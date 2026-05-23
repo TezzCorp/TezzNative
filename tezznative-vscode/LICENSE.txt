@@ -1,0 +1,47 @@
+================================================================================
+                    TEZZCORP PRIVATE SOURCE LICENSE (TPSL v1.0)
+================================================================================
+Copyright (c) 2026 TezzCorp Pvt Ltd. All Rights Reserved.
+Created and Designed by Rohit Pathak, Director of TezzCorp Pvt Ltd.
+
+This License governs the use of TezzNative-Language compiler, core tools, and 
+TezzLLM AI Engine (hereinafter referred to as the "Software") provided by 
+TezzCorp Pvt Ltd.
+
+1. PROPRIETARY AND CONFIDENTIALITY
+The underlying source code of the TezzNative compiler, its runtime engines, and
+the TezzLLM AI source code is proprietary to TezzCorp Pvt Ltd and remains strictly
+confidential. All intellectual property rights are vested in TezzCorp Pvt Ltd and
+its director, Rohit Pathak.
+
+2. GRANT OF LICENSE
+TezzCorp Pvt Ltd grants you a limited, non-exclusive, non-transferable, and
+revocable license to:
+- Run pre-compiled binaries of TezzNative and TezzLLM on your local machine.
+- Prepare training datasets and perform local federated training (running local
+  trainer binaries on your hardware) in accordance with the official guides.
+- Upload/contribute federated model weights to TezzCorp for model improvement.
+- Set configuration values and customize parameters in commands/scripts to 
+  fit your local hardware capabilities.
+
+3. RESTRICTIONS
+You shall not, and shall not permit any third party to:
+- Access, view, share, or distribute any non-public source code of the 
+  TezzNative language compiler, runtime, or TezzLLM core components.
+- Reverse engineer, decompile, decrypt, disassemble, or attempt to derive the 
+  source code of any compiled executable provided in this ecosystem.
+- Publish, sublicense, distribute, or sell the Software or any modifications 
+  thereof, without explicit prior written consent from TezzCorp Pvt Ltd.
+
+4. UPDATES AND SUPPORT
+Updates, patches, and fixes will be provided exclusively by TezzCorp Pvt Ltd
+based on user demands, bug reports, and errors submitted via the official portal.
+
+5. DISCLAIMER OF WARRANTY
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS, ROHIT PATHAK, OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES
+OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
