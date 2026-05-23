@@ -4,5 +4,5 @@ version.json linguist-vendored=true
 tezz.mod linguist-vendored=true
 tezz.lock linguist-vendored=true
 
-# Treat TezzNative files as Python for syntax highlighting and language categorization
-*.tn linguist-language=Python
+# Treat TezzNative files as TezzNative directly
+*.tn linguist-language=TezzNative
