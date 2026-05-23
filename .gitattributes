@@ -1,0 +1,8 @@
+# Force VS Code extension and config files to be treated as vendored (excluded from stats)
+tezznative-vscode/** linguist-vendored=true
+version.json linguist-vendored=true
+tezz.mod linguist-vendored=true
+tezz.lock linguist-vendored=true
+
+# Treat TezzNative files as Python for syntax highlighting and language categorization
+*.tn linguist-language=Python
