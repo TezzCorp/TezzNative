@@ -3,7 +3,7 @@
   "displayName": "TezzNative Language Support",
   "description": "Premium syntax highlighting, snippets, and LSP integration for the TezzNative 2.0 systems programming language.",
   "version": "2.0.0",
-  "publisher": "tezzcorp",
+  "publisher": "TezzCorpPvtLtd",
   "icon": "tezzcorp-logo.png",
   "engines": {
     "vscode": "^1.75.0"
