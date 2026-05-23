@@ -30,7 +30,11 @@
           ".tn",
           ".tnx"
         ],
-        "configuration": "./language-configuration.json"
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./tezzcorp-logo.png",
+          "dark": "./tezzcorp-logo.png"
+        }
       }
     ],
     "grammars": [
