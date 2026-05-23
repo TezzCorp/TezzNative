@@ -1,4 +1,4 @@
-# <p align="center"><img src="tezzcorp-logo.png" alt="TezzCorp Logo" width="128"/></p>
+# <p align="center"><img src="https://raw.githubusercontent.com/TezzCorp/TezzNative/main/tezznative-vscode/tezzcorp-logo.png" alt="TezzCorp Logo" width="128"/></p>
 
 # <p align="center">🌌 TezzNative Language Support</p>
 

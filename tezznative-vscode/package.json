@@ -2,7 +2,7 @@
   "name": "tezznative-vscode",
   "displayName": "TezzNative Language Support",
   "description": "Premium syntax highlighting, snippets, and LSP integration for the TezzNative 2.0 systems programming language.",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "publisher": "TezzCorpPvtLtd",
   "icon": "tezzcorp-logo.png",
   "engines": {
