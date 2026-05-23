@@ -20,3 +20,7 @@
 !tezz.lock
 !.gitignore
 !.gitattributes
+
+# Exclude compiled binaries and node_modules inside extension
+tezznative-vscode/node_modules/
+tezznative-vscode/*.vsix
