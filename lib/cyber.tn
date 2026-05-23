@@ -1,0 +1,242 @@
+// cyber module: Hacking and Cybersecurity utilities for TezzNative.
+//
+// Provides rapid prototyping tools for security research,
+// penetration testing, and cryptography.
+
+import "net"
+import "str"
+import "io"
+
+// Port Scanner
+// Returns the number of open ports found in the range.
+fn port_scan(host:str, start_port:int, end_port:int, timeout_ms:int) -> int:
+  if host == 0 || start_port > end_port:
+    ret 0
+  
+  open_count:int = 0
+  say "[*] Starting port scan on ", host
+  
+  p:int = start_port
+  while p <= end_port:
+    s:int = net.tcp_connect_timeout(host, p, timeout_ms)
+    if s >= 0:
+      say "[+] Port ", p, " is OPEN"
+      open_count = open_count + 1
+      net.close(s)
+    p = p + 1
+    
+  say "[*] Scan complete. Found ", open_count, " open ports."
+  ret open_count
+
+// XOR Cipher for simple obfuscation / decryption
+fn xor_cipher(data:str, key:str) -> str:
+  if data == 0:
+    ret 0 as str
+  if key == 0 || len(key) == 0:
+    ret data
+    
+  dlen:int = len(data)
+  klen:int = len(key)
+  out:*char = malloc(dlen + 1)
+  if out == 0:
+    ret 0 as str
+    
+  i:int = 0
+  while i < dlen:
+    d_byte:int = 0
+    k_byte:int = 0
+    unsafe:
+      d_byte = data[i] as int
+      k_byte = key[i % klen] as int
+    out[i] = (d_byte ^ k_byte) as char
+    i = i + 1
+    
+  out[dlen] = 0 as char
+  ret out as str
+
+// Base64 encoding
+let B64_CHARS:str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+fn b64_encode(data:str) -> str:
+  if data == 0:
+    ret 0 as str
+  
+  dlen:int = len(data)
+  out_len:int = 4 * ((dlen + 2) / 3)
+  out:*char = malloc(out_len + 1)
+  if out == 0:
+    ret 0 as str
+    
+  i:int = 0
+  j:int = 0
+  while i < dlen:
+    n0:int = 0
+    n1:int = 0
+    n2:int = 0
+    unsafe:
+      n0 = (data[i] as int) & 255
+      if i + 1 < dlen:
+        n1 = (data[i + 1] as int) & 255
+      if i + 2 < dlen:
+        n2 = (data[i + 2] as int) & 255
+        
+    b0:int = n0 >> 2
+    b1:int = ((n0 & 3) << 4) | (n1 >> 4)
+    b2:int = ((n1 & 15) << 2) | (n2 >> 6)
+    b3:int = n2 & 63
+    
+    unsafe:
+      out[j] = B64_CHARS[b0]
+      out[j+1] = B64_CHARS[b1]
+      if i + 1 < dlen:
+        out[j+2] = B64_CHARS[b2]
+      else:
+        out[j+2] = 61 as char // '='
+      if i + 2 < dlen:
+        out[j+3] = B64_CHARS[b3]
+      else:
+        out[j+3] = 61 as char // '='
+        
+    i = i + 3
+    j = j + 4
+    
+  out[out_len] = 0 as char
+  ret out as str
+
+// URL Encoder (useful for XSS/SQLi payloads)
+fn url_encode(data:str) -> str:
+  if data == 0:
+    ret 0 as str
+  
+  hex_chars:str = "0123456789ABCDEF"
+  dlen:int = len(data)
+  // Max possible size is 3 * dlen
+  out:*char = malloc(dlen * 3 + 1)
+  if out == 0:
+    ret 0 as str
+    
+  i:int = 0
+  j:int = 0
+  while i < dlen:
+    c:int = 0
+    unsafe:
+      c = (data[i] as int) & 255
+    
+    // Check if alphanumeric or safe char
+    is_safe:int = 0
+    if c >= 48 && c <= 57:  // 0-9
+      is_safe = 1
+    else if c >= 65 && c <= 90: // A-Z
+      is_safe = 1
+    else if c >= 97 && c <= 122: // a-z
+      is_safe = 1
+    else if c == 45 || c == 95 || c == 46 || c == 126: // - _ . ~
+      is_safe = 1
+      
+    if is_safe == 1:
+      out[j] = c as char
+      j = j + 1
+    else:
+      out[j] = 37 as char // '%'
+      unsafe:
+        out[j+1] = hex_chars[c >> 4]
+        out[j+2] = hex_chars[c & 15]
+      j = j + 3
+      
+    i = i + 1
+    
+  out[j] = 0 as char
+  ret out as str
+
+// ROT13 cipher
+fn rot13(data:str) -> str:
+  if data == 0:
+    ret 0 as str
+    
+  dlen:int = len(data)
+  out:*char = malloc(dlen + 1)
+  if out == 0:
+    ret 0 as str
+    
+  i:int = 0
+  while i < dlen:
+    c:int = 0
+    unsafe:
+      c = (data[i] as int) & 255
+      
+    if c >= 65 && c <= 90:
+      c = c + 13
+      if c > 90:
+        c = c - 26
+    else if c >= 97 && c <= 122:
+      c = c + 13
+      if c > 122:
+        c = c - 26
+        
+    out[i] = c as char
+    i = i + 1
+    
+  out[dlen] = 0 as char
+  ret out as str
+
+// Advanced Hex Dump
+fn hex_dump(data:*char, size:int) -> int:
+  if data == 0 || size <= 0:
+    ret 0
+    
+  hex_chars:str = "0123456789abcdef"
+  say "[*] Hex Dump (", size, " bytes):"
+  
+  i:int = 0
+  while i < size:
+    // Print offset
+    say i, "   "
+    
+    chunk:int = size - i
+    if chunk > 16:
+      chunk = 16
+      
+    // Print hex pairs (build line as string pieces via say)
+    hexbuf:*char = malloc(3)
+    hexbuf[2] = 0 as char
+    
+    j:int = 0
+    while j < 16:
+      if j < chunk:
+        val:int = 0
+        unsafe:
+          val = (data[i + j] as int) & 255
+          hexbuf[0] = hex_chars[val >> 4]
+          hexbuf[1] = hex_chars[val & 15]
+        say hexbuf as str
+      else:
+        say "  "
+      j = j + 1
+      
+    free(hexbuf)
+    say "  |"
+    
+    // Print ASCII
+    j = 0
+    charbuf:*char = malloc(2)
+    charbuf[1] = 0 as char
+    
+    while j < chunk:
+      val:int = 0
+      unsafe:
+        val = (data[i + j] as int) & 255
+      
+      // Printable ASCII range
+      if val >= 32 && val <= 126:
+        charbuf[0] = val as char
+      else:
+        charbuf[0] = 46 as char // '.'
+        
+      say charbuf as str
+      j = j + 1
+      
+    free(charbuf)
+    say "|"
+    
+    i = i + 16
+  ret 0

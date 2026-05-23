@@ -1,0 +1,1258 @@
+// os module: freestanding helpers for OS/kernel targets
+// This module is intentionally minimal and only depends on `sys`.
+
+import "sys"
+
+struct Task:
+  entry:*char
+  arg:*char
+  active:int
+  recycle:int
+  state:int
+  last_tick:int
+  runs:int
+
+extern fn arch_load_cr3(pml4:*char) -> int
+extern fn arch_enable_paging() -> int
+extern fn arch_rdtsc() -> int
+extern fn fb_addr() -> *char
+extern fn fb_width() -> int
+extern fn fb_height() -> int
+extern fn fb_pitch() -> int
+extern fn fb_bpp() -> int
+extern fn boot_text() -> int
+extern fn fb_text(x:int, y:int, s:str, color:int) -> int
+extern fn fb_present() -> int
+extern fn fb_host_windowing() -> int
+extern fn fb_set_scale(scale:int) -> int
+extern fn fb_get_scale() -> int
+extern fn fb_text_mode(mode:int) -> int
+extern fn fb_font_aa_mode(mode:int) -> int
+extern fn fb_font_ttf_mode(mode:int) -> int
+extern fn fb_draw_logo(x:int, y:int, w:int, h:int) -> int
+extern fn fb_draw_wallpaper(x:int, y:int, w:int, h:int) -> int
+extern fn fb_draw_cursor(x:int, y:int, scale:int) -> int
+extern fn fb_draw_app_icon(app:int, x:int, y:int, w:int, h:int) -> int
+extern fn fb_fill(color:int) -> int
+extern fn fb_fill_rect(x:int, y:int, w:int, h:int, color:int) -> int
+extern fn fb_blit(sx:int, sy:int, w:int, h:int, dx:int, dy:int) -> int
+extern fn fb_composite_rect(x:int, y:int, w:int, h:int, color:int, alpha:int) -> int
+extern fn fb_get_pixel(x:int, y:int) -> int
+extern fn fb_put_pixel(x:int, y:int, color:int) -> int
+extern fn fb_cursor_soft_reset() -> int
+extern fn fb_cursor_soft_move(x:int, y:int, scale:int) -> int
+extern fn fb_cursor_kind(kind:int) -> int
+extern fn fb_set_color(color:int) -> int
+extern fn fb_set_cursor(x:int, y:int) -> int
+extern fn fb_cursor_mode(mode:int) -> int
+extern fn fb_cursor(on:int, color:int) -> int
+extern fn memmap_count() -> int
+extern fn memmap_base(i:int) -> int
+extern fn memmap_len(i:int) -> int
+extern fn memmap_type(i:int) -> int
+extern fn disk_count() -> int
+extern fn disk_media_type(i:int) -> int
+extern fn disk_table_kind(i:int) -> int
+extern fn disk_mbr_id(i:int) -> int
+extern fn disk_part_count(i:int) -> int
+extern fn disk_part_index(disk_idx:int, part_idx:int) -> int
+extern fn disk_gpt_disk_hi(i:int) -> int
+extern fn disk_gpt_disk_lo(i:int) -> int
+extern fn disk_gpt_part_hi(i:int) -> int
+extern fn disk_gpt_part_lo(i:int) -> int
+extern fn pci_display_probe() -> int
+extern fn pci_display_vendor() -> int
+extern fn pci_display_device() -> int
+extern fn pci_display_class() -> int
+extern fn pci_display_subclass() -> int
+extern fn pci_display_prog_if() -> int
+extern fn pci_display_bus() -> int
+extern fn pci_display_slot() -> int
+extern fn pci_display_func() -> int
+extern fn pci_display_command() -> int
+extern fn pci_display_bar_addr(i:int) -> int
+extern fn pci_display_bar_size(i:int) -> int
+extern fn pci_display_bar_is_io(i:int) -> int
+extern fn pci_display_bar_prefetch(i:int) -> int
+extern fn pci_display_bar_mem_type(i:int) -> int
+extern fn pci_display_bar_safe(i:int) -> int
+extern fn pci_display_mmio_safe() -> int
+extern fn pci_usb_probe() -> int
+extern fn pci_usb_count() -> int
+extern fn pci_usb_kind_count(kind:int) -> int
+extern fn pci_usb_bus(i:int) -> int
+extern fn pci_usb_slot(i:int) -> int
+extern fn pci_usb_func(i:int) -> int
+extern fn pci_usb_prog_if(i:int) -> int
+extern fn pci_usb_vendor(i:int) -> int
+extern fn pci_usb_device(i:int) -> int
+extern fn pci_net_probe() -> int
+extern fn pci_net_count() -> int
+extern fn pci_net_bus(i:int) -> int
+extern fn pci_net_slot(i:int) -> int
+extern fn pci_net_func(i:int) -> int
+extern fn pci_net_subclass(i:int) -> int
+extern fn pci_net_prog_if(i:int) -> int
+extern fn pci_net_vendor(i:int) -> int
+extern fn pci_net_device(i:int) -> int
+extern fn pci_audio_probe() -> int
+extern fn pci_audio_count() -> int
+extern fn pci_audio_bus(i:int) -> int
+extern fn pci_audio_slot(i:int) -> int
+extern fn pci_audio_func(i:int) -> int
+extern fn pci_audio_subclass(i:int) -> int
+extern fn pci_audio_prog_if(i:int) -> int
+extern fn pci_audio_vendor(i:int) -> int
+extern fn pci_audio_device(i:int) -> int
+extern fn gpu_hw_cursor_available() -> int
+extern fn gpu_hw_cursor_enable(on:int) -> int
+extern fn gpu_hw_cursor_move(x:int, y:int) -> int
+extern fn gpu_driver_kind() -> int
+extern fn arch_id() -> int
+extern fn arch_bits() -> int
+extern fn blk_count() -> int
+extern fn blk_sector_size(dev_idx:int) -> int
+extern fn blk_sector_count(dev_idx:int) -> int
+extern fn blk_read_sector(dev_idx:int, lba:int, out512:*char) -> int
+extern fn blk_write_sector(dev_idx:int, lba:int, in512:*char) -> int
+extern fn irq_enable() -> int
+extern fn irq_disable() -> int
+extern fn halt() -> int
+extern fn timer_init(hz:int) -> int
+extern fn timer_ticks_irq() -> int
+extern fn timer_sleep_ms(ms:int) -> int
+extern fn kbd_has_event() -> int
+extern fn kbd_read_scancode() -> int
+extern fn kbd_read_scancode_raw() -> int
+extern fn kbd_read_char() -> int
+extern fn kbd_ime_active() -> int
+extern fn kbd_ime_cursor() -> int
+extern fn kbd_ime_length() -> int
+extern fn kbd_set_debug(on:int) -> int
+extern fn kbd_last_scancode() -> int
+extern fn mouse_has_packet() -> int
+extern fn mouse_read_packet() -> int
+extern fn mouse_dx() -> int
+extern fn mouse_dy() -> int
+extern fn mouse_buttons() -> int
+extern fn ps2_force_mouse_path(profile:int) -> int
+extern fn apic_available() -> int
+extern fn apic_init() -> int
+extern fn apic_eoi() -> int
+extern fn apic_timer_init(hz:int) -> int
+extern fn hpet_init() -> int
+extern fn hpet_set_base(base:int) -> int
+extern fn hpet_time_ns() -> int
+extern fn acpi_hpet_base() -> int
+extern fn power_battery_present() -> int
+extern fn power_battery_percent() -> int
+extern fn rtc_probe() -> int
+extern fn rtc_year() -> int
+extern fn rtc_month() -> int
+extern fn rtc_day() -> int
+extern fn rtc_hour() -> int
+extern fn rtc_minute() -> int
+extern fn rtc_second() -> int
+extern fn pf_last_addr_raw() -> int
+extern fn pf_last_err_raw() -> int
+extern fn pf_last_count_raw() -> int
+extern fn pf_autofix_set_raw(on:int) -> int
+extern fn arch_invlpg(p:*char) -> int
+
+extern fn tn_mmap_file(path:str, out_size:*int) -> *char
+extern fn tn_munmap_file(view:*char, size:int) -> int
+
+struct MemRegion:
+  base:int
+  len:int
+  typ:int
+
+struct HeapBlock:
+  size:int
+  is_free:int
+  next:*HeapBlock
+
+struct SysEntry:
+  num:int
+  fnptr:*char
+
+let CONSOLE_SYSWRITE:int = 0
+let CONSOLE_VGA:int = 1
+let CONSOLE_SERIAL:int = 2
+let CONSOLE_DEBUGCON:int = 3
+
+let PAGE_PRESENT:int = 1
+let PAGE_RW:int = 2
+let PAGE_PS:int = 128
+let PAGE_ADDR_MASK:int = -4096
+
+static let g_heap_base:*char = 0 as *char
+static let g_heap_end:*char = 0 as *char
+static let g_heap_cur:*char = 0 as *char
+static let g_heap_inited:int = 0
+static let g_heap_head:*HeapBlock = 0 as *HeapBlock
+
+static let g_page_base:*char = 0 as *char
+static let g_page_end:*char = 0 as *char
+static let g_page_cur:*char = 0 as *char
+static let g_page_size:int = 4096
+static let g_page_inited:int = 0
+static let g_pml4:*char = 0 as *char
+
+static let g_phys_regions:[MemRegion;64]
+static let g_phys_n:int = 0
+static let g_phys_inited:int = 0
+
+static let g_console_backend:int = 0
+static let g_console_mirror_serial:int = 0
+static let g_console_serial_in:int = 0
+static let g_vga_row:int = 0
+static let g_vga_col:int = 0
+static let g_vga_attr:int = 7
+static let g_vga_cursor_enabled:int = 0
+static let g_serial_base:int = 1016
+static let g_serial_inited:int = 0
+
+static let g_tasks:[Task;64]
+static let g_task_count:int = 0
+static let g_sched_inited:int = 0
+static let g_runq:[int;64]
+static let g_rhead:int = 0
+static let g_rtail:int = 0
+
+static let g_syscalls:[SysEntry;64]
+static let g_sys_count:int = 0
+
+fn mem_zero(p:*char, bytes:int) -> int:
+  if p == 0 || bytes <= 0:
+    ret 0
+  i:int = 0
+  while i < bytes:
+    unsafe:
+      p[i] = 0 as char
+    i = i + 1
+  ret 0
+
+fn heap_init(base:*char, size:int) -> int:
+  if base == 0 || size <= sizeof(HeapBlock) + 8:
+    ret 0 - 1
+  g_heap_base = base
+  g_heap_end = base + size
+  g_heap_cur = base
+  g_heap_inited = 1
+  g_heap_head = base as *HeapBlock
+  (*g_heap_head).size = size - sizeof(HeapBlock)
+  (*g_heap_head).is_free = 1
+  (*g_heap_head).next = 0 as *HeapBlock
+  ret 0
+
+fn heap_alloc(n:int) -> *char:
+  if g_heap_inited == 0 || n <= 0:
+    ret 0 as *char
+  // align to 8 bytes
+  n = ((n + 7) / 8) * 8
+  cur:*HeapBlock = g_heap_head
+  while cur != 0:
+    if (*cur).is_free != 0 && (*cur).size >= n:
+      remain:int = (*cur).size - n
+      if remain > (sizeof(HeapBlock) + 8):
+        next:*HeapBlock = ((cur as *char) + sizeof(HeapBlock) + n) as *HeapBlock
+        (*next).size = remain - sizeof(HeapBlock)
+        (*next).is_free = 1
+        (*next).next = (*cur).next
+        (*cur).next = next
+        (*cur).size = n
+      (*cur).is_free = 0
+      ret (cur as *char) + sizeof(HeapBlock)
+    cur = (*cur).next
+  ret 0 as *char
+
+fn heap_free(p:*char) -> int:
+  if p == 0 || g_heap_head == 0:
+    ret 0
+  blk:*HeapBlock = (p - sizeof(HeapBlock)) as *HeapBlock
+  (*blk).is_free = 1
+  // coalesce forward
+  nxt:*HeapBlock = (*blk).next
+  if nxt != 0 && (*nxt).is_free != 0:
+    (*blk).size = (*blk).size + sizeof(HeapBlock) + (*nxt).size
+    (*blk).next = (*nxt).next
+  // coalesce backward
+  prev:*HeapBlock = 0 as *HeapBlock
+  cur:*HeapBlock = g_heap_head
+  while cur != 0 && cur != blk:
+    prev = cur
+    cur = (*cur).next
+  if prev != 0 && (*prev).is_free != 0:
+    (*prev).size = (*prev).size + sizeof(HeapBlock) + (*blk).size
+    (*prev).next = (*blk).next
+  ret 0
+
+fn heap_total_bytes() -> int:
+  if g_heap_inited == 0:
+    ret 0
+  ret (g_heap_end as int) - (g_heap_base as int)
+
+fn heap_free_bytes() -> int:
+  if g_heap_head == 0:
+    ret 0
+  sum:int = 0
+  cur:*HeapBlock = g_heap_head
+  while cur != 0:
+    if (*cur).is_free != 0:
+      sum = sum + (*cur).size
+    cur = (*cur).next
+  ret sum
+
+fn heap_block_count() -> int:
+  if g_heap_head == 0:
+    ret 0
+  n:int = 0
+  cur:*HeapBlock = g_heap_head
+  while cur != 0:
+    n = n + 1
+    cur = (*cur).next
+  ret n
+
+fn heap_largest_free() -> int:
+  if g_heap_head == 0:
+    ret 0
+  best:int = 0
+  cur:*HeapBlock = g_heap_head
+  while cur != 0:
+    if (*cur).is_free != 0 && (*cur).size > best:
+      best = (*cur).size
+    cur = (*cur).next
+  ret best
+
+fn heap_validate() -> int:
+  if g_heap_head == 0:
+    ret 0
+  cur:*HeapBlock = g_heap_head
+  while cur != 0:
+    if (*cur).size <= 0:
+      ret 0
+    if (cur as int) < (g_heap_base as int):
+      ret 0
+    if (cur as int) >= (g_heap_end as int):
+      ret 0
+    cur = (*cur).next
+  ret 1
+
+fn page_init(base:*char, bytes:int, page_size:int) -> int:
+  if base == 0 || bytes <= 0 || page_size <= 0:
+    ret 0 - 1
+  g_page_base = base
+  g_page_end = base + bytes
+  g_page_cur = base
+  g_page_size = page_size
+  g_page_inited = 1
+  ret 0
+
+fn page_inited() -> int:
+  ret g_page_inited
+
+fn page_alloc(pages:int) -> *char:
+  if g_page_inited == 0 || pages <= 0:
+    ret 0 as *char
+  bytes:int = pages * g_page_size
+  next:*char = g_page_cur + bytes
+  if (next as int) > (g_page_end as int):
+    ret 0 as *char
+  out:*char = g_page_cur
+  g_page_cur = next
+  ret out
+
+fn page_free(p:*char, pages:int) -> int:
+  if p == 0 || pages <= 0:
+    ret 0
+  ret 0
+
+fn paging_set_root(pml4:*char) -> int:
+  g_pml4 = pml4
+  ret 0
+
+fn paging_root() -> *char:
+  ret g_pml4
+
+fn pf_last_addr() -> int:
+  ret pf_last_addr_raw()
+
+fn pf_last_err() -> int:
+  ret pf_last_err_raw()
+
+fn pf_last_count() -> int:
+  ret pf_last_count_raw()
+
+fn pf_autofix(on:int) -> int:
+  ret pf_autofix_set_raw(on)
+
+fn phys_init() -> int:
+  g_phys_n = 0
+  n:int = memmap_count()
+  i:int = 0
+  while i < n:
+    t:int = memmap_type(i)
+    if t == 1:
+      b:int = memmap_base(i)
+      l:int = memmap_len(i)
+      // skip low memory below 1MB
+      if b < 1048576:
+        delta:int = 1048576 - b
+        if delta < l:
+          b = b + delta
+          l = l - delta
+        else:
+          l = 0
+      // align to 4K
+      if l > 0:
+        ab:int = ((b + 4095) / 4096) * 4096
+        ae:int = ((b + l) / 4096) * 4096
+        if ae > ab && g_phys_n < 64:
+          g_phys_regions[g_phys_n].base = ab
+          g_phys_regions[g_phys_n].len = ae - ab
+          g_phys_regions[g_phys_n].typ = t
+          g_phys_n = g_phys_n + 1
+    i = i + 1
+  g_phys_inited = 1
+  ret g_phys_n
+
+fn phys_alloc(pages:int) -> *char:
+  if g_phys_inited == 0 || pages <= 0:
+    ret 0 as *char
+  bytes:int = pages * 4096
+  i:int = 0
+  while i < g_phys_n:
+    base:int = g_phys_regions[i].base
+    len:int = g_phys_regions[i].len
+    if len >= bytes:
+      g_phys_regions[i].base = base + bytes
+      g_phys_regions[i].len = len - bytes
+      ret base as *char
+    i = i + 1
+  ret 0 as *char
+
+fn phys_free(p:*char, pages:int) -> int:
+  // no-op for now
+  if p == 0 || pages <= 0:
+    ret 0
+  ret 0
+
+fn page_init_from_phys(pages:int) -> int:
+  p:*char = phys_alloc(pages)
+  if p == 0:
+    ret 0 - 1
+  ret page_init(p, pages * 4096, 4096)
+
+fn heap_init_from_phys(pages:int) -> int:
+  p:*char = phys_alloc(pages)
+  if p == 0:
+    ret 0 - 1
+  ret heap_init(p, pages * 4096)
+
+fn paging_build_identity_2m(pages:int, flags:int) -> *char:
+  if g_page_inited == 0 || pages <= 0:
+    ret 0 as *char
+  pml4:*char = page_alloc(1)
+  pdpt:*char = page_alloc(1)
+  if pml4 == 0 || pdpt == 0:
+    ret 0 as *char
+  mem_zero(pml4, 4096)
+  mem_zero(pdpt, 4096)
+  flg:int = flags + PAGE_PRESENT + PAGE_RW
+  unsafe:
+    pml4i:*int = pml4 as *int
+    pml4a:int = (pdpt as int / 4096) * 4096
+    pml4i[0] = pml4a + flg
+  max_pdpt:int = (pages - 1) / 512
+  pdpt_i:int = 0
+  while pdpt_i <= max_pdpt:
+    pd:*char = page_alloc(1)
+    if pd == 0:
+      ret 0 as *char
+    mem_zero(pd, 4096)
+    unsafe:
+      pdpti:*int = pdpt as *int
+      pda:int = (pd as int / 4096) * 4096
+      pdpti[pdpt_i] = pda + flg
+    base:int = pdpt_i * 512
+    count:int = pages - base
+    if count > 512:
+      count = 512
+    j:int = 0
+    while j < count:
+      addr:int = (base + j) * (2 * 1024 * 1024)
+      addr2:int = (addr / 2097152) * 2097152
+      entry:int = addr2 + flg + PAGE_PS
+      unsafe:
+        pdi:*int = pd as *int
+        pdi[j] = entry
+      j = j + 1
+    pdpt_i = pdpt_i + 1
+  g_pml4 = pml4
+  ret pml4
+
+fn paging_build_identity_memmap(flags:int) -> *char:
+  // Build identity map for all usable memmap regions using 2MiB pages.
+  if g_phys_inited == 0:
+    if phys_init() <= 0:
+      ret 0 as *char
+  pml4:*char = phys_alloc(1)
+  pdpt:*char = phys_alloc(1)
+  if pml4 == 0 || pdpt == 0:
+    ret 0 as *char
+  mem_zero(pml4, 4096)
+  mem_zero(pdpt, 4096)
+  flg:int = flags + PAGE_PRESENT + PAGE_RW
+  unsafe:
+    pml4i:*int = pml4 as *int
+    pml4a:int = (pdpt as int / 4096) * 4096
+    pml4i[0] = pml4a + flg
+  i:int = 0
+  while i < g_phys_n:
+    base:int = g_phys_regions[i].base
+    len:int = g_phys_regions[i].len
+    // round to 2MiB
+    start:int = (base / 2097152) * 2097152
+    end:int = ((base + len + 2097151) / 2097152) * 2097152
+    addr:int = start
+    while addr < end:
+      pdpt_i:int = addr / (512 * 2097152)
+      pd_i:int = (addr / 2097152) % 512
+      // allocate PD if missing
+      pdpti:*int = pdpt as *int
+      if pdpti[pdpt_i] == 0:
+        pd:*char = phys_alloc(1)
+        if pd == 0:
+          ret 0 as *char
+        mem_zero(pd, 4096)
+        pda:int = (pd as int / 4096) * 4096
+        pdpti[pdpt_i] = pda + flg
+      // fetch PD
+      pda2:int = pdpti[pdpt_i] - flg
+      pd2:*char = pda2 as *char
+      entry:int = addr + flg + PAGE_PS
+      unsafe:
+        pdi:*int = pd2 as *int
+        pdi[pd_i] = entry
+      addr = addr + 2097152
+    i = i + 1
+  g_pml4 = pml4
+  ret pml4
+
+fn paging_activate(pml4:*char) -> int:
+  if pml4 == 0:
+    ret 0 - 1
+  arch_load_cr3(pml4)
+  arch_enable_paging()
+  ret 0
+
+fn paging_map(virt:*char, phys:*char, flags:int) -> int:
+  // 4K page mapping (assumes identity mapping for page tables).
+  if virt == 0 || phys == 0:
+    ret 0 - 1
+  if g_pml4 == 0:
+    ret 0 - 1
+  v:int = virt as int
+  p:int = phys as int
+  v = (v / 4096) * 4096
+  p = (p / 4096) * 4096
+  pml4:*int = g_pml4 as *int
+  pml4i:int = (v >> 39) & 511
+  pdpti:int = (v >> 30) & 511
+  pdi:int = (v >> 21) & 511
+  pti:int = (v >> 12) & 511
+  entry:int = pml4[pml4i]
+  pdpt:*char = 0 as *char
+  if (entry & PAGE_PRESENT) == 0:
+    pdpt = phys_alloc(1)
+    if pdpt == 0:
+      ret 0 - 1
+    mem_zero(pdpt, 4096)
+    pml4[pml4i] = (pdpt as int) | PAGE_PRESENT | PAGE_RW
+  else:
+    pdpt = (entry & PAGE_ADDR_MASK) as *char
+  pdpt_i:*int = pdpt as *int
+  entry = pdpt_i[pdpti]
+  pd:*char = 0 as *char
+  if (entry & PAGE_PRESENT) == 0:
+    pd = phys_alloc(1)
+    if pd == 0:
+      ret 0 - 1
+    mem_zero(pd, 4096)
+    pdpt_i[pdpti] = (pd as int) | PAGE_PRESENT | PAGE_RW
+  else:
+    pd = (entry & PAGE_ADDR_MASK) as *char
+  pd_i:*int = pd as *int
+  entry = pd_i[pdi]
+  pt:*char = 0 as *char
+  if (entry & PAGE_PRESENT) == 0:
+    pt = phys_alloc(1)
+    if pt == 0:
+      ret 0 - 1
+    mem_zero(pt, 4096)
+    pd_i[pdi] = (pt as int) | PAGE_PRESENT | PAGE_RW
+  else:
+    pt = (entry & PAGE_ADDR_MASK) as *char
+  pt_i:*int = pt as *int
+  pt_i[pti] = (p as int) | PAGE_PRESENT | flags
+  ret 0
+
+fn paging_map_region(virt:*char, phys:*char, bytes:int, flags:int) -> int:
+  if bytes <= 0:
+    ret 0
+  off:int = 0
+  while off < bytes:
+    paging_map(virt + off, phys + off, flags)
+    off = off + 4096
+  ret 0
+
+fn paging_unmap(virt:*char) -> int:
+  if virt == 0:
+    ret 0 - 1
+  if g_pml4 == 0:
+    ret 0 - 1
+  v:int = virt as int
+  v = (v / 4096) * 4096
+  pml4:*int = g_pml4 as *int
+  pml4i:int = (v >> 39) & 511
+  pdpti:int = (v >> 30) & 511
+  pdi:int = (v >> 21) & 511
+  pti:int = (v >> 12) & 511
+  entry:int = pml4[pml4i]
+  if (entry & PAGE_PRESENT) == 0:
+    ret 0 - 1
+  pdpt:*char = (entry & PAGE_ADDR_MASK) as *char
+  pdpt_i:*int = pdpt as *int
+  entry = pdpt_i[pdpti]
+  if (entry & PAGE_PRESENT) == 0:
+    ret 0 - 1
+  pd:*char = (entry & PAGE_ADDR_MASK) as *char
+  pd_i:*int = pd as *int
+  entry = pd_i[pdi]
+  if (entry & PAGE_PRESENT) == 0:
+    ret 0 - 1
+  pt:*char = (entry & PAGE_ADDR_MASK) as *char
+  pt_i:*int = pt as *int
+  pt_i[pti] = 0
+  arch_invlpg(virt)
+  ret 0
+
+fn paging_enable() -> int:
+  if g_pml4 == 0:
+    ret 0 - 1
+  ret paging_activate(g_pml4)
+
+fn console_set_backend(mode:int) -> int:
+  g_console_backend = mode
+  ret g_console_backend
+
+fn console_get_backend() -> int:
+  ret g_console_backend
+
+fn console_mirror_serial(on:int) -> int:
+  if on != 0:
+    g_console_mirror_serial = 1
+  else:
+    g_console_mirror_serial = 0
+  ret g_console_mirror_serial
+
+fn console_serial_input(on:int) -> int:
+  if on != 0:
+    g_console_serial_in = 1
+  else:
+    g_console_serial_in = 0
+  ret g_console_serial_in
+
+fn console_set_scale(scale:int) -> int:
+  ret fb_set_scale(scale)
+
+fn console_get_scale() -> int:
+  ret fb_get_scale()
+
+fn console_set_color(color:int) -> int:
+  if g_console_backend == CONSOLE_VGA:
+    // Map 24-bit color to VGA 4-bit attribute (FG only).
+    if color >= 0 && color <= 255:
+      g_vga_attr = (g_vga_attr & 240) + (color % 16)
+      ret g_vga_attr
+    r:int = (color / 65536) % 256
+    g:int = (color / 256) % 256
+    b:int = color % 256
+    attr:int = 0
+    if r >= 128:
+      attr = attr + 4
+    if g >= 128:
+      attr = attr + 2
+    if b >= 128:
+      attr = attr + 1
+    if (r + g + b) >= 384:
+      attr = attr + 8
+    g_vga_attr = (g_vga_attr & 240) + (attr % 16)
+    ret g_vga_attr
+  ret fb_set_color(color)
+
+fn console_set_cursor(x:int, y:int) -> int:
+  ret fb_set_cursor(x, y)
+
+fn console_cursor_mode(mode:int) -> int:
+  ret fb_cursor_mode(mode)
+
+fn console_cursor(on:int, color:int) -> int:
+  ret fb_cursor(on, color)
+
+fn vga_clear() -> int:
+  base:*char = 753664 as *char
+  i:int = 0
+  total:int = 80 * 25 * 2
+  while i < total:
+    unsafe:
+      base[i] = 0 as char
+      base[i + 1] = g_vga_attr as char
+    i = i + 2
+  g_vga_row = 0
+  g_vga_col = 0
+  // Move hardware cursor to top-left only if enabled.
+  if g_vga_cursor_enabled != 0:
+    vga_cursor_set_pos()
+  ret 0
+
+fn vga_cursor_set_pos() -> int:
+  pos:int = (g_vga_row * 80) + g_vga_col
+  // VGA CRT controller cursor position (low/high).
+  sys.sys_outb(980, 15) // 0x3D4, index 0x0F
+  sys.sys_outb(981, pos % 256) // 0x3D5
+  sys.sys_outb(980, 14) // 0x3D4, index 0x0E
+  sys.sys_outb(981, (pos / 256) % 256)
+  ret 0
+
+fn vga_cursor_block() -> int:
+  // Full block cursor: start=0, end=15.
+  sys.sys_outb(980, 10) // 0x3D4, cursor start
+  sys.sys_outb(981, 0)
+  sys.sys_outb(980, 11) // 0x3D4, cursor end
+  sys.sys_outb(981, 15)
+  ret 0
+
+fn vga_cursor_enable(on:int) -> int:
+  g_vga_cursor_enabled = on
+  if on != 0:
+    vga_cursor_block()
+  else:
+    // Disable cursor by setting bit 5 of cursor start.
+    sys.sys_outb(980, 10)
+    sys.sys_outb(981, 32)
+  ret 0
+
+fn vga_putc(ch:int) -> int:
+  if ch == 13:
+    g_vga_col = 0
+    vga_cursor_set_pos()
+    ret 0
+  if ch == 10:
+    g_vga_col = 0
+    g_vga_row = g_vga_row + 1
+  else:
+    if ch == 8:
+      if g_vga_col > 0:
+        g_vga_col = g_vga_col - 1
+        idxb:int = (g_vga_row * 80 + g_vga_col) * 2
+        baseb:*char = 753664 as *char
+        unsafe:
+          baseb[idxb] = 0 as char
+          baseb[idxb + 1] = g_vga_attr as char
+        vga_cursor_set_pos()
+      ret 0
+    idx:int = (g_vga_row * 80 + g_vga_col) * 2
+    base:*char = 753664 as *char
+    unsafe:
+      base[idx] = ch as char
+      base[idx + 1] = g_vga_attr as char
+    g_vga_col = g_vga_col + 1
+    if g_vga_col >= 80:
+      g_vga_col = 0
+      g_vga_row = g_vga_row + 1
+  if g_vga_row >= 25:
+    // scroll up by one row
+    base2:*char = 753664 as *char
+    row_bytes:int = 80 * 2
+    i:int = 0
+    total:int = (25 - 1) * row_bytes
+    while i < total:
+      unsafe:
+        base2[i] = base2[i + row_bytes]
+      i = i + 1
+    // clear last row
+    j:int = (25 - 1) * row_bytes
+    while j < 25 * row_bytes:
+      unsafe:
+        base2[j] = 0 as char
+        base2[j + 1] = g_vga_attr as char
+      j = j + 2
+    g_vga_row = 24
+    g_vga_col = 0
+  if g_vga_cursor_enabled != 0:
+    vga_cursor_set_pos()
+  ret 0
+
+fn vga_write(s:str) -> int:
+  if s == 0:
+    ret 0
+  i:int = 0
+  while 1:
+    c:int = 0
+    unsafe:
+      c = s[i] as int
+    if c == 0:
+      break
+    vga_putc(c)
+    i = i + 1
+  ret 0
+
+fn serial_init(base:int) -> int:
+  if base <= 0:
+    base = 1016
+  g_serial_base = base
+  // Disable interrupts
+  sys.sys_outb(base + 1, 0)
+  // Enable DLAB
+  sys.sys_outb(base + 3, 128)
+  // Set divisor to 3 (38400 baud) assuming 115200 base
+  sys.sys_outb(base + 0, 3)
+  sys.sys_outb(base + 1, 0)
+  // 8 bits, no parity, one stop
+  sys.sys_outb(base + 3, 3)
+  // Enable FIFO, clear, 14-byte threshold
+  sys.sys_outb(base + 2, 199)
+  // IRQs enabled, RTS/DSR set
+  sys.sys_outb(base + 4, 11)
+  g_serial_inited = 1
+  ret 0
+
+fn serial_loopback_enable(on:int) -> int:
+  if g_serial_inited == 0:
+    serial_init(g_serial_base)
+  base:int = g_serial_base
+  if on != 0:
+    // Set loopback mode (bit 4)
+    sys.sys_outb(base + 4, 30)
+  else:
+    sys.sys_outb(base + 4, 11)
+  ret 0
+
+fn serial_loopback_test() -> int:
+  if g_serial_inited == 0:
+    serial_init(g_serial_base)
+  serial_loopback_enable(1)
+  base:int = g_serial_base
+  val:int = 174
+  sys.sys_outb(base, val)
+  got:int = sys.sys_inb(base)
+  serial_loopback_enable(0)
+  if got == val:
+    ret 1
+  ret 0
+
+fn serial_ready() -> int:
+  base:int = g_serial_base
+  ls:int = sys.sys_inb(base + 5)
+  // bit 5: THR empty
+  if ((ls / 32) % 2) != 0:
+    ret 1
+  ret 0
+
+fn serial_putc(ch:int) -> int:
+  if g_serial_inited == 0:
+    serial_init(g_serial_base)
+  base:int = g_serial_base
+  // spin until ready
+  tries:int = 0
+  while serial_ready() == 0:
+    tries = tries + 1
+    if tries > 1000000:
+      break
+  sys.sys_outb(base, ch)
+  ret 0
+
+fn serial_poll_char() -> int:
+  if g_serial_inited == 0:
+    serial_init(g_serial_base)
+  base:int = g_serial_base
+  ls:int = sys.sys_inb(base + 5)
+  // If UART is absent, many emulators return 0xFF; treat as no input.
+  if ls == 255:
+    ret 0
+  // bit 0: data ready
+  if (ls % 2) != 0:
+    v:int = sys.sys_inb(base)
+    if v == 255:
+      ret 0
+    ret v
+  ret 0
+
+fn console_write(s:str) -> int:
+  if s == 0:
+    ret 0
+  if g_console_backend == CONSOLE_VGA:
+    // optional mirror to serial for debug/CLI visibility
+    if g_console_mirror_serial != 0:
+      serial_write(0, s)
+    ret vga_write(s)
+  if g_console_backend == CONSOLE_SERIAL:
+    ret serial_write(0, s)
+  if g_console_backend == CONSOLE_DEBUGCON:
+    ret debugcon_write(s)
+  // Framebuffer/sys_write path: optionally mirror to serial too.
+  if g_console_mirror_serial != 0:
+    serial_write(0, s)
+  unsafe:
+    ret sys.sys_write(1, s as *char, len(s))
+
+fn console_write_int(v:int) -> int:
+  buf:[char;32]
+  i:int = 0
+  if v == 0:
+    buf[0] = 48 as char
+    buf[1] = 0 as char
+    unsafe:
+      ret console_write(&buf[0])
+  neg:int = 0
+  if v < 0:
+    neg = 1
+    v = 0 - v
+  while v > 0 && i < 30:
+    d:int = v % 10
+    buf[i] = (d + 48) as char
+    i = i + 1
+    v = v / 10
+  if neg != 0 && i < 30:
+    buf[i] = 45 as char
+    i = i + 1
+  // reverse in-place
+  j:int = 0
+  while j < i / 2:
+    t:char = buf[j]
+    buf[j] = buf[i - 1 - j]
+    buf[i - 1 - j] = t
+    j = j + 1
+  buf[i] = 0 as char
+  unsafe:
+    ret console_write(&buf[0])
+
+fn serial_write(port:int, s:str) -> int:
+  if port > 0:
+    g_serial_base = port
+  if s == 0:
+    ret 0
+  i:int = 0
+  while 1:
+    c:int = 0
+    unsafe:
+      c = s[i] as int
+    if c == 0:
+      break
+    serial_putc(c)
+    i = i + 1
+  ret 0
+
+fn kbd_poll_has_event() -> int:
+  ret kbd_has_event()
+
+fn kbd_poll_scancode() -> int:
+  ret kbd_read_scancode()
+
+fn kbd_poll_scancode_raw() -> int:
+  ret kbd_read_scancode_raw()
+
+fn kbd_poll_char() -> int:
+  ret kbd_read_char()
+
+fn kbd_poll_ime_active() -> int:
+  ret kbd_ime_active()
+
+fn kbd_poll_ime_cursor() -> int:
+  ret kbd_ime_cursor()
+
+fn kbd_poll_ime_length() -> int:
+  ret kbd_ime_length()
+
+fn kbd_debug(on:int) -> int:
+  ret kbd_set_debug(on)
+
+fn kbd_last() -> int:
+  ret kbd_last_scancode()
+
+fn mouse_poll_has_packet() -> int:
+  ret mouse_has_packet()
+
+fn mouse_poll_packet() -> int:
+  ret mouse_read_packet()
+
+fn mouse_poll_dx() -> int:
+  ret mouse_dx()
+
+fn mouse_poll_dy() -> int:
+  ret mouse_dy()
+
+fn mouse_poll_buttons() -> int:
+  ret mouse_buttons()
+
+fn console_read_char() -> int:
+  // Prefer keyboard to avoid serial noise blocking input.
+  c:int = kbd_poll_char()
+  if c > 0:
+    ret c
+  if g_console_serial_in != 0 || g_console_backend == CONSOLE_SERIAL:
+    c = serial_poll_char()
+    if c > 0:
+      ret c
+  ret 0
+
+fn debugcon_putc(ch:int) -> int:
+  // QEMU debug console (port 0xE9).
+  sys.sys_outb(233, ch)
+  ret 0
+
+fn debugcon_write(s:str) -> int:
+  if s == 0:
+    ret 0
+  i:int = 0
+  while 1:
+    c:int = 0
+    unsafe:
+      c = s[i] as int
+    if c == 0:
+      break
+    debugcon_putc(c)
+    i = i + 1
+  ret 0
+
+fn timer_now_ns() -> int:
+  // Platform time source
+  ret sys.sys_time_ns()
+
+fn timer_ticks() -> int:
+  ret arch_rdtsc()
+
+fn timer_sleep_ticks(ticks:int) -> int:
+  start:int = arch_rdtsc()
+  while (arch_rdtsc() - start) < ticks:
+    // spin
+    0
+  ret 0
+
+fn timer_irq_init(hz:int) -> int:
+  if apic_available() != 0:
+    apic_init()
+  ret timer_init(hz)
+
+fn timer_apic_init(hz:int) -> int:
+  if apic_available() == 0:
+    ret 0 - 1
+  apic_init()
+  ret apic_timer_init(hz)
+
+fn timer_hpet_init() -> int:
+  ret hpet_init()
+
+fn timer_hpet_ns() -> int:
+  ret hpet_time_ns()
+
+fn timer_hpet_autodetect() -> int:
+  base:int = acpi_hpet_base()
+  if base == 0:
+    ret 0 - 1
+  hpet_set_base(base)
+  ret hpet_init()
+
+fn timer_irq_ticks() -> int:
+  ret timer_ticks_irq()
+
+fn sched_init() -> int:
+  g_task_count = 0
+  g_sched_inited = 1
+  g_rhead = 0
+  g_rtail = 0
+  ret 0
+
+fn sched_ready_count() -> int:
+  if g_rhead == g_rtail:
+    ret 0
+  if g_rtail > g_rhead:
+    ret g_rtail - g_rhead
+  ret (64 - g_rhead) + g_rtail
+
+fn sched_task_count() -> int:
+  ret g_task_count
+
+fn sched_task_active(idx:int) -> int:
+  if idx < 0 || idx >= g_task_count:
+    ret 0
+  if g_tasks[idx].active != 0:
+    ret 1
+  ret 0
+
+fn sched_task_state(idx:int) -> int:
+  if idx < 0 || idx >= g_task_count:
+    ret 0
+  ret g_tasks[idx].state
+
+fn sched_task_last_tick(idx:int) -> int:
+  if idx < 0 || idx >= g_task_count:
+    ret 0
+  ret g_tasks[idx].last_tick
+
+fn sched_task_runs(idx:int) -> int:
+  if idx < 0 || idx >= g_task_count:
+    ret 0
+  ret g_tasks[idx].runs
+
+fn sched_enqueue(idx:int) -> int:
+  next:int = (g_rtail + 1) % 64
+  if next == g_rhead:
+    ret 0 - 1
+  g_runq[g_rtail] = idx
+  g_rtail = next
+  ret 0
+
+fn sched_dequeue(idx:*int) -> int:
+  if g_rhead == g_rtail:
+    ret 0
+  unsafe:
+    idx[0] = g_runq[g_rhead]
+  g_rhead = (g_rhead + 1) % 64
+  ret 1
+
+fn sched_spawn(entry:*char, arg:*char) -> int:
+  if g_sched_inited == 0:
+    ret 0 - 1
+  if g_task_count >= 64:
+    ret 0 - 1
+  unsafe:
+    g_tasks[g_task_count].entry = entry
+    g_tasks[g_task_count].arg = arg
+    g_tasks[g_task_count].active = 1
+    g_tasks[g_task_count].recycle = 1
+    g_tasks[g_task_count].state = 1
+    g_tasks[g_task_count].last_tick = 0
+    g_tasks[g_task_count].runs = 0
+  sched_enqueue(g_task_count)
+  g_task_count = g_task_count + 1
+  ret g_task_count - 1
+
+fn sched_task_requeue(idx:int) -> int:
+  if g_sched_inited == 0:
+    ret 0
+  if idx < 0 || idx >= g_task_count:
+    ret 0
+  if g_tasks[idx].active == 0:
+    g_tasks[idx].active = 1
+    g_tasks[idx].state = 1
+    sched_enqueue(idx)
+    ret 1
+  // already active; don't duplicate
+  ret 0
+
+fn sched_task_stop(idx:int) -> int:
+  if g_sched_inited == 0:
+    ret 0
+  if idx < 0 || idx >= g_task_count:
+    ret 0
+  if g_tasks[idx].active == 0:
+    g_tasks[idx].state = 0
+    ret 0
+  g_tasks[idx].active = 0
+  g_tasks[idx].state = 0
+  g_tasks[idx].recycle = 0
+  ret 1
+
+fn sched_yield() -> int:
+  sys.sys_yield()
+  ret 0
+
+fn cpu_halt() -> int:
+  ret irq_enable() + halt()
+
+fn sched_run_once() -> int:
+  if g_sched_inited == 0:
+    ret 0 - 1
+  idx:int = 0
+  if sched_dequeue(&idx) == 0:
+    ret 0
+  if idx < 0 || idx >= g_task_count:
+    ret 0
+  if g_tasks[idx].active == 0:
+    ret 0
+  t:*char = g_tasks[idx].entry
+  a:*char = g_tasks[idx].arg
+  if t != 0:
+    unsafe:
+      // entry returns nonzero to stay runnable
+      retfn:fn(*char)->int = t as fn(*char)->int
+      g_tasks[idx].state = 2
+      g_tasks[idx].last_tick = timer_ticks()
+      g_tasks[idx].runs = g_tasks[idx].runs + 1
+      keep:int = retfn(a)
+      if keep != 0:
+        g_tasks[idx].state = 1
+        sched_enqueue(idx)
+      else:
+        g_tasks[idx].active = 0
+        g_tasks[idx].state = 0
+  ret 0
+
+fn sched_run_loop(max_iters:int) -> int:
+  if g_sched_inited == 0:
+    ret 0 - 1
+  i:int = 0
+  while 1:
+    if max_iters > 0 && i >= max_iters:
+      break
+    if sched_ready_count() == 0:
+      break
+    sched_run_once()
+    i = i + 1
+  ret i
+
+fn syscall_register(num:int, fnptr:*char) -> int:
+  if g_sys_count >= 64:
+    ret 0 - 1
+  g_syscalls[g_sys_count].num = num
+  g_syscalls[g_sys_count].fnptr = fnptr
+  g_sys_count = g_sys_count + 1
+  ret 0
+
+fn syscall_invoke(num:int, a:int, b:int, c:int, d:int) -> int:
+  i:int = 0
+  while i < g_sys_count:
+    if g_syscalls[i].num == num:
+      fptr:*char = g_syscalls[i].fnptr
+      if fptr == 0:
+        ret 0 - 1
+      unsafe:
+        fnc:fn(int,int,int,int)->int = fptr as fn(int,int,int,int)->int
+        ret fnc(a,b,c,d)
+    i = i + 1
+  ret 0 - 1
+
+
+// -------------------------------------------------
+// Memory Mapping API (cross-platform)
+// Allows fast zero-copy loading of huge files (e.g. 8GB+ .gguf LLM models).
+// -------------------------------------------------
+
+// Map a file into virtual address space without loading it into RAM.
+// On Windows: uses CreateFileMappingA + MapViewOfFile.
+// On Linux/macOS: uses mmap(2) with MAP_PRIVATE|PROT_READ.
+// Returns a pointer to the read-only memory view.
+// out_size is set to the file byte length. Returns null on failure.
+fn mmap_file(path:str, out_size:*int) -> *char:
+  if path == 0:
+    ret 0 as *char
+  ret tn_mmap_file(path, out_size)
+
+// Unmap a file previously opened with mmap_file.
+fn munmap_file(view:*char, size:int) -> int:
+  if view == 0:
+    ret 0
+  ret tn_munmap_file(view, size)

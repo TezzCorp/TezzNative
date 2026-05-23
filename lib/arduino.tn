@@ -1,0 +1,525 @@
+// arduino module — TezzNative 2.0 Arduino Hardware Abstraction Layer
+//
+// Enables writing native TezzNative programs for Arduino AVR boards.
+// Compiles to AVR machine code via TezzNative's cross-compile target:
+//   tezzc buildexe --target=avr-atmega328p main.tn main.hex
+//
+// Supported boards (via target flag):
+//   avr-atmega328p  — Arduino Uno, Nano, Mini
+//   avr-atmega2560  — Arduino Mega
+//   avr-attiny85    — Digispark, ATtiny85
+//
+// All timing functions use AVR hardware timers (no floating-point).
+// All I/O maps directly to AVR port registers (PORTB, PORTC, PORTD).
+//
+// Usage:
+//   import "arduino"
+//   fn setup() -> int:
+//     arduino.pin_mode(13, arduino.OUTPUT)
+//     ret 0
+//   fn loop() -> int:
+//     arduino.digital_write(13, arduino.HIGH)
+//     arduino.delay(500)
+//     arduino.digital_write(13, arduino.LOW)
+//     arduino.delay(500)
+//     ret 0
+//   fn main() -> int:
+//     setup()
+//     while 1: loop()
+//     ret 0
+
+// ─────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────
+
+let INPUT:int  = 0
+let OUTPUT:int = 1
+let INPUT_PULLUP:int = 2
+
+let HIGH:int = 1
+let LOW:int  = 0
+
+let A0:int = 14
+let A1:int = 15
+let A2:int = 16
+let A3:int = 17
+let A4:int = 18
+let A5:int = 19
+
+let RISING:int  = 1
+let FALLING:int = 2
+let CHANGE:int  = 3
+let LOW_LEVEL:int = 0
+
+let LSBFIRST:int = 0
+let MSBFIRST:int = 1
+
+let LED_BUILTIN:int = 13
+
+// I2C bus identifiers
+let I2C0:int = 0
+let SPI0:int = 0
+let UART0:int = 0
+let UART1:int = 1
+
+// ─────────────────────────────────────────────────────────────
+// Digital I/O
+// ─────────────────────────────────────────────────────────────
+
+fn pin_mode(pin:int, mode:int) -> int:
+  ret avr_pin_mode(pin, mode)
+
+fn digital_write(pin:int, val:int) -> int:
+  ret avr_digital_write(pin, val)
+
+fn digital_read(pin:int) -> int:
+  ret avr_digital_read(pin)
+
+fn digital_toggle(pin:int) -> int:
+  v:int = digital_read(pin)
+  ret digital_write(pin, 1 - v)
+
+// Set multiple pins at once via bitmask (faster than individual writes)
+fn port_write(port:int, mask:int, val:int) -> int:
+  ret avr_port_write(port, mask, val)
+
+fn port_read(port:int) -> int:
+  ret avr_port_read(port)
+
+// ─────────────────────────────────────────────────────────────
+// Analog I/O
+// ─────────────────────────────────────────────────────────────
+
+fn analog_read(pin:int) -> int:
+  // Returns 0..1023 (10-bit ADC)
+  ret avr_analog_read(pin)
+
+fn analog_read_mv(pin:int) -> int:
+  // Returns millivolts (0..5000 for 5V VCC)
+  raw:int = avr_analog_read(pin)
+  ret (raw * 5000) / 1023
+
+fn analog_write(pin:int, val:int) -> int:
+  // PWM: val 0..255 maps to 0..100% duty cycle
+  if val < 0: val = 0
+  if val > 255: val = 255
+  ret avr_pwm_write(pin, val)
+
+// Set ADC reference voltage
+fn analog_reference(ref:int) -> int:
+  // 0=DEFAULT(VCC), 1=INTERNAL(1.1V), 3=EXTERNAL
+  ret avr_analog_ref(ref)
+
+// ─────────────────────────────────────────────────────────────
+// Timing
+// ─────────────────────────────────────────────────────────────
+
+fn delay(ms:int) -> int:
+  ret avr_delay_ms(ms)
+
+fn delay_us(us:int) -> int:
+  ret avr_delay_us(us)
+
+fn millis() -> int:
+  ret avr_millis()
+
+fn micros() -> int:
+  ret avr_micros()
+
+// Busy-wait for a rising edge on pin (returns time waited in us)
+fn pulse_in(pin:int, val:int, timeout_us:int) -> int:
+  ret avr_pulse_in(pin, val, timeout_us)
+
+// ─────────────────────────────────────────────────────────────
+// Interrupts
+// ─────────────────────────────────────────────────────────────
+
+fn attach_interrupt(pin:int, handler:fn()->int, mode:int) -> int:
+  ret avr_attach_interrupt(pin, handler, mode)
+
+fn detach_interrupt(pin:int) -> int:
+  ret avr_detach_interrupt(pin)
+
+fn interrupts_enable() -> int:
+  ret avr_interrupts_enable()
+
+fn interrupts_disable() -> int:
+  ret avr_interrupts_disable()
+
+fn sei() -> int: ret interrupts_enable()
+fn cli() -> int: ret interrupts_disable()
+
+// ─────────────────────────────────────────────────────────────
+// UART Serial communication
+// ─────────────────────────────────────────────────────────────
+
+struct Serial:
+  port:int
+  baud:int
+  timeout_ms:int
+
+fn serial_begin(port:int, baud:int) -> *Serial:
+  s:*Serial = (*Serial)malloc(sizeof(Serial))
+  if s == 0: ret 0 as *Serial
+  (*s).port = port
+  (*s).baud = baud
+  (*s).timeout_ms = 1000
+  avr_uart_begin(port, baud)
+  ret s
+
+fn serial_end(s:*Serial) -> int:
+  if s == 0: ret 0 - 1
+  avr_uart_end((*s).port)
+  free(s)
+  ret 0
+
+fn serial_print(s:*Serial, text:str) -> int:
+  if s == 0 || text == 0: ret 0 - 1
+  ret avr_uart_print((*s).port, text)
+
+fn serial_println(s:*Serial, text:str) -> int:
+  if s == 0: ret 0 - 1
+  serial_print(s, text)
+  ret avr_uart_write_byte((*s).port, 10)
+
+fn serial_print_int(s:*Serial, v:int) -> int:
+  if s == 0: ret 0 - 1
+  buf:[char;24]
+  n:int = v
+  i:int = 0
+  if n < 0:
+    buf[i] = 45 as char
+    i = i + 1
+    n = 0 - n
+  if n == 0:
+    buf[i] = 48 as char
+    i = i + 1
+  else:
+    j:int = 0
+    tmp:[char;24]
+    while n > 0:
+      tmp[j] = (48 + n % 10) as char
+      j = j + 1
+      n = n / 10
+    k:int = 0
+    while k < j:
+      buf[i] = tmp[j - k - 1]
+      i = i + 1
+      k = k + 1
+  buf[i] = 0 as char
+  ret avr_uart_print((*s).port, &buf[0] as str)
+
+fn serial_print_float(s:*Serial, v:float, decimals:int) -> int:
+  if s == 0: ret 0 - 1
+  // Basic float print
+  iv:int = v as int
+  frac:float = v - (iv as float)
+  if frac < 0.0: frac = 0.0 - frac
+  serial_print_int(s, iv)
+  avr_uart_write_byte((*s).port, 46)  // '.'
+  d:int = 0
+  while d < decimals:
+    frac = frac * 10.0
+    digit:int = frac as int
+    avr_uart_write_byte((*s).port, 48 + digit)
+    frac = frac - (digit as float)
+    d = d + 1
+  ret 0
+
+fn serial_available(s:*Serial) -> int:
+  if s == 0: ret 0
+  ret avr_uart_available((*s).port)
+
+fn serial_read_byte(s:*Serial) -> int:
+  if s == 0: ret 0 - 1
+  ret avr_uart_read_byte((*s).port)
+
+fn serial_read_line(s:*Serial) -> str:
+  if s == 0: ret 0 as str
+  buf:[char;256]
+  i:int = 0
+  timeout_start:int = millis()
+  while i < 255:
+    if avr_uart_available((*s).port) > 0:
+      c:int = avr_uart_read_byte((*s).port)
+      if c == 10 || c == 13: break
+      buf[i] = c as char
+      i = i + 1
+    if millis() - timeout_start > (*s).timeout_ms: break
+  buf[i] = 0 as char
+  // Return static buffer slice (safe for AVR small memory)
+  p:*char = malloc(i + 1)
+  if p == 0: ret 0 as str
+  unsafe:
+    memcpy(p, &buf[0], i)
+  p[i] = 0 as char
+  ret p as str
+
+fn serial_write_byte(s:*Serial, b:int) -> int:
+  if s == 0: ret 0 - 1
+  ret avr_uart_write_byte((*s).port, b)
+
+fn serial_flush(s:*Serial) -> int:
+  if s == 0: ret 0 - 1
+  ret avr_uart_flush((*s).port)
+
+// ─────────────────────────────────────────────────────────────
+// I2C (Wire)
+// ─────────────────────────────────────────────────────────────
+
+struct I2cBus:
+  bus:int
+  freq_hz:int
+
+fn i2c_begin(bus:int) -> *I2cBus:
+  b:*I2cBus = (*I2cBus)malloc(sizeof(I2cBus))
+  if b == 0: ret 0 as *I2cBus
+  (*b).bus = bus
+  (*b).freq_hz = 100000  // 100kHz standard
+  avr_i2c_begin(bus, 100000)
+  ret b
+
+fn i2c_begin_fast(bus:int) -> *I2cBus:
+  b:*I2cBus = i2c_begin(bus)
+  if b == 0: ret 0 as *I2cBus
+  (*b).freq_hz = 400000
+  avr_i2c_set_freq(bus, 400000)
+  ret b
+
+fn i2c_end(b:*I2cBus) -> int:
+  if b == 0: ret 0 - 1
+  avr_i2c_end((*b).bus)
+  free(b)
+  ret 0
+
+fn i2c_begin_tx(b:*I2cBus, addr:int) -> int:
+  if b == 0: ret 0 - 1
+  ret avr_i2c_begin_tx((*b).bus, addr)
+
+fn i2c_write(b:*I2cBus, data:int) -> int:
+  if b == 0: ret 0 - 1
+  ret avr_i2c_write((*b).bus, data)
+
+fn i2c_write_buf(b:*I2cBus, buf:*char, n:int) -> int:
+  if b == 0 || buf == 0 || n <= 0: ret 0 - 1
+  i:int = 0
+  while i < n:
+    avr_i2c_write((*b).bus, buf[i] as int)
+    i = i + 1
+  ret n
+
+fn i2c_end_tx(b:*I2cBus, stop:int) -> int:
+  if b == 0: ret 0 - 1
+  ret avr_i2c_end_tx((*b).bus, stop)
+
+fn i2c_request(b:*I2cBus, addr:int, n:int) -> int:
+  if b == 0: ret 0 - 1
+  ret avr_i2c_request((*b).bus, addr, n)
+
+fn i2c_read(b:*I2cBus) -> int:
+  if b == 0: ret 0 - 1
+  ret avr_i2c_read((*b).bus)
+
+fn i2c_available(b:*I2cBus) -> int:
+  if b == 0: ret 0
+  ret avr_i2c_available((*b).bus)
+
+// I2C register read helper (very common pattern)
+fn i2c_reg_read8(b:*I2cBus, addr:int, reg:int) -> int:
+  i2c_begin_tx(b, addr)
+  i2c_write(b, reg)
+  i2c_end_tx(b, 0)  // no stop — repeated start
+  i2c_request(b, addr, 1)
+  ret i2c_read(b)
+
+fn i2c_reg_write8(b:*I2cBus, addr:int, reg:int, val:int) -> int:
+  i2c_begin_tx(b, addr)
+  i2c_write(b, reg)
+  i2c_write(b, val)
+  ret i2c_end_tx(b, 1)  // stop
+
+// ─────────────────────────────────────────────────────────────
+// SPI
+// ─────────────────────────────────────────────────────────────
+
+struct SpiBus:
+  bus:int
+  clock_div:int
+  bit_order:int
+  mode:int
+
+let SPI_CLOCK_DIV2:int   = 0
+let SPI_CLOCK_DIV4:int   = 1
+let SPI_CLOCK_DIV8:int   = 2
+let SPI_CLOCK_DIV16:int  = 3
+let SPI_CLOCK_DIV32:int  = 4
+let SPI_CLOCK_DIV64:int  = 5
+let SPI_CLOCK_DIV128:int = 6
+
+let SPI_MODE0:int = 0
+let SPI_MODE1:int = 1
+let SPI_MODE2:int = 2
+let SPI_MODE3:int = 3
+
+fn spi_begin(bus:int) -> *SpiBus:
+  s:*SpiBus = (*SpiBus)malloc(sizeof(SpiBus))
+  if s == 0: ret 0 as *SpiBus
+  (*s).bus = bus
+  (*s).clock_div = SPI_CLOCK_DIV4
+  (*s).bit_order = MSBFIRST
+  (*s).mode = SPI_MODE0
+  avr_spi_begin(bus)
+  ret s
+
+fn spi_end(s:*SpiBus) -> int:
+  if s == 0: ret 0 - 1
+  avr_spi_end((*s).bus)
+  free(s)
+  ret 0
+
+fn spi_set_clock(s:*SpiBus, div:int) -> int:
+  if s == 0: ret 0 - 1
+  (*s).clock_div = div
+  ret avr_spi_set_clock((*s).bus, div)
+
+fn spi_set_bit_order(s:*SpiBus, order:int) -> int:
+  if s == 0: ret 0 - 1
+  (*s).bit_order = order
+  ret avr_spi_set_bit_order((*s).bus, order)
+
+fn spi_set_mode(s:*SpiBus, mode:int) -> int:
+  if s == 0: ret 0 - 1
+  (*s).mode = mode
+  ret avr_spi_set_mode((*s).bus, mode)
+
+fn spi_transfer(s:*SpiBus, data:int) -> int:
+  if s == 0: ret 0 - 1
+  ret avr_spi_transfer((*s).bus, data)
+
+fn spi_transfer_buf(s:*SpiBus, buf:*char, n:int) -> int:
+  if s == 0 || buf == 0 || n <= 0: ret 0 - 1
+  i:int = 0
+  while i < n:
+    buf[i] = avr_spi_transfer((*s).bus, buf[i] as int) as char
+    i = i + 1
+  ret n
+
+// ─────────────────────────────────────────────────────────────
+// EEPROM (non-volatile storage on Arduino Uno: 1024 bytes)
+// ─────────────────────────────────────────────────────────────
+
+let EEPROM_SIZE:int = 1024
+
+fn eeprom_read(addr:int) -> int:
+  if addr < 0 || addr >= EEPROM_SIZE: ret 0 - 1
+  ret avr_eeprom_read(addr)
+
+fn eeprom_write(addr:int, val:int) -> int:
+  if addr < 0 || addr >= EEPROM_SIZE: ret 0 - 1
+  ret avr_eeprom_write(addr, val)
+
+fn eeprom_read_int(addr:int) -> int:
+  lo:int = eeprom_read(addr)
+  hi:int = eeprom_read(addr + 1)
+  ret lo | (hi << 8)
+
+fn eeprom_write_int(addr:int, val:int) -> int:
+  eeprom_write(addr, val & 255)
+  eeprom_write(addr + 1, (val >> 8) & 255)
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// Built-in sensors helpers
+// ─────────────────────────────────────────────────────────────
+
+fn temperature_celsius(analog_pin:int) -> int:
+  // LM35 temperature sensor: 10mV/°C
+  mv:int = analog_read_mv(analog_pin)
+  ret mv / 10
+
+fn temperature_fahrenheit(analog_pin:int) -> int:
+  c:int = temperature_celsius(analog_pin)
+  ret (c * 9 / 5) + 32
+
+fn ldr_percent(analog_pin:int) -> int:
+  // Light Dependent Resistor: 0=dark, 100=bright
+  raw:int = analog_read(analog_pin)
+  ret raw * 100 / 1023
+
+fn pot_percent(analog_pin:int) -> int:
+  raw:int = analog_read(analog_pin)
+  ret raw * 100 / 1023
+
+// ─────────────────────────────────────────────────────────────
+// Servo motor control
+// ─────────────────────────────────────────────────────────────
+
+struct Servo:
+  pin:int
+  min_us:int  // pulse width for 0 degrees (default 544us)
+  max_us:int  // pulse width for 180 degrees (default 2400us)
+  angle:int
+
+fn servo_attach(pin:int) -> *Servo:
+  s:*Servo = (*Servo)malloc(sizeof(Servo))
+  if s == 0: ret 0 as *Servo
+  (*s).pin = pin
+  (*s).min_us = 544
+  (*s).max_us = 2400
+  (*s).angle = 90
+  pin_mode(pin, OUTPUT)
+  ret s
+
+fn servo_write(s:*Servo, angle:int) -> int:
+  if s == 0: ret 0 - 1
+  if angle < 0: angle = 0
+  if angle > 180: angle = 180
+  (*s).angle = angle
+  pulse_us:int = (*s).min_us + (angle * ((*s).max_us - (*s).min_us)) / 180
+  // Generate 50Hz PWM pulse (20ms period, pulse = pulse_us)
+  digital_write((*s).pin, HIGH)
+  delay_us(pulse_us)
+  digital_write((*s).pin, LOW)
+  ret 0
+
+fn servo_read(s:*Servo) -> int:
+  if s == 0: ret 0
+  ret (*s).angle
+
+fn servo_detach(s:*Servo) -> int:
+  if s == 0: ret 0 - 1
+  free(s)
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// Tone / buzzer
+// ─────────────────────────────────────────────────────────────
+
+fn tone(pin:int, freq_hz:int, duration_ms:int) -> int:
+  ret avr_tone(pin, freq_hz, duration_ms)
+
+fn no_tone(pin:int) -> int:
+  ret avr_no_tone(pin)
+
+// ─────────────────────────────────────────────────────────────
+// Math helpers for embedded
+// ─────────────────────────────────────────────────────────────
+
+fn map_range(val:int, from_lo:int, from_hi:int, to_lo:int, to_hi:int) -> int:
+  if from_hi == from_lo: ret to_lo
+  ret to_lo + (val - from_lo) * (to_hi - to_lo) / (from_hi - from_lo)
+
+fn constrain(val:int, lo:int, hi:int) -> int:
+  if val < lo: ret lo
+  if val > hi: ret hi
+  ret val
+
+fn abs_int(v:int) -> int:
+  if v < 0: ret 0 - v
+  ret v
+
+fn random_int(lo:int, hi:int) -> int:
+  ret avr_random(lo, hi)
+
+fn random_seed(seed:int) -> int:
+  ret avr_random_seed(seed)

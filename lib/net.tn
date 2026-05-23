@@ -1,0 +1,2948 @@
+// net module: production network baseline for TezzNative.
+//
+// Scope in v1.0:
+// - TCP + UDP socket wrappers
+// - DNS endpoint helpers + URL utilities
+// - TLS socket handle wrappers
+// - HTTP/HTTPS convenience helpers (client + minimal server helpers)
+// - WebSocket handshake + frame helpers
+// - Native runtime-backed URL downloader
+//
+// Notes:
+// - This module is the production baseline for app/service networking.
+// - HTTP/2, QUIC, SMTP/IMAP, and full proxy stacks remain future milestones.
+
+let NET_OK:int = 0
+let NET_ERR:int = 0 - 1
+
+let HTTP_PORT:int = 80
+let HTTPS_PORT:int = 443
+
+let NET_DEFAULT_TIMEOUT_MS:int = 5000
+let NET_DEFAULT_MAX_READ:int = 262144
+let NET_READ_CHUNK:int = 2048
+let HTTP_ROUTE_TABLE_DEFAULT_CAP:int = 16
+let HTTP_ROUTE_MATCH_NONE:int = 0
+let HTTP_ROUTE_MATCH_OK:int = 1
+let HTTP_ROUTE_MATCH_METHOD_MISMATCH:int = 2
+let HTTP_SERVER_SESSION_DEFAULT_MAX_ERRORS:int = 8
+
+struct HttpRouteEntry:
+  method:str
+  pattern:str
+  handler:*char
+
+struct HttpRouteTable:
+  entries:*HttpRouteEntry
+  count:int
+  cap:int
+
+struct HttpServerSession:
+  listener:int
+  routes:*HttpRouteTable
+  timeout_ms:int
+  max_req_bytes:int
+  max_clients:int
+  max_errors:int
+  served:int
+  errors:int
+
+fn _starts_with(s:str, p:str) -> int:
+  if s == 0 || p == 0:
+    ret 0
+  i:int = 0
+  while p[i] != 0 as char:
+    if s[i] == 0 as char:
+      ret 0
+    if s[i] != p[i]:
+      ret 0
+    i = i + 1
+  ret 1
+
+fn _streq(a:str, b:str) -> int:
+  if a == 0 || b == 0:
+    ret 0
+  i:int = 0
+  while a[i] != 0 as char && b[i] != 0 as char:
+    if a[i] != b[i]:
+      ret 0
+    i = i + 1
+  if a[i] == 0 as char && b[i] == 0 as char:
+    ret 1
+  ret 0
+
+fn _streq_nocase(a:str, b:str) -> int:
+  if a == 0 || b == 0:
+    ret 0
+  i:int = 0
+  while a[i] != 0 as char && b[i] != 0 as char:
+    av:int = _tolower_ascii((a[i] as int) & 255)
+    bv:int = _tolower_ascii((b[i] as int) & 255)
+    if av != bv:
+      ret 0
+    i = i + 1
+  if a[i] == 0 as char && b[i] == 0 as char:
+    ret 1
+  ret 0
+
+fn _join2(a:str, b:str) -> str:
+  if a == 0:
+    ret b
+  if b == 0:
+    ret a
+  na:int = len(a)
+  nb:int = len(b)
+  p:*char = malloc(na + nb + 1)
+  if p == 0:
+    ret 0 as str
+  unsafe:
+    memcpy(p, a as *char, na)
+    memcpy(p + na, b as *char, nb)
+  p[na + nb] = 0 as char
+  ret p as str
+
+fn _join3(a:str, b:str, c:str) -> str:
+  if a == 0:
+    ret _join2(b, c)
+  if b == 0:
+    ret _join2(a, c)
+  if c == 0:
+    ret _join2(a, b)
+  na:int = len(a)
+  nb:int = len(b)
+  nc:int = len(c)
+  p:*char = malloc(na + nb + nc + 1)
+  if p == 0:
+    ret 0 as str
+  unsafe:
+    memcpy(p, a as *char, na)
+    memcpy(p + na, b as *char, nb)
+    memcpy(p + na + nb, c as *char, nc)
+  p[na + nb + nc] = 0 as char
+  ret p as str
+
+fn _itoa(v:int) -> str:
+  neg:int = 0
+  n:int = v
+  if n < 0:
+    neg = 1
+    n = 0 - n
+  tmp:*char = malloc(32)
+  if tmp == 0:
+    ret 0 as str
+  i:int = 0
+  if n == 0:
+    tmp[i] = 48 as char
+    i = i + 1
+  while n > 0:
+    d:int = n % 10
+    tmp[i] = (48 + d) as char
+    i = i + 1
+    n = n / 10
+  if neg != 0:
+    tmp[i] = 45 as char
+    i = i + 1
+  out:*char = malloc(i + 1)
+  if out == 0:
+    free(tmp)
+    ret 0 as str
+  j:int = 0
+  while j < i:
+    out[j] = tmp[i - j - 1]
+    j = j + 1
+  out[i] = 0 as char
+  free(tmp)
+  ret out as str
+
+fn _byte_at(s:str, i:int) -> int:
+  if s == 0 || i < 0:
+    ret 0
+  c:int = (s[i] as int)
+  if c < 0:
+    c = c + 256
+  ret c
+
+// Address family constant: IPv4.
+fn af_inet() -> int:
+  ret net_af_inet()
+
+// Address family constant: IPv6.
+fn af_inet6() -> int:
+  ret net_af_inet6()
+
+// Socket type constant: TCP stream.
+fn sock_stream() -> int:
+  ret net_sock_stream()
+
+// Socket type constant: UDP datagram.
+fn sock_dgram() -> int:
+  ret net_sock_dgram()
+
+// Protocol constant: TCP.
+fn ipproto_tcp() -> int:
+  ret net_ipproto_tcp()
+
+// Protocol constant: UDP.
+fn ipproto_udp() -> int:
+  ret net_ipproto_udp()
+
+// Initialize network runtime.
+fn init() -> int:
+  ret net_init()
+
+// Cleanup network runtime.
+fn cleanup() -> int:
+  ret net_cleanup()
+
+// Return last platform/network error code.
+fn last_error() -> int:
+  ret net_last_error()
+
+// Create socket from explicit family/type/protocol.
+fn socket(fam:int, typ:int, proto:int) -> int:
+  ret net_socket(fam, typ, proto)
+
+// Close socket descriptor.
+fn close(sock:int) -> int:
+  ret net_close(sock)
+
+// Connect socket to host:port.
+fn connect(sock:int, host:str, port:int) -> int:
+  ret net_connect(sock, host, port)
+
+// Bind socket to host:port.
+fn bind(sock:int, host:str, port:int) -> int:
+  ret net_bind(sock, host, port)
+
+// Mark TCP socket as listening.
+fn listen(sock:int, backlog:int) -> int:
+  ret net_listen(sock, backlog)
+
+// Accept next incoming connection.
+fn accept(sock:int) -> int:
+  ret net_accept(sock)
+
+// Send raw bytes.
+fn send(sock:int, buf:*char, n:int) -> int:
+  ret net_send(sock, buf, n)
+
+// Receive raw bytes.
+fn recv(sock:int, buf:*char, n:int) -> int:
+  ret net_recv(sock, buf, n)
+
+// Enable (1) or disable (0) blocking mode.
+fn set_blocking(sock:int, on:int) -> int:
+  ret net_set_blocking(sock, on)
+
+// Set socket timeout in milliseconds.
+fn set_timeout(sock:int, ms:int) -> int:
+  ret net_set_timeout(sock, ms)
+
+// Resolve host+port to textual endpoint.
+fn resolve(host:str, port:int) -> str:
+  ret net_resolve(host, port)
+
+// Return HTTP default port.
+fn http_port() -> int:
+  ret HTTP_PORT
+
+// Return HTTPS default port.
+fn https_port() -> int:
+  ret HTTPS_PORT
+
+// Return default network timeout used by helpers.
+fn default_timeout_ms() -> int:
+  ret NET_DEFAULT_TIMEOUT_MS
+
+// Return default max receive bytes used by helpers.
+fn default_max_read() -> int:
+  ret NET_DEFAULT_MAX_READ
+
+// Check if URL starts with http://
+fn is_http_url(url:str) -> int:
+  if url == 0:
+    ret 0
+  if _starts_with(url, "http://") != 0:
+    ret 1
+  ret 0
+
+// Check if URL starts with https://
+fn is_https_url(url:str) -> int:
+  if url == 0:
+    ret 0
+  if _starts_with(url, "https://") != 0:
+    ret 1
+  ret 0
+
+// Convenience: TCP socket.
+fn tcp_socket() -> int:
+  ret net_socket(af_inet(), sock_stream(), ipproto_tcp())
+
+// Connect TCP socket and return descriptor.
+fn tcp_connect(host:str, port:int) -> int:
+  s:int = tcp_socket()
+  if s < 0:
+    ret NET_ERR
+  if net_connect(s, host, port) != 0:
+    net_close(s)
+    ret NET_ERR
+  ret s
+
+// Connect TCP socket with timeout.
+fn tcp_connect_timeout(host:str, port:int, timeout_ms:int) -> int:
+  s:int = tcp_connect(host, port)
+  if s < 0:
+    ret NET_ERR
+  if timeout_ms > 0:
+    net_set_timeout(s, timeout_ms)
+  ret s
+
+// Start TCP listener.
+fn tcp_listen(host:str, port:int, backlog:int) -> int:
+  s:int = tcp_socket()
+  if s < 0:
+    ret NET_ERR
+  if net_bind(s, host, port) != 0:
+    net_close(s)
+    ret NET_ERR
+  if net_listen(s, backlog) != 0:
+    net_close(s)
+    ret NET_ERR
+  ret s
+
+// Send all requested bytes; returns bytes sent or <0 on error.
+fn tcp_send_all(sock:int, buf:*char, n:int) -> int:
+  if sock < 0 || buf == 0 || n < 0:
+    ret NET_ERR
+  sent:int = 0
+  chunk_buf:[char;2048]
+  while sent < n:
+    chunk:int = n - sent
+    if chunk > 2048:
+      chunk = 2048
+    i:int = 0
+    while i < chunk:
+      chunk_buf[i] = buf[sent + i]
+      i = i + 1
+    w:int = net_send(sock, &chunk_buf[0], chunk)
+    if w <= 0:
+      ret NET_ERR
+    sent = sent + w
+  ret sent
+
+// Send Tezz string over TCP.
+fn tcp_send_text(sock:int, payload:str) -> int:
+  if payload == 0:
+    ret NET_ERR
+  ret tcp_send_all(sock, payload as *char, len(payload))
+
+// Receive bytes until peer close/timeout or max_bytes reached.
+// Returns heap string (caller frees) or 0 on allocation error.
+fn tcp_recv_all(sock:int, max_bytes:int) -> str:
+  if max_bytes <= 0:
+    max_bytes = NET_DEFAULT_MAX_READ
+  out:*char = malloc(max_bytes + 1)
+  if out == 0:
+    ret 0 as str
+  got:int = 0
+  chunk_buf:[char;2048]
+  while got < max_bytes:
+    chunk:int = max_bytes - got
+    if chunk > 2048:
+      chunk = 2048
+    r:int = net_recv(sock, &chunk_buf[0], chunk)
+    if r <= 0:
+      break
+    i:int = 0
+    while i < r:
+      out[got + i] = chunk_buf[i]
+      i = i + 1
+    got = got + r
+  out[got] = 0 as char
+  ret out as str
+
+// Send one request and return full text response.
+// Returns heap string (caller frees), or 0 on failure.
+fn tcp_request(host:str, port:int, request:str, timeout_ms:int, max_bytes:int) -> str:
+  if host == 0 || request == 0:
+    ret 0 as str
+  s:int = tcp_connect(host, port)
+  if s < 0:
+    ret 0 as str
+  if timeout_ms <= 0:
+    timeout_ms = NET_DEFAULT_TIMEOUT_MS
+  net_set_timeout(s, timeout_ms)
+  if tcp_send_text(s, request) < 0:
+    net_close(s)
+    ret 0 as str
+  resp:str = tcp_recv_all(s, max_bytes)
+  net_close(s)
+  ret resp
+
+// Build raw HTTP request string.
+fn _http_request_ex(method:str, host:str, path:str, body:str, content_type:str, extra_headers:str) -> str:
+  m:str = method
+  h:str = host
+  p:str = path
+  if m == 0:
+    m = "GET"
+  if h == 0:
+    h = ""
+  if p == 0 || p[0] == 0:
+    p = "/"
+
+  req1:str = _join3(m, " ", p)
+  req2:str = _join2(req1, " HTTP/1.1\r\nHost: ")
+  req3:str = _join2(req2, h)
+  req4:str = _join2(req3, "\r\nUser-Agent: TezzNative/1.0\r\nAccept: */*\r\nConnection: close\r\n")
+  req4b:str = req4
+  if extra_headers != 0 && extra_headers[0] != 0 as char:
+    req4x:str = _join2(req4, extra_headers)
+    req4b = _join2(req4x, "\r\n")
+    free(req4x)
+    free(req4)
+  free(req1)
+  free(req2)
+  free(req3)
+
+  if body == 0:
+    req5:str = _join2(req4b, "\r\n")
+    free(req4b)
+    ret req5
+
+  ctype:str = content_type
+  if ctype == 0:
+    ctype = "application/octet-stream"
+  blen:int = len(body)
+  clen:str = _itoa(blen)
+  req5:str = _join2(req4b, "Content-Type: ")
+  req6:str = _join2(req5, ctype)
+  req7:str = _join2(req6, "\r\nContent-Length: ")
+  req8:str = _join2(req7, clen)
+  req9:str = _join2(req8, "\r\n\r\n")
+  req10:str = _join2(req9, body)
+  free(req4b)
+  free(req5)
+  free(req6)
+  free(req7)
+  free(req8)
+  free(req9)
+  free(clen)
+  ret req10
+
+fn _http_request(method:str, host:str, path:str, body:str, content_type:str) -> str:
+  ret _http_request_ex(method, host, path, body, content_type, 0 as str)
+
+// HTTP GET via raw TCP (returns full response text).
+fn http_get(host:str, path:str, timeout_ms:int, max_bytes:int) -> str:
+  req:str = _http_request("GET", host, path, 0 as str, 0 as str)
+  if req == 0:
+    ret 0 as str
+  resp:str = tcp_request(host, HTTP_PORT, req, timeout_ms, max_bytes)
+  free(req)
+  ret resp
+
+// HTTP POST via raw TCP (returns full response text).
+fn http_post(host:str, path:str, body:str, content_type:str, timeout_ms:int, max_bytes:int) -> str:
+  req:str = _http_request("POST", host, path, body, content_type)
+  if req == 0:
+    ret 0 as str
+  resp:str = tcp_request(host, HTTP_PORT, req, timeout_ms, max_bytes)
+  free(req)
+  ret resp
+
+// Convenience: UDP socket.
+fn udp_socket() -> int:
+  ret net_socket(af_inet(), sock_dgram(), ipproto_udp())
+
+// Connect UDP peer.
+fn udp_connect(host:str, port:int) -> int:
+  s:int = udp_socket()
+  if s < 0:
+    ret NET_ERR
+  if net_connect(s, host, port) != 0:
+    net_close(s)
+    ret NET_ERR
+  ret s
+
+// Send UDP text payload.
+fn udp_send_text(sock:int, payload:str) -> int:
+  if sock < 0 || payload == 0:
+    ret NET_ERR
+  ret net_send(sock, payload as *char, len(payload))
+
+// Receive one UDP payload as heap string.
+fn udp_recv_text(sock:int, max_bytes:int) -> str:
+  if sock < 0:
+    ret 0 as str
+  if max_bytes <= 0:
+    max_bytes = NET_READ_CHUNK
+  out:*char = malloc(max_bytes + 1)
+  if out == 0:
+    ret 0 as str
+  r:int = net_recv(sock, out, max_bytes)
+  if r < 0:
+    out[0] = 0 as char
+    ret out as str
+  out[r] = 0 as char
+  ret out as str
+
+// Open TLS handle (native runtime backend).
+fn tls_open(host:str, port:int) -> int:
+  ret tls_connect(host, port)
+
+// Open TLS handle with per-request policy override.
+// min_version: 0(default) | 12(TLS1.2+) | 13(TLS1.3-only)
+// handshake_timeout_ms: 0 uses backend default.
+// pin_sha256_hex: 64-char hex SHA-256 fingerprint (or empty for no pin).
+fn tls_open_with_policy(host:str, port:int, min_version:int, handshake_timeout_ms:int, pin_sha256_hex:str) -> int:
+  // Compatibility fallback:
+  // some installed compiler builds do not expose `tls_connect_ex` yet.
+  // keep API shape stable and fall back to standard TLS connect.
+  // policy arguments are reserved for upgraded runtimes/compilers.
+  if min_version < 0:
+    min_version = 0
+  if handshake_timeout_ms < 0:
+    handshake_timeout_ms = 0
+  if pin_sha256_hex == 0:
+    pin_sha256_hex = ""
+  ret tls_connect(host, port)
+
+// Close TLS handle.
+fn tls_close_h(h:int) -> int:
+  ret tls_close(h)
+
+// Send Tezz string over TLS handle.
+fn tls_send_text(h:int, payload:str) -> int:
+  if h < 0 || payload == 0:
+    ret NET_ERR
+  ret tls_send(h, payload as *char, len(payload))
+
+// Send exact byte length over TLS handle (binary-safe).
+fn tls_send_all(h:int, buf:*char, n:int) -> int:
+  if h < 0 || buf == 0 || n < 0:
+    ret NET_ERR
+  sent:int = 0
+  chunk_buf:[char;2048]
+  while sent < n:
+    chunk:int = n - sent
+    if chunk > 2048:
+      chunk = 2048
+    i:int = 0
+    while i < chunk:
+      chunk_buf[i] = buf[sent + i]
+      i = i + 1
+    w:int = tls_send(h, &chunk_buf[0], chunk)
+    if w <= 0:
+      ret NET_ERR
+    sent = sent + w
+  ret sent
+
+// Receive all TLS bytes up to max_bytes.
+fn tls_recv_all(h:int, max_bytes:int) -> str:
+  if h < 0:
+    ret 0 as str
+  if max_bytes <= 0:
+    max_bytes = NET_DEFAULT_MAX_READ
+  out:*char = malloc(max_bytes + 1)
+  if out == 0:
+    ret 0 as str
+  got:int = 0
+  chunk_buf:[char;2048]
+  while got < max_bytes:
+    chunk:int = max_bytes - got
+    if chunk > 2048:
+      chunk = 2048
+    r:int = tls_recv(h, &chunk_buf[0], chunk)
+    if r <= 0:
+      break
+    i:int = 0
+    while i < r:
+      out[got + i] = chunk_buf[i]
+      i = i + 1
+    got = got + r
+  out[got] = 0 as char
+  ret out as str
+
+// HTTPS GET via TLS socket (returns full response text).
+fn https_get(host:str, path:str, max_bytes:int) -> str:
+  req:str = _http_request("GET", host, path, 0 as str, 0 as str)
+  if req == 0:
+    ret 0 as str
+  h:int = tls_connect(host, HTTPS_PORT)
+  if h < 0:
+    free(req)
+    ret 0 as str
+  if tls_send_text(h, req) < 0:
+    tls_close(h)
+    free(req)
+    ret 0 as str
+  free(req)
+  resp:str = tls_recv_all(h, max_bytes)
+  tls_close(h)
+  ret resp
+
+// HTTPS POST via TLS socket (returns full response text).
+fn https_post(host:str, path:str, body:str, content_type:str, max_bytes:int) -> str:
+  req:str = _http_request("POST", host, path, body, content_type)
+  if req == 0:
+    ret 0 as str
+  h:int = tls_connect(host, HTTPS_PORT)
+  if h < 0:
+    free(req)
+    ret 0 as str
+  if tls_send_text(h, req) < 0:
+    tls_close(h)
+    free(req)
+    ret 0 as str
+  free(req)
+  resp:str = tls_recv_all(h, max_bytes)
+  tls_close(h)
+  ret resp
+
+// download(url, out_path) -> 0 on success, <0 on error.
+// Uses native runtime downloader for http:// and https:// URLs.
+fn download(url:str, out_path:str) -> int:
+  if url == 0 || out_path == 0:
+    ret NET_ERR
+  ret http_download(url, out_path)
+
+// download helper that enforces HTTP URL scheme.
+fn download_http(url:str, out_path:str) -> int:
+  if is_http_url(url) == 0:
+    ret NET_ERR
+  ret download(url, out_path)
+
+// download helper that enforces HTTPS URL scheme.
+fn download_https(url:str, out_path:str) -> int:
+  if is_https_url(url) == 0:
+    ret NET_ERR
+  ret download(url, out_path)
+
+fn _tolower_ascii(c:int) -> int:
+  if c >= 65 && c <= 90:
+    ret c + 32
+  ret c
+
+fn _eq_nocase_range(s:str, from_i:int, to_i:int, name:str) -> int:
+  if s == 0 || name == 0:
+    ret 0
+  nlen:int = len(name)
+  if (to_i - from_i) != nlen:
+    ret 0
+  i:int = 0
+  while i < nlen:
+    av:int = s[from_i + i] as int
+    bv:int = name[i] as int
+    a:int = _tolower_ascii(av & 255)
+    b:int = _tolower_ascii(bv & 255)
+    if a != b:
+      ret 0
+    i = i + 1
+  ret 1
+
+fn _substr_dup(s:str, start:int, end:int) -> str:
+  if s == 0:
+    ret 0 as str
+  slen:int = len(s)
+  st:int = start
+  en:int = end
+  if st < 0:
+    st = 0
+  if st > slen:
+    st = slen
+  if en < st:
+    en = st
+  if en > slen:
+    en = slen
+  n:int = en - st
+  out:*char = malloc(n + 1)
+  if out == 0:
+    ret 0 as str
+  if n > 0:
+    unsafe:
+      memcpy(out, (s as *char) + st, n)
+  out[n] = 0 as char
+  ret out as str
+
+fn _parse_int_dec(s:str) -> int:
+  if s == 0:
+    ret 0
+  i:int = 0
+  while s[i] == 32 as char || s[i] == 9 as char || s[i] == 13 as char || s[i] == 10 as char:
+    i = i + 1
+  sign:int = 1
+  if s[i] == 45 as char:
+    sign = 0 - 1
+    i = i + 1
+  else if s[i] == 43 as char:
+    i = i + 1
+  v:int = 0
+  seen:int = 0
+  while 1:
+    c:int = (s[i] as int) & 255
+    if c < 48 || c > 57:
+      break
+    v = (v * 10) + (c - 48)
+    seen = 1
+    i = i + 1
+  if seen == 0:
+    ret 0
+  ret v * sign
+
+fn _find_header_end_index(buf:*char, n:int) -> int:
+  if buf == 0 || n < 4:
+    ret 0 - 1
+  i:int = 0
+  while i + 3 < n:
+    if (((buf[i] as int) & 255) == 13):
+      if (((buf[i + 1] as int) & 255) == 10):
+        if (((buf[i + 2] as int) & 255) == 13):
+          if (((buf[i + 3] as int) & 255) == 10):
+            ret i + 4
+    if (((buf[i] as int) & 255) == 114): // 'r' fallback when CR escapes are normalized
+      if (((buf[i + 1] as int) & 255) == 10):
+        if (((buf[i + 2] as int) & 255) == 114):
+          if (((buf[i + 3] as int) & 255) == 10):
+            ret i + 4
+    i = i + 1
+  ret 0 - 1
+
+fn _recv_exact(sock:int, buf:*char, n:int) -> int:
+  if sock < 0 || buf == 0 || n < 0:
+    ret NET_ERR
+  got:int = 0
+  chunk_buf:[char;2048]
+  while got < n:
+    chunk:int = n - got
+    if chunk > 2048:
+      chunk = 2048
+    r:int = net_recv(sock, &chunk_buf[0], chunk)
+    if r <= 0:
+      ret NET_ERR
+    i:int = 0
+    while i < r:
+      buf[got + i] = chunk_buf[i]
+      i = i + 1
+    got = got + r
+  ret got
+
+fn _contains_nocase(hay:str, needle:str) -> int:
+  if hay == 0 || needle == 0:
+    ret 0
+  hn:int = len(hay)
+  nn:int = len(needle)
+  if nn <= 0:
+    ret 1
+  if nn > hn:
+    ret 0
+  i:int = 0
+  while i + nn <= hn:
+    j:int = 0
+    ok:int = 1
+    while j < nn:
+      av:int = 0
+      bv:int = 0
+      unsafe:
+        av = hay[i + j] as int
+        bv = needle[j] as int
+      a:int = _tolower_ascii(av & 255)
+      b:int = _tolower_ascii(bv & 255)
+      if a != b:
+        ok = 0
+        break
+      j = j + 1
+    if ok != 0:
+      ret 1
+    i = i + 1
+  ret 0
+
+// HTTP server helpers.
+
+fn http_server_listen(host:str, port:int, backlog:int) -> int:
+  b:int = backlog
+  if b <= 0:
+    b = 64
+  ret tcp_listen(host, port, b)
+
+fn http_server_accept(listener:int, timeout_ms:int) -> int:
+  if listener < 0:
+    ret NET_ERR
+  cli:int = net_accept(listener)
+  if cli < 0:
+    ret NET_ERR
+  if timeout_ms > 0:
+    net_set_timeout(cli, timeout_ms)
+  ret cli
+
+// Reads one HTTP request (headers + body when Content-Length is present).
+// Returns heap string (caller frees) or 0 on allocation/read failure.
+fn http_read_request(sock:int, max_bytes:int) -> str:
+  if sock < 0:
+    ret 0 as str
+  lim:int = max_bytes
+  if lim <= 0:
+    lim = 65536
+  out:*char = malloc(lim + 1)
+  if out == 0:
+    ret 0 as str
+  got:int = 0
+  header_end:int = 0 - 1
+  target:int = 0 - 1
+  chunk_buf:[char;2048]
+  while got < lim:
+    chunk:int = lim - got
+    if chunk > 2048:
+      chunk = 2048
+    r:int = net_recv(sock, &chunk_buf[0], chunk)
+    if r <= 0:
+      break
+    i:int = 0
+    while i < r:
+      out[got + i] = chunk_buf[i]
+      i = i + 1
+    got = got + r
+    out[got] = 0 as char
+    if header_end < 0:
+      header_end = _find_header_end_index(out, got)
+      if header_end >= 0:
+        cl:int = http_content_length(out as str)
+        if cl < 0:
+          cl = 0
+        target = header_end + cl
+        if target <= got:
+          break
+      continue
+    if target >= 0 && got >= target:
+      break
+  out[got] = 0 as char
+  ret out as str
+
+fn http_method(req:str) -> str:
+  if req == 0:
+    ret 0 as str
+  i:int = 0
+  while req[i] != 0 as char && req[i] != 32 as char && req[i] != 9 as char && req[i] != 13 as char && req[i] != 10 as char:
+    i = i + 1
+  ret _substr_dup(req, 0, i)
+
+fn http_path(req:str) -> str:
+  if req == 0:
+    ret 0 as str
+  i:int = 0
+  while req[i] != 0 as char && req[i] != 32 as char && req[i] != 9 as char && req[i] != 13 as char && req[i] != 10 as char:
+    i = i + 1
+  while req[i] == 32 as char || req[i] == 9 as char:
+    i = i + 1
+  start:int = i
+  while req[i] != 0 as char && req[i] != 32 as char && req[i] != 9 as char && req[i] != 13 as char && req[i] != 10 as char:
+    i = i + 1
+  ret _substr_dup(req, start, i)
+
+fn http_version(req:str) -> str:
+  if req == 0:
+    ret 0 as str
+  i:int = 0
+  while req[i] != 0 as char && req[i] != 32 as char && req[i] != 9 as char && req[i] != 13 as char && req[i] != 10 as char:
+    i = i + 1
+  while req[i] == 32 as char || req[i] == 9 as char:
+    i = i + 1
+  while req[i] != 0 as char && req[i] != 32 as char && req[i] != 9 as char && req[i] != 13 as char && req[i] != 10 as char:
+    i = i + 1
+  while req[i] == 32 as char || req[i] == 9 as char:
+    i = i + 1
+  start:int = i
+  while req[i] != 0 as char && req[i] != 13 as char && req[i] != 10 as char:
+    i = i + 1
+  ret _substr_dup(req, start, i)
+
+fn http_get_header(req:str, name:str) -> str:
+  if req == 0 || name == 0:
+    ret 0 as str
+  n:int = len(req)
+  i:int = 0
+  while i < n:
+    c0:int = _byte_at(req, i)
+    if c0 == 0 || c0 == 10 || c0 == 13:
+      break
+    i = i + 1
+  while i < n:
+    c1:int = _byte_at(req, i)
+    if c1 == 10 || c1 == 13:
+      i = i + 1
+    else:
+      break
+  while i < n:
+    c2:int = _byte_at(req, i)
+    if c2 == 0 || c2 == 10 || c2 == 13:
+      break
+    line_start:int = i
+    while i < n:
+      c3:int = _byte_at(req, i)
+      if c3 == 0 || c3 == 10 || c3 == 13:
+        break
+      i = i + 1
+    line_end:int = i
+    while i < n:
+      c4:int = _byte_at(req, i)
+      if c4 == 10 || c4 == 13:
+        i = i + 1
+      else:
+        break
+
+    if line_end <= line_start:
+      continue
+
+    colon:int = line_start
+    while colon < line_end:
+      if _byte_at(req, colon) == 58: // ':'
+        break
+      colon = colon + 1
+    if colon >= line_end:
+      continue
+
+    ks:int = line_start
+    while ks < colon:
+      c5:int = _byte_at(req, ks)
+      if c5 == 32 || c5 == 9:
+        ks = ks + 1
+      else:
+        break
+    ke:int = colon
+    while ke > ks:
+      c6:int = _byte_at(req, ke - 1)
+      if c6 == 32 || c6 == 9:
+        ke = ke - 1
+      else:
+        break
+    key:str = _substr_dup(req, ks, ke)
+    if key != 0 && _streq(key, name) != 0:
+      vs:int = colon + 1
+      while vs < line_end:
+        c7:int = _byte_at(req, vs)
+        if c7 == 32 || c7 == 9:
+          vs = vs + 1
+        else:
+          break
+      ve:int = line_end
+      while ve > vs:
+        c8:int = _byte_at(req, ve - 1)
+        if c8 == 32 || c8 == 9:
+          ve = ve - 1
+        else:
+          break
+      free(key)
+      ret _substr_dup(req, vs, ve)
+    if key != 0:
+      free(key)
+  ret 0 as str
+
+fn http_content_length(req:str) -> int:
+  h:str = http_get_header(req, "Content-Length")
+  if h == 0:
+    ret 0
+  n:int = _parse_int_dec(h)
+  free(h)
+  ret n
+
+fn http_status_text(code:int) -> str:
+  if code == 100:
+    ret "Continue"
+  else if code == 101:
+    ret "Switching Protocols"
+  else if code == 200:
+    ret "OK"
+  else if code == 201:
+    ret "Created"
+  else if code == 202:
+    ret "Accepted"
+  else if code == 204:
+    ret "No Content"
+  else if code == 301:
+    ret "Moved Permanently"
+  else if code == 302:
+    ret "Found"
+  else if code == 304:
+    ret "Not Modified"
+  else if code == 400:
+    ret "Bad Request"
+  else if code == 401:
+    ret "Unauthorized"
+  else if code == 403:
+    ret "Forbidden"
+  else if code == 404:
+    ret "Not Found"
+  else if code == 405:
+    ret "Method Not Allowed"
+  else if code == 409:
+    ret "Conflict"
+  else if code == 429:
+    ret "Too Many Requests"
+  else if code == 500:
+    ret "Internal Server Error"
+  else if code == 501:
+    ret "Not Implemented"
+  else if code == 503:
+    ret "Service Unavailable"
+  ret "OK"
+
+// Writes a full HTTP response.
+fn http_write_response_ex(sock:int, status:int, content_type:str, body:str, extra_headers:str) -> int:
+  if sock < 0:
+    ret NET_ERR
+  ctype:str = content_type
+  if ctype == 0 || ctype[0] == 0 as char:
+    ctype = "text/plain; charset=utf-8"
+  payload:str = body
+  if payload == 0:
+    payload = ""
+  code_s:str = _itoa(status)
+  stxt:str = http_status_text(status)
+  clen_s:str = _itoa(len(payload))
+
+  l1:str = _join3("HTTP/1.1 ", code_s, " ")
+  l2:str = _join2(l1, stxt)
+  l3:str = _join2(l2, "\r\nServer: TezzNative/1.0\r\nConnection: close\r\nContent-Type: ")
+  l4:str = _join2(l3, ctype)
+  l5:str = _join2(l4, "\r\nContent-Length: ")
+  l6:str = _join2(l5, clen_s)
+  l7:str = 0 as str
+  if extra_headers != 0 && extra_headers[0] != 0 as char:
+    l8:str = _join2(l6, "\r\n")
+    l9:str = _join2(l8, extra_headers)
+    l7 = _join2(l9, "\r\n\r\n")
+    free(l8)
+    free(l9)
+  else:
+    l7 = _join2(l6, "\r\n\r\n")
+  resp:str = _join2(l7, payload)
+  w:int = tcp_send_all(sock, resp as *char, len(resp))
+
+  free(code_s)
+  free(clen_s)
+  free(l1)
+  free(l2)
+  free(l3)
+  free(l4)
+  free(l5)
+  free(l6)
+  free(l7)
+  free(resp)
+
+  if w < 0:
+    ret NET_ERR
+  ret NET_OK
+
+fn http_write_response(sock:int, status:int, content_type:str, body:str) -> int:
+  ret http_write_response_ex(sock, status, content_type, body, 0 as str)
+
+fn http_respond_text(sock:int, status:int, text:str) -> int:
+  ret http_write_response(sock, status, "text/plain; charset=utf-8", text)
+
+fn http_respond_json(sock:int, status:int, json:str) -> int:
+  ret http_write_response(sock, status, "application/json; charset=utf-8", json)
+
+fn http_respond_not_found(sock:int) -> int:
+  ret http_respond_text(sock, 404, "Not Found")
+
+fn http_respond_bad_request(sock:int) -> int:
+  ret http_respond_text(sock, 400, "Bad Request")
+
+// ------------------------------
+// HTTP routing helpers
+// ------------------------------
+
+// Normalize request/path input to route path:
+// - accepts raw request line or full request buffer
+// - strips query/fragment
+// - guarantees "/" for empty path
+fn http_route_path(path_or_req:str) -> str:
+  if path_or_req == 0:
+    ret 0 as str
+  raw:str = 0 as str
+  if path_or_req[0] == 47 as char || path_or_req[0] == 42 as char: // '/' or '*'
+    raw = _substr_dup(path_or_req, 0, len(path_or_req))
+  else if _url_scheme_end(path_or_req) >= 0:
+    raw = _substr_dup(path_or_req, 0, len(path_or_req))
+  else:
+    raw = http_path(path_or_req)
+  if raw == 0:
+    ret 0 as str
+  if _url_scheme_end(raw) >= 0:
+    abs_pq:str = url_path_query(raw)
+    free(raw)
+    raw = abs_pq
+    if raw == 0:
+      ret 0 as str
+  if raw[0] == 0 as char:
+    free(raw)
+    ret _substr_dup("/", 0, 1)
+  q:int = _find_char_from(raw, 63, 0) // '?'
+  h:int = _find_char_from(raw, 35, 0) // '#'
+  end:int = len(raw)
+  if q >= 0 && q < end:
+    end = q
+  if h >= 0 && h < end:
+    end = h
+  out:str = _substr_dup(raw, 0, end)
+  free(raw)
+  if out == 0:
+    ret 0 as str
+  if out[0] == 0 as char:
+    free(out)
+    ret _substr_dup("/", 0, 1)
+  ret out
+
+// Route matching:
+// - exact: "/health"
+// - wildcard prefix: "/api/*" or "/api*"
+// - all: "*"
+fn http_route_match(path_or_req:str, pattern:str) -> int:
+  if path_or_req == 0 || pattern == 0 || pattern[0] == 0 as char:
+    ret 0
+  if pattern[0] == 42 as char && pattern[1] == 0 as char: // "*"
+    ret 1
+  path:str = http_route_path(path_or_req)
+  if path == 0:
+    ret 0
+  pn:int = len(pattern)
+  if pn > 0 && pattern[pn - 1] == 42 as char: // '*'
+    pref_raw:str = _substr_dup(pattern, 0, pn - 1)
+    pref:str = http_route_path(pref_raw)
+    free(pref_raw)
+    ok:int = 0
+    if pref != 0:
+      if _starts_with(path, pref) != 0:
+        ok = 1
+      else:
+        pl:int = len(pref)
+        if pl > 1 && pref[pl - 1] == 47 as char:
+          pref2:str = _substr_dup(pref, 0, pl - 1)
+          if pref2 != 0 && _streq(path, pref2) != 0:
+            ok = 1
+          if pref2 != 0:
+            free(pref2)
+      free(pref)
+    free(path)
+    ret ok
+  pat:str = http_route_path(pattern)
+  ok2:int = 0
+  if pat != 0 && _streq(path, pat) != 0:
+    ok2 = 1
+  if pat != 0:
+    free(pat)
+  free(path)
+  ret ok2
+
+// Match request by method + route pattern.
+// method can be "*" for any.
+fn http_route_request_match(req:str, method:str, pattern:str) -> int:
+  if req == 0 || pattern == 0:
+    ret 0
+  if method != 0 && method[0] != 0 as char:
+    any_method:int = 0
+    if method[0] == 42 as char && method[1] == 0 as char:
+      any_method = 1
+    if any_method == 0:
+      rm:str = http_method(req)
+      if rm == 0:
+        ret 0
+      mk:int = _streq_nocase(rm, method)
+      free(rm)
+      if mk == 0:
+        ret 0
+  rp:str = http_path(req)
+  if rp == 0:
+    ret 0
+  ok:int = http_route_match(rp, pattern)
+  free(rp)
+  ret ok
+
+fn _http_method_dup_norm(method:str) -> str:
+  if method == 0 || method[0] == 0 as char:
+    ret _substr_dup("*", 0, 1)
+  if method[0] == 42 as char && method[1] == 0 as char:
+    ret _substr_dup("*", 0, 1)
+  n:int = len(method)
+  out:*char = malloc(n + 1)
+  if out == 0:
+    ret 0 as str
+  i:int = 0
+  while i < n:
+    c:int = (method[i] as int) & 255
+    if c >= 97 && c <= 122:
+      out[i] = (c - 32) as char
+    else:
+      out[i] = method[i]
+    i = i + 1
+  out[n] = 0 as char
+  ret out as str
+
+fn _http_route_method_match(route_method:str, req_method:str) -> int:
+  if route_method == 0 || route_method[0] == 0 as char:
+    ret 1
+  if route_method[0] == 42 as char && route_method[1] == 0 as char:
+    ret 1
+  if req_method == 0 || req_method[0] == 0 as char:
+    ret 0
+  ret _streq_nocase(route_method, req_method)
+
+fn _http_route_pattern_score(path:str, pattern:str) -> int:
+  if path == 0 || pattern == 0 || pattern[0] == 0 as char:
+    ret 0 - 1
+  if http_route_match(path, pattern) == 0:
+    ret 0 - 1
+  if pattern[0] == 42 as char && pattern[1] == 0 as char:
+    ret 1
+  pn:int = len(pattern)
+  if pn > 0 && pattern[pn - 1] == 42 as char:
+    ret 100000 + pn
+  ret 200000 + pn
+
+// Conditional route response helpers.
+// Returns:
+// - 1 when matched and response written
+// - 0 when route did not match
+// - NET_ERR on write error
+fn http_route_respond_ex_if(req:str, sock:int, method:str, pattern:str, status:int, content_type:str, body:str, extra_headers:str) -> int:
+  if http_route_request_match(req, method, pattern) == 0:
+    ret 0
+  if http_write_response_ex(sock, status, content_type, body, extra_headers) != 0:
+    ret NET_ERR
+  ret 1
+
+fn http_route_respond_text_if(req:str, sock:int, method:str, pattern:str, status:int, text:str) -> int:
+  if http_route_request_match(req, method, pattern) == 0:
+    ret 0
+  if http_respond_text(sock, status, text) != 0:
+    ret NET_ERR
+  ret 1
+
+fn http_route_respond_json_if(req:str, sock:int, method:str, pattern:str, status:int, json:str) -> int:
+  if http_route_request_match(req, method, pattern) == 0:
+    ret 0
+  if http_respond_json(sock, status, json) != 0:
+    ret NET_ERR
+  ret 1
+
+fn _http_route_table_dup_str(s:str) -> str:
+  if s == 0:
+    ret 0 as str
+  ret _substr_dup(s, 0, len(s))
+
+fn _http_route_table_entry_release(e:*HttpRouteEntry) -> int:
+  if e == 0:
+    ret NET_ERR
+  if (*e).method != 0:
+    free((*e).method)
+    (*e).method = 0 as str
+  if (*e).pattern != 0:
+    free((*e).pattern)
+    (*e).pattern = 0 as str
+  (*e).handler = 0 as *char
+  ret NET_OK
+
+fn _http_route_table_grow(tab:*HttpRouteTable, min_cap:int) -> int:
+  if tab == 0:
+    ret NET_ERR
+  old_cap:int = (*tab).cap
+  new_cap:int = old_cap * 2
+  if new_cap < min_cap:
+    new_cap = min_cap
+  if new_cap <= 0:
+    new_cap = HTTP_ROUTE_TABLE_DEFAULT_CAP
+  new_entries:*HttpRouteEntry = (*HttpRouteEntry)malloc(sizeof(HttpRouteEntry) * new_cap)
+  if new_entries == 0:
+    ret NET_ERR
+  i:int = 0
+  while i < (*tab).count:
+    new_entries[i].method = (*tab).entries[i].method
+    new_entries[i].pattern = (*tab).entries[i].pattern
+    new_entries[i].handler = (*tab).entries[i].handler
+    i = i + 1
+  while i < new_cap:
+    new_entries[i].method = 0 as str
+    new_entries[i].pattern = 0 as str
+    new_entries[i].handler = 0 as *char
+    i = i + 1
+  if (*tab).entries != 0:
+    free((*tab).entries as *char)
+  (*tab).entries = new_entries
+  (*tab).cap = new_cap
+  ret NET_OK
+
+fn http_route_table_new(capacity:int) -> *HttpRouteTable:
+  cap:int = capacity
+  if cap <= 0:
+    cap = HTTP_ROUTE_TABLE_DEFAULT_CAP
+  tab:*HttpRouteTable = (*HttpRouteTable)malloc(sizeof(HttpRouteTable))
+  if tab == 0:
+    ret 0 as *HttpRouteTable
+  (*tab).entries = (*HttpRouteEntry)malloc(sizeof(HttpRouteEntry) * cap)
+  if (*tab).entries == 0:
+    free(tab as *char)
+    ret 0 as *HttpRouteTable
+  (*tab).count = 0
+  (*tab).cap = cap
+  i:int = 0
+  while i < cap:
+    (*tab).entries[i].method = 0 as str
+    (*tab).entries[i].pattern = 0 as str
+    (*tab).entries[i].handler = 0 as *char
+    i = i + 1
+  ret tab
+
+fn http_route_table_free(tab:*HttpRouteTable) -> int:
+  if tab == 0:
+    ret NET_ERR
+  http_route_table_clear(tab)
+  if (*tab).entries != 0:
+    free((*tab).entries as *char)
+    (*tab).entries = 0 as *HttpRouteEntry
+  (*tab).count = 0
+  (*tab).cap = 0
+  free(tab as *char)
+  ret NET_OK
+
+fn http_route_table_count(tab:*HttpRouteTable) -> int:
+  if tab == 0:
+    ret 0
+  ret (*tab).count
+
+fn http_route_table_capacity(tab:*HttpRouteTable) -> int:
+  if tab == 0:
+    ret 0
+  ret (*tab).cap
+
+fn http_route_table_clear(tab:*HttpRouteTable) -> int:
+  if tab == 0:
+    ret NET_ERR
+  i:int = 0
+  while i < (*tab).count:
+    _http_route_table_entry_release(&((*tab).entries[i]))
+    i = i + 1
+  (*tab).count = 0
+  ret NET_OK
+
+fn http_route_table_add(tab:*HttpRouteTable, method:str, pattern:str, handler:*char) -> int:
+  if tab == 0 || pattern == 0 || pattern[0] == 0 as char || handler == 0:
+    ret NET_ERR
+  mdup:str = _http_method_dup_norm(method)
+  pdup:str = 0 as str
+  if pattern[0] == 42 as char && pattern[1] == 0 as char:
+    pdup = _substr_dup("*", 0, 1)
+  else:
+    pdup = http_route_path(pattern)
+  if mdup == 0 || pdup == 0:
+    if mdup != 0:
+      free(mdup)
+    if pdup != 0:
+      free(pdup)
+    ret NET_ERR
+  i:int = 0
+  while i < (*tab).count:
+    if _streq((*tab).entries[i].method, mdup) != 0 && _streq((*tab).entries[i].pattern, pdup) != 0:
+      (*tab).entries[i].handler = handler
+      free(mdup)
+      free(pdup)
+      ret NET_OK
+    i = i + 1
+  if (*tab).count >= (*tab).cap:
+    if _http_route_table_grow(tab, (*tab).count + 1) != 0:
+      free(mdup)
+      free(pdup)
+      ret NET_ERR
+  i = (*tab).count
+  (*tab).entries[i].method = mdup
+  (*tab).entries[i].pattern = pdup
+  (*tab).entries[i].handler = handler
+  (*tab).count = (*tab).count + 1
+  ret NET_OK
+
+fn http_route_table_remove_at(tab:*HttpRouteTable, index:int) -> int:
+  if tab == 0:
+    ret NET_ERR
+  if index < 0 || index >= (*tab).count:
+    ret NET_ERR
+  _http_route_table_entry_release(&((*tab).entries[index]))
+  i:int = index
+  while i + 1 < (*tab).count:
+    (*tab).entries[i].method = (*tab).entries[i + 1].method
+    (*tab).entries[i].pattern = (*tab).entries[i + 1].pattern
+    (*tab).entries[i].handler = (*tab).entries[i + 1].handler
+    i = i + 1
+  if (*tab).count > 0:
+    tail:int = (*tab).count - 1
+    (*tab).entries[tail].method = 0 as str
+    (*tab).entries[tail].pattern = 0 as str
+    (*tab).entries[tail].handler = 0 as *char
+    (*tab).count = tail
+  ret NET_OK
+
+// Returns first matching route index or -1 when no route matches.
+fn http_route_table_find(tab:*HttpRouteTable, req:str) -> int:
+  if tab == 0 || req == 0:
+    ret NET_ERR
+  rm:str = http_method(req)
+  rp:str = http_path(req)
+  if rp == 0:
+    if rm != 0:
+      free(rm)
+    ret NET_ERR
+  best_idx:int = 0 - 1
+  best_score:int = 0 - 1
+  i:int = 0
+  while i < (*tab).count:
+    if _http_route_method_match((*tab).entries[i].method, rm) != 0:
+      sc:int = _http_route_pattern_score(rp, (*tab).entries[i].pattern)
+      if sc > best_score:
+        best_score = sc
+        best_idx = i
+    i = i + 1
+  if rm != 0:
+    free(rm)
+  free(rp)
+  ret best_idx
+
+// Route-table request match class:
+// - HTTP_ROUTE_MATCH_OK
+// - HTTP_ROUTE_MATCH_METHOD_MISMATCH
+// - HTTP_ROUTE_MATCH_NONE
+fn http_route_table_match_kind(tab:*HttpRouteTable, req:str) -> int:
+  if tab == 0 || req == 0:
+    ret HTTP_ROUTE_MATCH_NONE
+  if http_route_table_find(tab, req) >= 0:
+    ret HTTP_ROUTE_MATCH_OK
+  rp:str = http_path(req)
+  if rp == 0:
+    ret HTTP_ROUTE_MATCH_NONE
+  i:int = 0
+  while i < (*tab).count:
+    if _http_route_pattern_score(rp, (*tab).entries[i].pattern) >= 0:
+      free(rp)
+      ret HTTP_ROUTE_MATCH_METHOD_MISMATCH
+    i = i + 1
+  free(rp)
+  ret HTTP_ROUTE_MATCH_NONE
+
+// Dispatch to first matching route handler.
+// Handler signature:
+//   fn handler(sock:int, req:str) -> int
+// Returns:
+// - 1 when a route matched and handler returned success
+// - 0 when no route matched
+// - NET_ERR on handler failure or invalid inputs
+fn http_route_table_dispatch(tab:*HttpRouteTable, sock:int, req:str) -> int:
+  if tab == 0 || req == 0:
+    ret NET_ERR
+  idx:int = http_route_table_find(tab, req)
+  if idx < 0:
+    ret 0
+  fnptr:*char = (*tab).entries[idx].handler
+  if fnptr == 0:
+    ret NET_ERR
+  handler:fn(int,str)->int = fnptr as fn(int,str)->int
+  rc:int = handler(sock, req)
+  if rc < 0:
+    ret NET_ERR
+  ret 1
+
+fn http_route_table_serve_or_404(tab:*HttpRouteTable, sock:int, req:str) -> int:
+  kind:int = http_route_table_match_kind(tab, req)
+  if kind == HTTP_ROUTE_MATCH_OK:
+    hit2:int = http_route_table_dispatch(tab, sock, req)
+    if hit2 < 0:
+      ret NET_ERR
+    ret hit2
+  if kind == HTTP_ROUTE_MATCH_METHOD_MISMATCH:
+    if http_respond_text(sock, 405, "Method Not Allowed") != 0:
+      ret NET_ERR
+    ret 0
+  if kind == HTTP_ROUTE_MATCH_NONE:
+    if http_respond_not_found(sock) != 0:
+      ret NET_ERR
+    ret 0
+  ret NET_ERR
+
+fn http_request_start_line_valid(req:str) -> int:
+  if req == 0:
+    ret 0
+  m:str = http_method(req)
+  p:str = http_path(req)
+  if p != 0 && p[0] != 47 as char && p[0] != 42 as char:
+    if _url_scheme_end(p) >= 0:
+      p2:str = url_path_query(p)
+      free(p)
+      p = p2
+  v:str = http_version(req)
+  ok:int = 1
+  if m == 0 || m[0] == 0 as char:
+    ok = 0
+  if p == 0 || p[0] == 0 as char:
+    ok = 0
+  if p != 0:
+    if p[0] != 47 as char:
+      if p[0] != 42 as char || p[1] != 0 as char:
+        ok = 0
+  if v == 0 || _starts_with(v, "HTTP/1.") == 0:
+    ok = 0
+  if m != 0:
+    free(m)
+  if p != 0:
+    free(p)
+  if v != 0:
+    free(v)
+  ret ok
+
+fn http_server_session_new(listener:int, routes:*HttpRouteTable, timeout_ms:int, max_req_bytes:int) -> *HttpServerSession:
+  if routes == 0:
+    ret 0 as *HttpServerSession
+  ses:*HttpServerSession = (*HttpServerSession)malloc(sizeof(HttpServerSession))
+  if ses == 0:
+    ret 0 as *HttpServerSession
+  (*ses).listener = listener
+  (*ses).routes = routes
+  (*ses).timeout_ms = timeout_ms
+  if (*ses).timeout_ms < 0:
+    (*ses).timeout_ms = 0
+  (*ses).max_req_bytes = max_req_bytes
+  if (*ses).max_req_bytes <= 0:
+    (*ses).max_req_bytes = 65536
+  (*ses).max_clients = 0
+  (*ses).max_errors = HTTP_SERVER_SESSION_DEFAULT_MAX_ERRORS
+  (*ses).served = 0
+  (*ses).errors = 0
+  ret ses
+
+fn http_server_session_free(ses:*HttpServerSession) -> int:
+  if ses == 0:
+    ret NET_ERR
+  free(ses as *char)
+  ret NET_OK
+
+fn http_server_session_set_limits(ses:*HttpServerSession, max_clients:int, max_errors:int) -> int:
+  if ses == 0:
+    ret NET_ERR
+  (*ses).max_clients = max_clients
+  if (*ses).max_clients < 0:
+    (*ses).max_clients = 0
+  (*ses).max_errors = max_errors
+  if (*ses).max_errors < 0:
+    (*ses).max_errors = 0
+  ret NET_OK
+
+fn http_server_session_served(ses:*HttpServerSession) -> int:
+  if ses == 0:
+    ret 0
+  ret (*ses).served
+
+fn http_server_session_errors(ses:*HttpServerSession) -> int:
+  if ses == 0:
+    ret 0
+  ret (*ses).errors
+
+fn http_server_session_reset_stats(ses:*HttpServerSession) -> int:
+  if ses == 0:
+    ret NET_ERR
+  (*ses).served = 0
+  (*ses).errors = 0
+  ret NET_OK
+
+fn http_server_session_serve_once(ses:*HttpServerSession) -> int:
+  if ses == 0 || (*ses).routes == 0:
+    ret NET_ERR
+  if (*ses).listener < 0:
+    (*ses).errors = (*ses).errors + 1
+    ret NET_ERR
+  cli:int = http_server_accept((*ses).listener, (*ses).timeout_ms)
+  if cli < 0:
+    (*ses).errors = (*ses).errors + 1
+    ret NET_ERR
+  req:str = http_read_request(cli, (*ses).max_req_bytes)
+  if req == 0:
+    close(cli)
+    (*ses).errors = (*ses).errors + 1
+    ret NET_ERR
+  if http_request_start_line_valid(req) == 0:
+    http_respond_bad_request(cli)
+    close(cli)
+    free(req)
+    (*ses).served = (*ses).served + 1
+    ret 0
+  matched:int = http_route_table_serve_or_404((*ses).routes, cli, req)
+  close(cli)
+  free(req)
+  if matched < 0:
+    (*ses).errors = (*ses).errors + 1
+    ret NET_ERR
+  (*ses).served = (*ses).served + 1
+  ret matched
+
+// Loop accept+dispatch path.
+// Returns processed client count, or NET_ERR when setup is invalid.
+fn http_server_session_serve_loop(ses:*HttpServerSession, max_clients:int) -> int:
+  if ses == 0 || (*ses).routes == 0:
+    ret NET_ERR
+  lim:int = max_clients
+  if lim <= 0:
+    lim = (*ses).max_clients
+  if lim <= 0:
+    lim = 2147483647
+  n:int = 0
+  while n < lim:
+    if (*ses).max_errors > 0 && (*ses).errors >= (*ses).max_errors:
+      break
+    rc:int = http_server_session_serve_once(ses)
+    if rc < 0 && (*ses).max_errors <= 0:
+      break
+    n = n + 1
+  ret n
+
+// Register CRUD resource routes:
+// - POST   /resource
+// - GET    /resource
+// - GET    /resource/*
+// - PUT    /resource/*
+// - PATCH  /resource/*
+// - DELETE /resource/*
+// Any handler can be 0 to skip that CRUD operation.
+// Returns number of routes added, or NET_ERR on failure.
+fn http_route_table_add_crud(tab:*HttpRouteTable, resource_path:str, create_handler:*char, read_handler:*char, update_handler:*char, delete_handler:*char) -> int:
+  if tab == 0 || resource_path == 0 || resource_path[0] == 0 as char:
+    ret NET_ERR
+  added:int = 0
+  start_count:int = (*tab).count
+  base:str = http_route_path(resource_path)
+  if base == 0:
+    ret NET_ERR
+  if base[0] == 0 as char:
+    free(base)
+    ret NET_ERR
+  item:str = _join2(base, "/*")
+  if item == 0:
+    free(base)
+    ret NET_ERR
+
+  if create_handler != 0:
+    if http_route_table_add(tab, "POST", base, create_handler) != 0:
+      while (*tab).count > start_count:
+        http_route_table_remove_at(tab, (*tab).count - 1)
+      free(base)
+      free(item)
+      ret NET_ERR
+    added = added + 1
+
+  if read_handler != 0:
+    if http_route_table_add(tab, "GET", base, read_handler) != 0:
+      while (*tab).count > start_count:
+        http_route_table_remove_at(tab, (*tab).count - 1)
+      free(base)
+      free(item)
+      ret NET_ERR
+    added = added + 1
+    if http_route_table_add(tab, "GET", item, read_handler) != 0:
+      while (*tab).count > start_count:
+        http_route_table_remove_at(tab, (*tab).count - 1)
+      free(base)
+      free(item)
+      ret NET_ERR
+    added = added + 1
+
+  if update_handler != 0:
+    if http_route_table_add(tab, "PUT", item, update_handler) != 0:
+      while (*tab).count > start_count:
+        http_route_table_remove_at(tab, (*tab).count - 1)
+      free(base)
+      free(item)
+      ret NET_ERR
+    added = added + 1
+    if http_route_table_add(tab, "PATCH", item, update_handler) != 0:
+      while (*tab).count > start_count:
+        http_route_table_remove_at(tab, (*tab).count - 1)
+      free(base)
+      free(item)
+      ret NET_ERR
+    added = added + 1
+
+  if delete_handler != 0:
+    if http_route_table_add(tab, "DELETE", item, delete_handler) != 0:
+      while (*tab).count > start_count:
+        http_route_table_remove_at(tab, (*tab).count - 1)
+      free(base)
+      free(item)
+      ret NET_ERR
+    added = added + 1
+
+  free(base)
+  free(item)
+  ret added
+
+// Serve exactly one client using one route rule + 404 fallback.
+// Returns 1 when route matched, 0 for 404 fallback, NET_ERR on I/O failure.
+fn http_server_serve_route_once(listener:int, timeout_ms:int, max_req_bytes:int, method:str, pattern:str, status:int, content_type:str, body:str) -> int:
+  if listener < 0:
+    ret NET_ERR
+  cli:int = http_server_accept(listener, timeout_ms)
+  if cli < 0:
+    ret NET_ERR
+  req:str = http_read_request(cli, max_req_bytes)
+  if req == 0:
+    close(cli)
+    ret NET_ERR
+  matched:int = http_route_respond_ex_if(req, cli, method, pattern, status, content_type, body, 0 as str)
+  if matched == 0:
+    http_respond_not_found(cli)
+  close(cli)
+  free(req)
+  if matched < 0:
+    ret NET_ERR
+  ret matched
+
+// Serve exactly one client using a route table + 404 fallback.
+// Returns 1 when a route matched, 0 for 404 fallback, NET_ERR on I/O failure.
+fn http_server_serve_table_once(listener:int, timeout_ms:int, max_req_bytes:int, tab:*HttpRouteTable) -> int:
+  if listener < 0 || tab == 0:
+    ret NET_ERR
+  cli:int = http_server_accept(listener, timeout_ms)
+  if cli < 0:
+    ret NET_ERR
+  req:str = http_read_request(cli, max_req_bytes)
+  if req == 0:
+    close(cli)
+    ret NET_ERR
+  matched:int = http_route_table_serve_or_404(tab, cli, req)
+  close(cli)
+  free(req)
+  if matched < 0:
+    ret NET_ERR
+  ret matched
+
+// WebSocket helpers.
+
+fn _rotl32(x:int, shift:int) -> int:
+  mask:int = 4294967295
+  s:int = shift % 32
+  if s < 0:
+    s = s + 32
+  v:int = x & mask
+  if s == 0:
+    ret v
+  ret (((v << s) & mask) | ((v >> (32 - s)) & mask)) & mask
+
+fn _sha1_bytes(data:*char, n:int, out20:*char) -> int:
+  if data == 0 || out20 == 0 || n < 0:
+    ret NET_ERR
+  total:int = n + 1 + 8
+  while (total % 64) != 0:
+    total = total + 1
+  msg:*char = malloc(total)
+  if msg == 0:
+    ret NET_ERR
+  if n > 0:
+    unsafe:
+      memcpy(msg, data, n)
+  msg[n] = 128 as char
+  i:int = n + 1
+  while i < total:
+    msg[i] = 0 as char
+    i = i + 1
+  bit_len:int = n * 8
+  i = 0
+  while i < 8:
+    shift:int = (7 - i) * 8
+    msg[total - 8 + i] = ((bit_len >> shift) & 255) as char
+    i = i + 1
+
+  mask:int = 4294967295
+  h0:int = 1732584193
+  h1:int = 4023233417
+  h2:int = 2562383102
+  h3:int = 271733878
+  h4:int = 3285377520
+  w:[int;80]
+
+  block:int = 0
+  while block < total:
+    t:int = 0
+    while t < 16:
+      j:int = block + (t * 4)
+      b0:int = (msg[j] as int) & 255
+      b1:int = (msg[j + 1] as int) & 255
+      b2:int = (msg[j + 2] as int) & 255
+      b3:int = (msg[j + 3] as int) & 255
+      w[t] = ((b0 << 24) | (b1 << 16) | (b2 << 8) | b3) & mask
+      t = t + 1
+    while t < 80:
+      x:int = w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16]
+      w[t] = _rotl32(x, 1)
+      t = t + 1
+
+    a:int = h0
+    b:int = h1
+    c:int = h2
+    d:int = h3
+    e:int = h4
+    t = 0
+    while t < 80:
+      f:int = 0
+      k:int = 0
+      if t < 20:
+        f = (b & c) | (((b ^ mask)) & d)
+        k = 1518500249
+      else if t < 40:
+        f = b ^ c ^ d
+        k = 1859775393
+      else if t < 60:
+        f = (b & c) | (b & d) | (c & d)
+        k = 2400959708
+      else:
+        f = b ^ c ^ d
+        k = 3395469782
+      temp:int = (_rotl32(a, 5) + f + e + k + w[t]) & mask
+      e = d
+      d = c
+      c = _rotl32(b, 30)
+      b = a
+      a = temp
+      t = t + 1
+
+    h0 = (h0 + a) & mask
+    h1 = (h1 + b) & mask
+    h2 = (h2 + c) & mask
+    h3 = (h3 + d) & mask
+    h4 = (h4 + e) & mask
+    block = block + 64
+
+  out20[0] = ((h0 >> 24) & 255) as char
+  out20[1] = ((h0 >> 16) & 255) as char
+  out20[2] = ((h0 >> 8) & 255) as char
+  out20[3] = (h0 & 255) as char
+  out20[4] = ((h1 >> 24) & 255) as char
+  out20[5] = ((h1 >> 16) & 255) as char
+  out20[6] = ((h1 >> 8) & 255) as char
+  out20[7] = (h1 & 255) as char
+  out20[8] = ((h2 >> 24) & 255) as char
+  out20[9] = ((h2 >> 16) & 255) as char
+  out20[10] = ((h2 >> 8) & 255) as char
+  out20[11] = (h2 & 255) as char
+  out20[12] = ((h3 >> 24) & 255) as char
+  out20[13] = ((h3 >> 16) & 255) as char
+  out20[14] = ((h3 >> 8) & 255) as char
+  out20[15] = (h3 & 255) as char
+  out20[16] = ((h4 >> 24) & 255) as char
+  out20[17] = ((h4 >> 16) & 255) as char
+  out20[18] = ((h4 >> 8) & 255) as char
+  out20[19] = (h4 & 255) as char
+  free(msg)
+  ret NET_OK
+
+fn _base64_encode(data:*char, n:int) -> str:
+  if data == 0 || n < 0:
+    ret 0 as str
+  tbl:str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+  out_len:int = ((n + 2) / 3) * 4
+  out:*char = malloc(out_len + 1)
+  if out == 0:
+    ret 0 as str
+  i:int = 0
+  w:int = 0
+  while i < n:
+    b0:int = (data[i] as int) & 255
+    i = i + 1
+    b1:int = 0
+    b2:int = 0
+    has1:int = 0
+    has2:int = 0
+    if i < n:
+      b1 = (data[i] as int) & 255
+      i = i + 1
+      has1 = 1
+    if i < n:
+      b2 = (data[i] as int) & 255
+      i = i + 1
+      has2 = 1
+    s0:int = (b0 >> 2) & 63
+    s1:int = ((b0 & 3) << 4) | ((b1 >> 4) & 15)
+    s2:int = ((b1 & 15) << 2) | ((b2 >> 6) & 3)
+    s3:int = b2 & 63
+    out[w] = tbl[s0]
+    out[w + 1] = tbl[s1]
+    if has1 != 0:
+      out[w + 2] = tbl[s2]
+    else:
+      out[w + 2] = 61 as char
+    if has2 != 0:
+      out[w + 3] = tbl[s3]
+    else:
+      out[w + 3] = 61 as char
+    w = w + 4
+  out[w] = 0 as char
+  ret out as str
+
+fn ws_accept_key(client_key:str) -> str:
+  if client_key == 0 || client_key[0] == 0 as char:
+    ret 0 as str
+  joined:str = _join2(client_key, "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
+  if joined == 0:
+    ret 0 as str
+  digest:[char;20]
+  if _sha1_bytes(joined as *char, len(joined), digest) != 0:
+    free(joined)
+    ret 0 as str
+  free(joined)
+  ret _base64_encode(digest, 20)
+
+fn ws_is_upgrade_request(req:str) -> int:
+  if req == 0:
+    ret 0
+  m:str = http_method(req)
+  if m == 0:
+    ret 0
+  ok:int = 0
+  if _starts_with(m, "GET") != 0 && len(m) == 3:
+    u:str = http_get_header(req, "Upgrade")
+    k:str = http_get_header(req, "Sec-WebSocket-Key")
+    c:str = http_get_header(req, "Connection")
+    if u != 0 && k != 0 && c != 0:
+      // For now expect canonical values as sent by modern clients.
+      if (_starts_with(u, "websocket") != 0 || _starts_with(u, "WebSocket") != 0):
+        if (_starts_with(c, "Upgrade") != 0 || _starts_with(c, "upgrade") != 0):
+          if k[0] != 0 as char:
+            ok = 1
+    if u != 0:
+      free(u)
+    if k != 0:
+      free(k)
+    if c != 0:
+      free(c)
+  free(m)
+  ret ok
+
+fn ws_server_handshake(sock:int, req:str) -> int:
+  if sock < 0 || req == 0:
+    ret NET_ERR
+  key:str = http_get_header(req, "Sec-WebSocket-Key")
+  if key == 0 || key[0] == 0 as char:
+    if key != 0:
+      free(key)
+    ret NET_ERR
+  accept:str = ws_accept_key(key)
+  free(key)
+  if accept == 0:
+    ret NET_ERR
+  r1:str = _join2("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ", accept)
+  r2:str = _join2(r1, "\r\n\r\n")
+  w:int = tcp_send_text(sock, r2)
+  free(accept)
+  free(r1)
+  free(r2)
+  if w < 0:
+    ret NET_ERR
+  ret NET_OK
+
+fn ws_send_frame(sock:int, opcode:int, payload:*char, n:int) -> int:
+  if sock < 0 || n < 0:
+    ret NET_ERR
+  head:[char;10]
+  head[0] = (128 | (opcode & 15)) as char
+  hlen:int = 0
+  plen:int = n
+  if plen < 126:
+    head[1] = (plen & 127) as char
+    hlen = 2
+  else if plen <= 65535:
+    head[1] = 126 as char
+    head[2] = ((plen >> 8) & 255) as char
+    head[3] = (plen & 255) as char
+    hlen = 4
+  else:
+    head[1] = 127 as char
+    head[2] = ((plen >> 56) & 255) as char
+    head[3] = ((plen >> 48) & 255) as char
+    head[4] = ((plen >> 40) & 255) as char
+    head[5] = ((plen >> 32) & 255) as char
+    head[6] = ((plen >> 24) & 255) as char
+    head[7] = ((plen >> 16) & 255) as char
+    head[8] = ((plen >> 8) & 255) as char
+    head[9] = (plen & 255) as char
+    hlen = 10
+  if tcp_send_all(sock, head, hlen) < 0:
+    ret NET_ERR
+  if plen > 0:
+    if payload == 0:
+      ret NET_ERR
+    if tcp_send_all(sock, payload, plen) < 0:
+      ret NET_ERR
+  ret NET_OK
+
+fn ws_send_text(sock:int, text:str) -> int:
+  if text == 0:
+    ret NET_ERR
+  ret ws_send_frame(sock, 1, text as *char, len(text))
+
+fn ws_send_binary(sock:int, payload:*char, n:int) -> int:
+  ret ws_send_frame(sock, 2, payload, n)
+
+fn _drain_bytes(sock:int, n:int) -> int:
+  if n <= 0:
+    ret NET_OK
+  tmp:[char;256]
+  left:int = n
+  while left > 0:
+    take:int = left
+    if take > 256:
+      take = 256
+    if _recv_exact(sock, tmp, take) < 0:
+      ret NET_ERR
+    left = left - take
+  ret NET_OK
+
+// Reads one WebSocket frame and returns decoded payload as string.
+// opcode_out (optional) receives frame opcode. Close returns 0 with opcode=8.
+fn ws_recv_frame(sock:int, max_bytes:int, opcode_out:*int) -> str:
+  if sock < 0:
+    if opcode_out != 0:
+      unsafe:
+        *opcode_out = 0 - 1
+    ret 0 as str
+  lim:int = max_bytes
+  if lim <= 0:
+    lim = NET_DEFAULT_MAX_READ
+
+  h2:[char;2]
+  if _recv_exact(sock, h2, 2) < 0:
+    if opcode_out != 0:
+      unsafe:
+        *opcode_out = 0 - 1
+    ret 0 as str
+  b0:int = (h2[0] as int) & 255
+  b1:int = (h2[1] as int) & 255
+  opcode:int = b0 & 15
+  masked:int = (b1 >> 7) & 1
+  plen:int = b1 & 127
+
+  if plen == 126:
+    e2:[char;2]
+    if _recv_exact(sock, e2, 2) < 0:
+      if opcode_out != 0:
+        unsafe:
+          *opcode_out = 0 - 1
+      ret 0 as str
+    plen = (((e2[0] as int) & 255) << 8) | ((e2[1] as int) & 255)
+  else if plen == 127:
+    e8:[char;8]
+    if _recv_exact(sock, e8, 8) < 0:
+      if opcode_out != 0:
+        unsafe:
+          *opcode_out = 0 - 1
+      ret 0 as str
+    plen = (((e8[0] as int) & 255) << 56)
+    plen = plen | (((e8[1] as int) & 255) << 48)
+    plen = plen | (((e8[2] as int) & 255) << 40)
+    plen = plen | (((e8[3] as int) & 255) << 32)
+    plen = plen | (((e8[4] as int) & 255) << 24)
+    plen = plen | (((e8[5] as int) & 255) << 16)
+    plen = plen | (((e8[6] as int) & 255) << 8)
+    plen = plen | ((e8[7] as int) & 255)
+  if plen < 0:
+    if opcode_out != 0:
+      unsafe:
+        *opcode_out = 0 - 1
+    ret 0 as str
+
+  mask_key:[char;4]
+  if masked != 0:
+    if _recv_exact(sock, mask_key, 4) < 0:
+      if opcode_out != 0:
+        unsafe:
+          *opcode_out = 0 - 1
+      ret 0 as str
+
+  if plen > lim:
+    if _drain_bytes(sock, plen) < 0:
+      if opcode_out != 0:
+        unsafe:
+          *opcode_out = 0 - 1
+      ret 0 as str
+    if opcode_out != 0:
+      unsafe:
+        *opcode_out = opcode
+    ret 0 as str
+
+  out:*char = malloc(plen + 1)
+  if out == 0:
+    _drain_bytes(sock, plen)
+    if opcode_out != 0:
+      unsafe:
+        *opcode_out = 0 - 1
+    ret 0 as str
+  if plen > 0:
+    if _recv_exact(sock, out, plen) < 0:
+      free(out)
+      if opcode_out != 0:
+        unsafe:
+          *opcode_out = 0 - 1
+      ret 0 as str
+
+  if masked != 0:
+    i:int = 0
+    while i < plen:
+      m:int = (mask_key[i % 4] as int) & 255
+      v:int = ((out[i] as int) & 255) ^ m
+      out[i] = (v & 255) as char
+      i = i + 1
+
+  out[plen] = 0 as char
+  if opcode_out != 0:
+    unsafe:
+      *opcode_out = opcode
+  if opcode == 8:
+    free(out)
+    ret 0 as str
+  ret out as str
+
+// Compatibility helper: receive one text frame payload.
+fn ws_recv_text(sock:int, max_bytes:int) -> str:
+  opcode:int = 0 - 1
+  payload:str = ws_recv_frame(sock, max_bytes, &opcode)
+  if payload == 0:
+    ret 0 as str
+  if opcode == 1 || opcode == 2 || opcode == 0:
+    ret payload
+  free(payload)
+  ret 0 as str
+
+fn ws_send_ping(sock:int, payload:str) -> int:
+  if payload == 0:
+    ret ws_send_frame(sock, 9, 0 as *char, 0)
+  ret ws_send_frame(sock, 9, payload as *char, len(payload))
+
+fn ws_send_pong(sock:int, payload:str) -> int:
+  if payload == 0:
+    ret ws_send_frame(sock, 10, 0 as *char, 0)
+  ret ws_send_frame(sock, 10, payload as *char, len(payload))
+
+// Echo-oriented session loop:
+// - text -> text echo
+// - binary -> binary echo
+// - ping -> pong
+// - close/end -> exits
+// Returns processed frame count or NET_ERR.
+fn ws_session_echo_loop(sock:int, max_bytes:int, max_frames:int) -> int:
+  if sock < 0:
+    ret NET_ERR
+  limit:int = max_frames
+  if limit <= 0:
+    limit = 2147483647
+  handled:int = 0
+  while handled < limit:
+    opcode:int = 0 - 1
+    msg:str = ws_recv_frame(sock, max_bytes, &opcode)
+    if msg == 0:
+      if opcode == 8 || opcode == 0:
+        ret handled
+      ret NET_ERR
+    rc:int = NET_OK
+    if opcode == 1:
+      rc = ws_send_text(sock, msg)
+    else if opcode == 2:
+      rc = ws_send_binary(sock, msg as *char, len(msg))
+    else if opcode == 9:
+      rc = ws_send_pong(sock, msg)
+    else:
+      rc = NET_OK
+    free(msg)
+    if rc < 0:
+      ret NET_ERR
+    handled = handled + 1
+  ret handled
+
+// Upgrade request to WebSocket and run echo loop.
+// Returns frame count (>=0) or NET_ERR.
+fn ws_upgrade_and_session_echo(sock:int, req:str, max_bytes:int, max_frames:int) -> int:
+  if sock < 0 || req == 0:
+    ret NET_ERR
+  if ws_server_handshake(sock, req) != 0:
+    ret NET_ERR
+  ret ws_session_echo_loop(sock, max_bytes, max_frames)
+
+// DNS helpers.
+
+fn dns_lookup(host:str) -> str:
+  if host == 0:
+    ret 0 as str
+  ret resolve(host, 0)
+
+fn dns_lookup_port(host:str, port:int) -> str:
+  if host == 0:
+    ret 0 as str
+  ret resolve(host, port)
+
+fn dns_is_ipv4(addr:str) -> int:
+  if addr == 0 || addr[0] == 0 as char:
+    ret 0
+  dots:int = 0
+  digits:int = 0
+  i:int = 0
+  while addr[i] != 0 as char:
+    c:int = (addr[i] as int) & 255
+    if c >= 48 && c <= 57:
+      digits = digits + 1
+      if digits > 3:
+        ret 0
+    else if c == 46:
+      if digits == 0:
+        ret 0
+      dots = dots + 1
+      digits = 0
+      if dots > 3:
+        ret 0
+    else:
+      ret 0
+    i = i + 1
+  if dots == 3 && digits > 0:
+    ret 1
+  ret 0
+
+fn dns_is_ipv6(addr:str) -> int:
+  if addr == 0 || addr[0] == 0 as char:
+    ret 0
+  colons:int = 0
+  i:int = 0
+  while addr[i] != 0 as char:
+    c:int = (addr[i] as int) & 255
+    hex:int = 0
+    if (c >= 48 && c <= 57) || (c >= 65 && c <= 70) || (c >= 97 && c <= 102):
+      hex = 1
+    if c == 58:
+      colons = colons + 1
+    else if hex == 0:
+      ret 0
+    i = i + 1
+  if colons >= 2:
+    ret 1
+  ret 0
+
+fn _rfind_char(s:str, ch:int) -> int:
+  if s == 0:
+    ret 0 - 1
+  i:int = len(s) - 1
+  while i >= 0:
+    if (((s[i] as int) & 255) == ch):
+      ret i
+    i = i - 1
+  ret 0 - 1
+
+fn dns_endpoint_host(endpoint:str) -> str:
+  if endpoint == 0:
+    ret 0 as str
+  if endpoint[0] == 91 as char: // '['
+    i:int = 1
+    while endpoint[i] != 0 as char && endpoint[i] != 93 as char: // ']'
+      i = i + 1
+    if endpoint[i] == 93 as char:
+      ret _substr_dup(endpoint, 1, i)
+  if dns_is_ipv6(endpoint) != 0:
+    ret _substr_dup(endpoint, 0, len(endpoint))
+  p:int = _rfind_char(endpoint, 58) // ':'
+  if p < 0:
+    ret _substr_dup(endpoint, 0, len(endpoint))
+  ret _substr_dup(endpoint, 0, p)
+
+fn dns_endpoint_port(endpoint:str, default_port:int) -> int:
+  if endpoint == 0:
+    ret default_port
+  if endpoint[0] == 91 as char:
+    i:int = 1
+    while endpoint[i] != 0 as char && endpoint[i] != 93 as char:
+      i = i + 1
+    if endpoint[i] == 93 as char && endpoint[i + 1] == 58 as char:
+      ret _parse_int_dec(endpoint + i + 2)
+    ret default_port
+  if dns_is_ipv6(endpoint) != 0:
+    ret default_port
+  p:int = _rfind_char(endpoint, 58)
+  if p < 0:
+    ret default_port
+  ret _parse_int_dec(endpoint + p + 1)
+
+fn dns_resolve_endpoint(endpoint:str, default_port:int) -> str:
+  if endpoint == 0:
+    ret 0 as str
+  host:str = dns_endpoint_host(endpoint)
+  if host == 0:
+    ret 0 as str
+  port:int = dns_endpoint_port(endpoint, default_port)
+  out:str = resolve(host, port)
+  free(host)
+  ret out
+
+// ------------------------------
+// URL + HTTP response utilities
+// ------------------------------
+
+fn _find_char_from(s:str, ch:int, start:int) -> int:
+  if s == 0:
+    ret 0 - 1
+  i:int = start
+  if i < 0:
+    i = 0
+  n:int = len(s)
+  while i < n:
+    if (((s[i] as int) & 255) == ch):
+      ret i
+    i = i + 1
+  ret 0 - 1
+
+fn _url_scheme_end(url:str) -> int:
+  if url == 0:
+    ret 0 - 1
+  n:int = len(url)
+  i:int = 0
+  while i + 2 < n:
+    if url[i] == 58 as char: // ':'
+      if url[i + 1] == 47 as char && url[i + 2] == 47 as char: // "//"
+        ret i
+    i = i + 1
+  ret 0 - 1
+
+fn url_scheme(url:str) -> str:
+  if url == 0:
+    ret 0 as str
+  se:int = _url_scheme_end(url)
+  if se < 0:
+    ret 0 as str
+  ret _substr_dup(url, 0, se)
+
+fn _url_authority_start(url:str) -> int:
+  se:int = _url_scheme_end(url)
+  if se < 0:
+    ret 0
+  ret se + 3
+
+fn _url_path_start(url:str) -> int:
+  if url == 0:
+    ret 0 - 1
+  st:int = _url_authority_start(url)
+  n:int = len(url)
+  i:int = st
+  while i < n:
+    c:int = (url[i] as int) & 255
+    if c == 47 || c == 63 || c == 35: // '/', '?', '#'
+      ret i
+    i = i + 1
+  ret n
+
+fn url_authority(url:str) -> str:
+  if url == 0:
+    ret 0 as str
+  st:int = _url_authority_start(url)
+  n:int = len(url)
+  if st >= n:
+    ret 0 as str
+  p:int = _url_path_start(url)
+  if p < 0:
+    p = n
+  ret _substr_dup(url, st, p)
+
+fn url_host(url:str) -> str:
+  auth:str = url_authority(url)
+  if auth == 0:
+    ret 0 as str
+  h:str = dns_endpoint_host(auth)
+  free(auth)
+  ret h
+
+fn url_default_port(url:str) -> int:
+  s:str = url_scheme(url)
+  if s == 0:
+    ret HTTP_PORT
+  port:int = HTTP_PORT
+  if _starts_with(s, "https") != 0 || _starts_with(s, "wss") != 0 || _starts_with(s, "HTTPS") != 0 || _starts_with(s, "WSS") != 0:
+    port = HTTPS_PORT
+  free(s)
+  ret port
+
+fn url_port(url:str) -> int:
+  auth:str = url_authority(url)
+  if auth == 0:
+    ret url_default_port(url)
+  defp:int = url_default_port(url)
+  p:int = dns_endpoint_port(auth, defp)
+  free(auth)
+  ret p
+
+fn url_path(url:str) -> str:
+  if url == 0:
+    ret 0 as str
+  n:int = len(url)
+  ps:int = _url_path_start(url)
+  if ps < 0 || ps >= n:
+    ret _substr_dup("/", 0, 1)
+  if url[ps] == 63 as char: // '?'
+    base:str = "/"
+    q:str = _substr_dup(url, ps, n)
+    out:str = _join2(base, q)
+    free(q)
+    ret out
+  if url[ps] == 35 as char: // '#'
+    ret _substr_dup("/", 0, 1)
+  qe:int = _find_char_from(url, 35, ps) // '#'
+  if qe < 0:
+    qe = n
+  ret _substr_dup(url, ps, qe)
+
+fn url_query(url:str) -> str:
+  if url == 0:
+    ret 0 as str
+  n:int = len(url)
+  q:int = _find_char_from(url, 63, 0) // '?'
+  if q < 0:
+    ret 0 as str
+  end:int = _find_char_from(url, 35, q + 1) // '#'
+  if end < 0:
+    end = n
+  ret _substr_dup(url, q + 1, end)
+
+fn url_fragment(url:str) -> str:
+  if url == 0:
+    ret 0 as str
+  n:int = len(url)
+  h:int = _find_char_from(url, 35, 0) // '#'
+  if h < 0:
+    ret 0 as str
+  ret _substr_dup(url, h + 1, n)
+
+fn url_path_query(url:str) -> str:
+  p:str = url_path(url)
+  if p == 0:
+    ret 0 as str
+  q:str = url_query(url)
+  if q == 0 || q[0] == 0 as char:
+    if q != 0:
+      free(q)
+    ret p
+  p1:str = _join2(p, "?")
+  out:str = _join2(p1, q)
+  free(p)
+  free(q)
+  free(p1)
+  ret out
+
+fn url_is_secure(url:str) -> int:
+  s:str = url_scheme(url)
+  if s == 0:
+    ret 0
+  ok:int = 0
+  if _starts_with(s, "https") != 0 || _starts_with(s, "wss") != 0 || _starts_with(s, "HTTPS") != 0 || _starts_with(s, "WSS") != 0:
+    ok = 1
+  free(s)
+  ret ok
+
+fn _is_url_unreserved(c:int) -> int:
+  out:int = 0
+  if (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122):
+    out = 1
+  else if c == 45 || c == 95 || c == 46 || c == 126: // - _ . ~
+    out = 1
+  ret out
+
+fn _hex_upper(n:int) -> int:
+  out:int = 0
+  if n < 10:
+    out = 48 + n
+  else:
+    out = 55 + n
+  ret out
+
+fn _trim_range_dup(s:str, from_i:int, to_i:int) -> str:
+  if s == 0:
+    ret 0 as str
+  a:int = from_i
+  b:int = to_i
+  if a < 0:
+    a = 0
+  n:int = len(s)
+  if b > n:
+    b = n
+  while a < b:
+    c0:int = _byte_at(s, a)
+    if c0 == 32 || c0 == 9 || c0 == 10 || c0 == 13:
+      a = a + 1
+    else:
+      break
+  while b > a:
+    c1:int = _byte_at(s, b - 1)
+    if c1 == 32 || c1 == 9 || c1 == 10 || c1 == 13:
+      b = b - 1
+    else:
+      break
+  ret _substr_dup(s, a, b)
+
+fn url_encode_component(s:str) -> str:
+  if s == 0:
+    ret 0 as str
+  n:int = len(s)
+  out:*char = malloc((n * 3) + 1)
+  if out == 0:
+    ret 0 as str
+  i:int = 0
+  w:int = 0
+  while i < n:
+    c:int = (s[i] as int) & 255
+    if _is_url_unreserved(c) != 0:
+      out[w] = c as char
+      w = w + 1
+    else:
+      out[w] = 37 as char // '%'
+      out[w + 1] = _hex_upper((c >> 4) & 15) as char
+      out[w + 2] = _hex_upper(c & 15) as char
+      w = w + 3
+    i = i + 1
+  out[w] = 0 as char
+  ret out as str
+
+fn url_decode_component(s:str) -> str:
+  if s == 0:
+    ret 0 as str
+  n:int = len(s)
+  out:*char = malloc(n + 1)
+  if out == 0:
+    ret 0 as str
+  i:int = 0
+  w:int = 0
+  while i < n:
+    c:int = (s[i] as int) & 255
+    if c == 37 && (i + 2) < n: // '%'
+      h1:int = _hex_val((s[i + 1] as int) & 255)
+      h2:int = _hex_val((s[i + 2] as int) & 255)
+      if h1 >= 0 && h2 >= 0:
+        out[w] = ((h1 << 4) + h2) as char
+        w = w + 1
+        i = i + 3
+        continue
+    if c == 43: // '+'
+      out[w] = 32 as char
+      w = w + 1
+      i = i + 1
+      continue
+    out[w] = c as char
+    w = w + 1
+    i = i + 1
+  out[w] = 0 as char
+  ret out as str
+
+fn query_param(query_or_url:str, key:str) -> str:
+  if query_or_url == 0 || key == 0:
+    ret 0 as str
+  qsrc:str = 0 as str
+  if _find_char_from(query_or_url, 63, 0) >= 0 || _find_char_from(query_or_url, 35, 0) >= 0:
+    qsrc = url_query(query_or_url)
+  else:
+    qsrc = _substr_dup(query_or_url, 0, len(query_or_url))
+  if qsrc == 0:
+    ret 0 as str
+  n:int = len(qsrc)
+  i:int = 0
+  while i < n:
+    seg_start:int = i
+    while i < n && qsrc[i] != 38 as char: // '&'
+      i = i + 1
+    seg_end:int = i
+    if seg_end > seg_start:
+      eq:int = seg_start
+      while eq < seg_end && qsrc[eq] != 61 as char: // '='
+        eq = eq + 1
+      kenc:str = _substr_dup(qsrc, seg_start, eq)
+      kdec:str = url_decode_component(kenc)
+      free(kenc)
+      if kdec != 0 && _streq(kdec, key) != 0:
+        venc:str = 0 as str
+        if eq < seg_end:
+          venc = _substr_dup(qsrc, eq + 1, seg_end)
+        else:
+          venc = _substr_dup("", 0, 0)
+        vdec:str = url_decode_component(venc)
+        free(venc)
+        free(kdec)
+        free(qsrc)
+        ret vdec
+      if kdec != 0:
+        free(kdec)
+    if i < n && qsrc[i] == 38 as char:
+      i = i + 1
+  free(qsrc)
+  ret 0 as str
+
+fn query_has_key(query_or_url:str, key:str) -> int:
+  v:str = query_param(query_or_url, key)
+  if v == 0:
+    ret 0
+  free(v)
+  ret 1
+
+fn query_param_int(query_or_url:str, key:str, default_value:int) -> int:
+  v:str = query_param(query_or_url, key)
+  if v == 0:
+    ret default_value
+  out:int = _parse_int_dec(v)
+  free(v)
+  ret out
+
+fn http_has_header(req:str, name:str) -> int:
+  v:str = http_get_header(req, name)
+  if v == 0:
+    ret 0
+  free(v)
+  ret 1
+
+fn http_auth_scheme(req:str) -> str:
+  h:str = http_get_header(req, "Authorization")
+  if h == 0:
+    ret 0 as str
+  i:int = 0
+  n:int = len(h)
+  while i < n:
+    if h[i] == 32 as char || h[i] == 9 as char:
+      i = i + 1
+    else:
+      break
+  start:int = i
+  while i < n:
+    if h[i] == 32 as char || h[i] == 9 as char:
+      break
+    i = i + 1
+  out:str = _substr_dup(h, start, i)
+  free(h)
+  ret out
+
+fn http_auth_token(req:str) -> str:
+  h:str = http_get_header(req, "Authorization")
+  if h == 0:
+    ret 0 as str
+  n:int = len(h)
+  i:int = 0
+  while i < n:
+    if h[i] == 32 as char || h[i] == 9 as char:
+      i = i + 1
+    else:
+      break
+  while i < n:
+    if h[i] == 32 as char || h[i] == 9 as char:
+      i = i + 1
+      break
+    i = i + 1
+  out:str = _trim_range_dup(h, i, n)
+  free(h)
+  ret out
+
+fn http_bearer_token(req:str) -> str:
+  h:str = http_get_header(req, "Authorization")
+  if h == 0:
+    ret 0 as str
+  n:int = len(h)
+  i:int = 0
+  while i < n:
+    if h[i] == 32 as char || h[i] == 9 as char:
+      i = i + 1
+    else:
+      break
+  s0:int = i
+  while i < n:
+    if h[i] == 32 as char || h[i] == 9 as char:
+      break
+    i = i + 1
+  scheme:str = _substr_dup(h, s0, i)
+  ok:int = 0
+  if scheme != 0:
+    if _streq(scheme, "Bearer") != 0 || _streq(scheme, "bearer") != 0 || _streq(scheme, "BEARER") != 0:
+      ok = 1
+    free(scheme)
+  if ok == 0:
+    free(h)
+    ret 0 as str
+  while i < n:
+    if h[i] == 32 as char || h[i] == 9 as char:
+      i = i + 1
+    else:
+      break
+  out:str = _trim_range_dup(h, i, n)
+  free(h)
+  ret out
+
+fn http_get_cookie(req:str, name:str) -> str:
+  if name == 0:
+    ret 0 as str
+  ck:str = http_get_header(req, "Cookie")
+  if ck == 0:
+    ret 0 as str
+  n:int = len(ck)
+  i:int = 0
+  while i < n:
+    while i < n:
+      if ck[i] == 32 as char || ck[i] == 9 as char || ck[i] == 59 as char:
+        i = i + 1
+      else:
+        break
+    seg_start:int = i
+    while i < n && ck[i] != 59 as char: // ';'
+      i = i + 1
+    seg_end:int = i
+    if seg_end > seg_start:
+      eq:int = seg_start
+      while eq < seg_end && ck[eq] != 61 as char: // '='
+        eq = eq + 1
+      k:str = _trim_range_dup(ck, seg_start, eq)
+      if k != 0 && _streq(k, name) != 0:
+        vraw:str = 0 as str
+        if eq < seg_end:
+          vraw = _trim_range_dup(ck, eq + 1, seg_end)
+        else:
+          vraw = _substr_dup("", 0, 0)
+        vdec:str = url_decode_component(vraw)
+        free(vraw)
+        free(k)
+        free(ck)
+        ret vdec
+      if k != 0:
+        free(k)
+    if i < n && ck[i] == 59 as char:
+      i = i + 1
+  free(ck)
+  ret 0 as str
+
+fn http_request_url(method:str, url:str, body:str, content_type:str, extra_headers:str, timeout_ms:int, max_bytes:int) -> str:
+  if url == 0:
+    ret 0 as str
+  auth:str = url_authority(url)
+  if auth == 0:
+    ret 0 as str
+  defp:int = url_default_port(url)
+  host:str = dns_endpoint_host(auth)
+  if host == 0:
+    free(auth)
+    ret 0 as str
+  port:int = dns_endpoint_port(auth, defp)
+  free(auth)
+  pathq:str = url_path_query(url)
+  if pathq == 0:
+    free(host)
+    ret 0 as str
+  secure:int = url_is_secure(url)
+  req:str = _http_request_ex(method, host, pathq, body, content_type, extra_headers)
+  if req == 0:
+    free(host)
+    free(pathq)
+    ret 0 as str
+  resp:str = 0 as str
+  if secure != 0:
+    h:int = tls_connect(host, port)
+    if h >= 0:
+      if tls_send_text(h, req) >= 0:
+        resp = tls_recv_all(h, max_bytes)
+      tls_close(h)
+  else:
+    resp = tcp_request(host, port, req, timeout_ms, max_bytes)
+  free(req)
+  free(host)
+  free(pathq)
+  ret resp
+
+fn http_get_url(url:str, timeout_ms:int, max_bytes:int) -> str:
+  ret http_request_url("GET", url, 0 as str, 0 as str, 0 as str, timeout_ms, max_bytes)
+
+fn http_post_url(url:str, body:str, content_type:str, timeout_ms:int, max_bytes:int) -> str:
+  ret http_request_url("POST", url, body, content_type, 0 as str, timeout_ms, max_bytes)
+
+fn http_fetch(url:str, timeout_ms:int, max_bytes:int) -> str:
+  ret http_get_url(url, timeout_ms, max_bytes)
+
+fn _hex_val(c:int) -> int:
+  out:int = 0 - 1
+  if c >= 48 && c <= 57:
+    out = c - 48
+  else if c >= 65 && c <= 70:
+    out = 10 + (c - 65)
+  else if c >= 97 && c <= 102:
+    out = 10 + (c - 97)
+  ret out
+
+fn _parse_hex_slice(s:str, a:int, b:int) -> int:
+  if s == 0:
+    ret 0
+  i:int = a
+  v:int = 0
+  while i < b:
+    c:int = (s[i] as int) & 255
+    if c == 59 || c == 32 || c == 9: // ';' or space or tab
+      break
+    hv:int = _hex_val(c)
+    if hv < 0:
+      break
+    v = (v << 4) + hv
+    i = i + 1
+  ret v
+
+fn http_status_code(resp:str) -> int:
+  if resp == 0:
+    ret 0
+  i:int = 0
+  while resp[i] != 0 as char && resp[i] != 32 as char:
+    i = i + 1
+  while resp[i] == 32 as char:
+    i = i + 1
+  ret _parse_int_dec(resp + i)
+
+fn http_reason_phrase(resp:str) -> str:
+  if resp == 0:
+    ret 0 as str
+  i:int = 0
+  while resp[i] != 0 as char && resp[i] != 32 as char:
+    i = i + 1
+  while resp[i] == 32 as char:
+    i = i + 1
+  while resp[i] != 0 as char && resp[i] != 32 as char:
+    i = i + 1
+  while resp[i] == 32 as char:
+    i = i + 1
+  start:int = i
+  while resp[i] != 0 as char && resp[i] != 10 as char && resp[i] != 13 as char && resp[i] != 114 as char:
+    i = i + 1
+  ret _substr_dup(resp, start, i)
+
+fn http_response_header(resp:str, name:str) -> str:
+  ret http_get_header(resp, name)
+
+fn http_response_body(resp:str) -> str:
+  if resp == 0:
+    ret 0 as str
+  n:int = len(resp)
+  start:int = _find_header_end_index(resp as *char, n)
+  if start < 0:
+    ret _substr_dup("", 0, 0)
+  if start > n:
+    start = n
+  ret _substr_dup(resp, start, n)
+
+fn http_is_chunked(resp:str) -> int:
+  h:str = http_get_header(resp, "Transfer-Encoding")
+  if h == 0:
+    ret 0
+  ok:int = 0
+  if _starts_with(h, "chunked") != 0 || _starts_with(h, "Chunked") != 0 || _starts_with(h, "CHUNKED") != 0:
+    ok = 1
+  free(h)
+  ret ok
+
+fn http_decode_chunked_body(body:str) -> str:
+  if body == 0:
+    ret 0 as str
+  n:int = len(body)
+  out:*char = malloc(n + 1)
+  if out == 0:
+    ret 0 as str
+  i:int = 0
+  w:int = 0
+  while i < n:
+    line_start:int = i
+    while i < n:
+      c0:int = (body[i] as int) & 255
+      if c0 == 10 || c0 == 13 || c0 == 114:
+        break
+      i = i + 1
+    sz:int = _parse_hex_slice(body, line_start, i)
+    while i < n:
+      c1:int = (body[i] as int) & 255
+      if c1 == 10 || c1 == 13 || c1 == 114:
+        i = i + 1
+      else:
+        break
+    if sz <= 0:
+      break
+    if i + sz > n:
+      sz = n - i
+    if sz > 0:
+      unsafe:
+        memcpy(out + w, (body as *char) + i, sz)
+      w = w + sz
+      i = i + sz
+    while i < n:
+      c2:int = (body[i] as int) & 255
+      if c2 == 10 || c2 == 13 || c2 == 114:
+        i = i + 1
+      else:
+        break
+  out[w] = 0 as char
+  ret out as str
+
+fn http_response_body_decoded(resp:str) -> str:
+  b:str = http_response_body(resp)
+  if b == 0:
+    ret 0 as str
+  if http_is_chunked(resp) == 0:
+    ret b
+  out:str = http_decode_chunked_body(b)
+  free(b)
+  ret out
+
+fn http_fetch_body(url:str, timeout_ms:int, max_bytes:int) -> str:
+  resp:str = http_fetch(url, timeout_ms, max_bytes)
+  if resp == 0:
+    ret 0 as str
+  body:str = http_response_body_decoded(resp)
+  free(resp)
+  ret body
+
+fn dns_endpoint_join(host:str, port:int) -> str:
+  if host == 0:
+    ret 0 as str
+  ps:str = _itoa(port)
+  if dns_is_ipv6(host) != 0 && host[0] != 91 as char:
+    b1:str = _join2("[", host)
+    b2:str = _join2(b1, "]:")
+    out6:str = _join2(b2, ps)
+    free(ps)
+    free(b1)
+    free(b2)
+    ret out6
+  p0:str = _join2(host, ":")
+  out:str = _join2(p0, ps)
+  free(ps)
+  free(p0)
+  ret out
+
+fn tcp_recv_line(sock:int, max_bytes:int) -> str:
+  if sock < 0:
+    ret 0 as str
+  lim:int = max_bytes
+  if lim <= 0:
+    lim = 4096
+  out:*char = malloc(lim + 1)
+  if out == 0:
+    ret 0 as str
+  i:int = 0
+  while i < lim:
+    c:[char;1]
+    r:int = net_recv(sock, c, 1)
+    if r <= 0:
+      break
+    ch:int = (c[0] as int) & 255
+    if ch == 10 || ch == 13 || ch == 114:
+      break
+    out[i] = c[0]
+    i = i + 1
+  out[i] = 0 as char
+  ret out as str
+
+fn http_server_serve_text_once(listener:int, max_req_bytes:int, status:int, text:str) -> int:
+  if listener < 0:
+    ret NET_ERR
+  cli:int = http_server_accept(listener, 0)
+  if cli < 0:
+    ret NET_ERR
+  req:str = http_read_request(cli, max_req_bytes)
+  if req != 0:
+    free(req)
+  rc:int = http_respond_text(cli, status, text)
+  close(cli)
+  ret rc

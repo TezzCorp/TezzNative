@@ -1,0 +1,682 @@
+// tzgui module: production-oriented, low-boilerplate GUI engine helpers.
+// Built on top of core `gui` + `frame` primitives.
+//
+// Goals:
+// - Easy app code (few calls to get a windowed UI)
+// - Damage-aware redraw requests (apps mark what changed)
+// - Deterministic behavior for freestanding/framebuffer targets
+
+import "gui"
+import "frame"
+import "io"
+import "os"
+
+struct TzGuiTheme:
+  bg:int
+  panel:int
+  panel_title:int
+  text:int
+  button:int
+  button_inset:int
+  accent:int
+
+struct TzGuiEngine:
+  surf:GuiSurface
+  damage:TzDamage
+  theme:TzGuiTheme
+  ready:int
+
+struct TzGuiCaps:
+  platform:str
+  backend:str
+  windowing:int
+  framebuffer:int
+  input:int
+  hidpi_scale_hint:int
+
+fn _ascii_lower(c:int) -> int:
+  if c >= 65 && c <= 90:
+    ret c + 32
+  ret c
+
+fn _contains_ci(hay:str, needle:str) -> int:
+  if hay == 0 || needle == 0:
+    ret 0
+  nh:int = len(hay)
+  nn:int = len(needle)
+  if nn <= 0 || nh < nn:
+    ret 0
+  i:int = 0
+  while i <= (nh - nn):
+    j:int = 0
+    while j < nn:
+      hc:int = 0
+      nc:int = 0
+      unsafe:
+        hc = hay[i + j] as int
+        nc = needle[j] as int
+      if _ascii_lower(hc) != _ascii_lower(nc):
+        break
+      j = j + 1
+    if j == nn:
+      ret 1
+    i = i + 1
+  ret 0
+
+fn _platform_name() -> str:
+  if io.path_sep_ch() == 92:
+    ret "windows"
+  un:str = proc_out("uname -s")
+  if un != 0:
+    if _contains_ci(un, "darwin") != 0:
+      free(un)
+      ret "macos"
+    if _contains_ci(un, "linux") != 0:
+      free(un)
+      ret "linux"
+    free(un)
+  ret "unknown"
+
+fn theme_dark(out:*TzGuiTheme) -> int:
+  if out == 0:
+    ret 0 - 1
+  out[0].bg = 1052946
+  out[0].panel = 2105376
+  out[0].panel_title = 3355443
+  out[0].text = 16777215
+  out[0].button = 2241348
+  out[0].button_inset = 4482696
+  out[0].accent = 32768
+  ret 0
+
+fn theme_light(out:*TzGuiTheme) -> int:
+  if out == 0:
+    ret 0 - 1
+  out[0].bg = 15658734
+  out[0].panel = 15066597
+  out[0].panel_title = 13816530
+  out[0].text = 65793
+  out[0].button = 12566463
+  out[0].button_inset = 14474460
+  out[0].accent = 16744448
+  ret 0
+
+fn engine_init(out:*TzGuiEngine) -> int:
+  if out == 0:
+    ret 0 - 1
+  theme_dark(&out[0].theme)
+  // Trigger lazy Win32 window creation (host_gui_backend lazy-inits on first present)
+  os.fb_present()
+  gui.gui_surface(&out[0].surf)
+  if out[0].surf.addr == 0:
+    out[0].ready = 0
+    ret 0 - 2
+  frame.tz_damage_reset(&out[0].damage)
+  frame.tz_damage_add_clipped(&out[0].damage, 0, 0, out[0].surf.width, out[0].surf.height, out[0].surf.width, out[0].surf.height)
+  out[0].ready = 1
+  ret 0
+
+fn engine_set_theme(e:*TzGuiEngine, theme:*TzGuiTheme) -> int:
+  if e == 0 || theme == 0:
+    ret 0 - 1
+  e[0].theme.bg = theme[0].bg
+  e[0].theme.panel = theme[0].panel
+  e[0].theme.panel_title = theme[0].panel_title
+  e[0].theme.text = theme[0].text
+  e[0].theme.button = theme[0].button
+  e[0].theme.button_inset = theme[0].button_inset
+  e[0].theme.accent = theme[0].accent
+  if e[0].ready != 0:
+    frame.tz_damage_add_clipped(&e[0].damage, 0, 0, e[0].surf.width, e[0].surf.height, e[0].surf.width, e[0].surf.height)
+  ret 0
+
+fn engine_ready(e:*TzGuiEngine) -> int:
+  if e == 0:
+    ret 0
+  ret e[0].ready
+
+fn backend_name(e:*TzGuiEngine) -> str:
+  if e != 0 && e[0].ready != 0 && e[0].surf.addr != 0:
+    ret "framebuffer"
+  if os.fb_host_windowing() != 0:
+    ret "host-window"
+  ret "none"
+
+fn detect_caps(out:*TzGuiCaps) -> int:
+  if out == 0:
+    ret 0 - 1
+  out[0].platform = _platform_name()
+  out[0].backend = "none"
+  out[0].windowing = 0
+  out[0].framebuffer = 0
+  out[0].input = 0
+  out[0].hidpi_scale_hint = 1
+
+  if os.fb_host_windowing() != 0:
+    out[0].windowing = 1
+    out[0].backend = "host-window"
+
+  surf:GuiSurface
+  gui.gui_surface(&surf)
+  if surf.addr != 0 && surf.width > 0 && surf.height > 0:
+    out[0].backend = "framebuffer"
+    out[0].framebuffer = 1
+    out[0].input = 1
+    if surf.width >= 2560 || surf.height >= 1440:
+      out[0].hidpi_scale_hint = 2
+    else:
+      out[0].hidpi_scale_hint = 1
+
+  ret 0
+
+fn engine_begin_frame(e:*TzGuiEngine) -> int:
+  if e == 0 || e[0].ready == 0:
+    ret 0 - 1
+  gui.gui_pump_input()
+  ret 0
+
+fn engine_mark_dirty(e:*TzGuiEngine, x:int, y:int, w:int, h:int) -> int:
+  if e == 0 || e[0].ready == 0:
+    ret 0 - 1
+  ret frame.tz_damage_add_clipped(&e[0].damage, x, y, w, h, e[0].surf.width, e[0].surf.height)
+
+fn engine_repaint_all(e:*TzGuiEngine) -> int:
+  if e == 0 || e[0].ready == 0:
+    ret 0 - 1
+  ret frame.tz_damage_add_clipped(&e[0].damage, 0, 0, e[0].surf.width, e[0].surf.height, e[0].surf.width, e[0].surf.height)
+
+fn engine_dirty_count(e:*TzGuiEngine) -> int:
+  if e == 0 || e[0].ready == 0:
+    ret 0
+  ret frame.tz_damage_count(&e[0].damage)
+
+fn engine_clear_dirty(e:*TzGuiEngine) -> int:
+  if e == 0 || e[0].ready == 0:
+    ret 0 - 1
+  n:int = frame.tz_damage_count(&e[0].damage)
+  i:int = 0
+  while i < n:
+    r:TzRect
+    if frame.tz_damage_take(&e[0].damage, i, &r) != 0:
+      gui.gui_rect(&e[0].surf, r.x, r.y, r.w, r.h, e[0].theme.bg)
+    i = i + 1
+  frame.tz_damage_reset(&e[0].damage)
+  gui.gui_end(&e[0].surf)
+  ret 0
+
+fn window(e:*TzGuiEngine, x:int, y:int, w:int, h:int, title:str) -> int:
+  if e == 0 || e[0].ready == 0:
+    ret 0 - 1
+  gui.gui_rect(&e[0].surf, x, y, w, h, e[0].theme.panel)
+  gui.gui_rect(&e[0].surf, x, y, w, 18, e[0].theme.panel_title)
+  gui.gui_text(&e[0].surf, x + 4, y + 4, title, e[0].theme.text)
+  engine_mark_dirty(e, x, y, w, h)
+  gui.gui_end(&e[0].surf)
+  ret 0
+
+fn label(e:*TzGuiEngine, x:int, y:int, text:str) -> int:
+  if e == 0 || e[0].ready == 0:
+    ret 0 - 1
+  gui.gui_text(&e[0].surf, x, y, text, e[0].theme.text)
+  engine_mark_dirty(e, x, y, (len(text) + 2) * 8, 16)
+  gui.gui_end(&e[0].surf)
+  ret 0
+
+fn button(e:*TzGuiEngine, x:int, y:int, w:int, h:int, text:str) -> int:
+  if e == 0 || e[0].ready == 0:
+    ret 0 - 1
+  gui.gui_rect(&e[0].surf, x, y, w, h, e[0].theme.button)
+  gui.gui_rect(&e[0].surf, x + 2, y + 2, w - 4, h - 4, e[0].theme.button_inset)
+  gui.gui_text(&e[0].surf, x + 6, y + 6, text, e[0].theme.text)
+  engine_mark_dirty(e, x, y, w, h)
+  gui.gui_end(&e[0].surf)
+  ret 0
+
+fn accent_line(e:*TzGuiEngine, x:int, y:int, w:int, h:int) -> int:
+  if e == 0 || e[0].ready == 0:
+    ret 0 - 1
+  gui.gui_rect(&e[0].surf, x, y, w, h, e[0].theme.accent)
+  engine_mark_dirty(e, x, y, w, h)
+  gui.gui_end(&e[0].surf)
+  ret 0
+
+fn pointer_x() -> int:
+  ret gui.gui_mouse_x()
+
+fn pointer_y() -> int:
+  ret gui.gui_mouse_y()
+
+fn pointer_buttons() -> int:
+  ret gui.gui_mouse_buttons()
+
+// ------------------------------
+// Retained widget tree (production lane)
+// ------------------------------
+
+let TZ_WIDGET_MAX:int = 256
+let TZ_WIDGET_TEXT_MAX:int = 96
+
+let TZ_WIDGET_PANEL:int = 1
+let TZ_WIDGET_LABEL:int = 2
+let TZ_WIDGET_BUTTON:int = 3
+
+let TZ_FULL_REDRAW_NONE:int = 0
+let TZ_FULL_REDRAW_MODE_RESET:int = 1
+let TZ_FULL_REDRAW_THEME_RESET:int = 2
+let TZ_FULL_REDRAW_LAYOUT_RESET:int = 3
+let TZ_FULL_REDRAW_TREE_RESET:int = 4
+
+struct TzWidget:
+  id:int
+  parent:int
+  kind:int
+  x:int
+  y:int
+  w:int
+  h:int
+  z:int
+  order:int
+  visible:int
+  alive:int
+  dirty:int
+  bg:int
+  fg:int
+  text:[char;96]
+
+struct TzWidgetSpec:
+  parent:int
+  kind:int
+  x:int
+  y:int
+  w:int
+  h:int
+  z:int
+  visible:int
+  bg:int
+  fg:int
+  text:str
+
+struct TzWidgetTree:
+  width:int
+  height:int
+  clear_color:int
+  next_id:int
+  next_order:int
+  widget_count:int
+  full_redraw_reason:int
+  widgets:[TzWidget;256]
+  damage:TzDamage
+
+fn _tree_clear_text(out:*char) -> int:
+  if out == 0:
+    ret 0 - 1
+  i:int = 0
+  while i < TZ_WIDGET_TEXT_MAX:
+    out[i] = 0 as char
+    i = i + 1
+  ret 0
+
+fn _tree_copy_text(out:*char, src:str) -> int:
+  if out == 0:
+    ret 0 - 1
+  _tree_clear_text(out)
+  if src == 0:
+    ret 0
+  n:int = len(src)
+  if n > (TZ_WIDGET_TEXT_MAX - 1):
+    n = TZ_WIDGET_TEXT_MAX - 1
+  if n > 0:
+    unsafe:
+      memcpy(out, src as *char, n)
+  out[n] = 0 as char
+  ret 0
+
+fn _tree_widget_slot_by_id(tree:*TzWidgetTree, widget_id:int) -> int:
+  if tree == 0 || widget_id <= 0:
+    ret 0 - 1
+  i:int = 0
+  while i < TZ_WIDGET_MAX:
+    if tree[0].widgets[i].alive != 0 && tree[0].widgets[i].id == widget_id:
+      ret i
+    i = i + 1
+  ret 0 - 1
+
+fn _tree_add_rect(tree:*TzWidgetTree, x:int, y:int, w:int, h:int) -> int:
+  if tree == 0:
+    ret 0 - 1
+  ret frame.tz_damage_add_clipped(&tree[0].damage, x, y, w, h, tree[0].width, tree[0].height)
+
+fn _tree_widget_mark_rect(tree:*TzWidgetTree, slot:int) -> int:
+  if tree == 0:
+    ret 0 - 1
+  if slot < 0 || slot >= TZ_WIDGET_MAX:
+    ret 0 - 1
+  if tree[0].widgets[slot].alive == 0:
+    ret 0
+  ret _tree_add_rect(tree, tree[0].widgets[slot].x, tree[0].widgets[slot].y, tree[0].widgets[slot].w, tree[0].widgets[slot].h)
+
+fn tree_init(out:*TzWidgetTree, width:int, height:int) -> int:
+  if out == 0:
+    ret 0 - 1
+  if width <= 0:
+    width = 1024
+  if height <= 0:
+    height = 768
+  out[0].width = width
+  out[0].height = height
+  out[0].clear_color = 1052946
+  out[0].next_id = 1
+  out[0].next_order = 1
+  out[0].widget_count = 0
+  out[0].full_redraw_reason = TZ_FULL_REDRAW_TREE_RESET
+  frame.tz_damage_reset(&out[0].damage)
+  i:int = 0
+  while i < TZ_WIDGET_MAX:
+    out[0].widgets[i].id = 0
+    out[0].widgets[i].parent = 0
+    out[0].widgets[i].kind = TZ_WIDGET_PANEL
+    out[0].widgets[i].x = 0
+    out[0].widgets[i].y = 0
+    out[0].widgets[i].w = 0
+    out[0].widgets[i].h = 0
+    out[0].widgets[i].z = 0
+    out[0].widgets[i].order = 0
+    out[0].widgets[i].visible = 0
+    out[0].widgets[i].alive = 0
+    out[0].widgets[i].dirty = 0
+    out[0].widgets[i].bg = 2105376
+    out[0].widgets[i].fg = 16777215
+    _tree_clear_text(&out[0].widgets[i].text[0])
+    i = i + 1
+  frame.tz_damage_add_clipped(&out[0].damage, 0, 0, width, height, width, height)
+  ret 0
+
+fn tree_set_clear_color(tree:*TzWidgetTree, color:int) -> int:
+  if tree == 0:
+    ret 0 - 1
+  tree[0].clear_color = color
+  ret 0
+
+fn tree_request_full_redraw(tree:*TzWidgetTree, reason:int) -> int:
+  if tree == 0:
+    ret 0 - 1
+  if reason <= TZ_FULL_REDRAW_NONE:
+    reason = TZ_FULL_REDRAW_TREE_RESET
+  tree[0].full_redraw_reason = reason
+  ret frame.tz_damage_add_clipped(&tree[0].damage, 0, 0, tree[0].width, tree[0].height, tree[0].width, tree[0].height)
+
+fn tree_full_redraw_reason(tree:*TzWidgetTree) -> int:
+  if tree == 0:
+    ret TZ_FULL_REDRAW_TREE_RESET
+  ret tree[0].full_redraw_reason
+
+fn tree_widget_count(tree:*TzWidgetTree) -> int:
+  if tree == 0:
+    ret 0
+  ret tree[0].widget_count
+
+fn widget_add(tree:*TzWidgetTree, spec:*TzWidgetSpec) -> int:
+  if tree == 0 || spec == 0:
+    ret 0 - 1
+  slot:int = 0 - 1
+  i:int = 0
+  while i < TZ_WIDGET_MAX:
+    if tree[0].widgets[i].alive == 0:
+      slot = i
+      break
+    i = i + 1
+  if slot < 0:
+    ret 0 - 2
+  ww:int = spec[0].w
+  hh:int = spec[0].h
+  if ww <= 0:
+    ww = 1
+  if hh <= 0:
+    hh = 1
+  kind:int = spec[0].kind
+  if kind < TZ_WIDGET_PANEL || kind > TZ_WIDGET_BUTTON:
+    kind = TZ_WIDGET_PANEL
+  vis:int = 1
+  if spec[0].visible == 0:
+    vis = 0
+  wid:int = tree[0].next_id
+  tree[0].next_id = tree[0].next_id + 1
+  tree[0].widgets[slot].id = wid
+  tree[0].widgets[slot].parent = spec[0].parent
+  tree[0].widgets[slot].kind = kind
+  tree[0].widgets[slot].x = spec[0].x
+  tree[0].widgets[slot].y = spec[0].y
+  tree[0].widgets[slot].w = ww
+  tree[0].widgets[slot].h = hh
+  tree[0].widgets[slot].z = spec[0].z
+  tree[0].widgets[slot].order = tree[0].next_order
+  tree[0].next_order = tree[0].next_order + 1
+  tree[0].widgets[slot].visible = vis
+  tree[0].widgets[slot].alive = 1
+  tree[0].widgets[slot].dirty = 1
+  tree[0].widgets[slot].bg = spec[0].bg
+  tree[0].widgets[slot].fg = spec[0].fg
+  if tree[0].widgets[slot].fg == 0:
+    tree[0].widgets[slot].fg = 16777215
+  _tree_copy_text(&tree[0].widgets[slot].text[0], spec[0].text)
+  tree[0].widget_count = tree[0].widget_count + 1
+  if vis != 0:
+    _tree_widget_mark_rect(tree, slot)
+  ret wid
+
+fn widget_update_bounds(tree:*TzWidgetTree, widget_id:int, x:int, y:int, w:int, h:int) -> int:
+  slot:int = _tree_widget_slot_by_id(tree, widget_id)
+  if slot < 0:
+    ret 0 - 1
+  if w <= 0:
+    w = 1
+  if h <= 0:
+    h = 1
+  if tree[0].widgets[slot].visible != 0:
+    _tree_add_rect(tree, tree[0].widgets[slot].x, tree[0].widgets[slot].y, tree[0].widgets[slot].w, tree[0].widgets[slot].h)
+  tree[0].widgets[slot].x = x
+  tree[0].widgets[slot].y = y
+  tree[0].widgets[slot].w = w
+  tree[0].widgets[slot].h = h
+  tree[0].widgets[slot].dirty = 1
+  if tree[0].widgets[slot].visible != 0:
+    _tree_widget_mark_rect(tree, slot)
+  ret 0
+
+fn widget_set_text(tree:*TzWidgetTree, widget_id:int, text:str) -> int:
+  slot:int = _tree_widget_slot_by_id(tree, widget_id)
+  if slot < 0:
+    ret 0 - 1
+  if tree[0].widgets[slot].visible != 0:
+    _tree_add_rect(tree, tree[0].widgets[slot].x, tree[0].widgets[slot].y, tree[0].widgets[slot].w, tree[0].widgets[slot].h)
+  _tree_copy_text(&tree[0].widgets[slot].text[0], text)
+  tree[0].widgets[slot].dirty = 1
+  if tree[0].widgets[slot].visible != 0:
+    _tree_widget_mark_rect(tree, slot)
+  ret 0
+
+fn widget_set_colors(tree:*TzWidgetTree, widget_id:int, bg:int, fg:int) -> int:
+  slot:int = _tree_widget_slot_by_id(tree, widget_id)
+  if slot < 0:
+    ret 0 - 1
+  if tree[0].widgets[slot].visible != 0:
+    _tree_add_rect(tree, tree[0].widgets[slot].x, tree[0].widgets[slot].y, tree[0].widgets[slot].w, tree[0].widgets[slot].h)
+  tree[0].widgets[slot].bg = bg
+  tree[0].widgets[slot].fg = fg
+  if tree[0].widgets[slot].fg == 0:
+    tree[0].widgets[slot].fg = 16777215
+  tree[0].widgets[slot].dirty = 1
+  if tree[0].widgets[slot].visible != 0:
+    _tree_widget_mark_rect(tree, slot)
+  ret 0
+
+fn widget_set_z(tree:*TzWidgetTree, widget_id:int, z:int) -> int:
+  slot:int = _tree_widget_slot_by_id(tree, widget_id)
+  if slot < 0:
+    ret 0 - 1
+  tree[0].widgets[slot].z = z
+  tree[0].widgets[slot].dirty = 1
+  if tree[0].widgets[slot].visible != 0:
+    _tree_widget_mark_rect(tree, slot)
+  ret 0
+
+fn widget_set_visible(tree:*TzWidgetTree, widget_id:int, visible:int) -> int:
+  slot:int = _tree_widget_slot_by_id(tree, widget_id)
+  if slot < 0:
+    ret 0 - 1
+  vis:int = 0
+  if visible != 0:
+    vis = 1
+  if tree[0].widgets[slot].visible == vis:
+    ret 0
+  _tree_widget_mark_rect(tree, slot)
+  tree[0].widgets[slot].visible = vis
+  tree[0].widgets[slot].dirty = 1
+  if vis != 0:
+    _tree_widget_mark_rect(tree, slot)
+  ret 0
+
+fn widget_remove(tree:*TzWidgetTree, widget_id:int) -> int:
+  slot:int = _tree_widget_slot_by_id(tree, widget_id)
+  if slot < 0:
+    ret 0 - 1
+  _tree_widget_mark_rect(tree, slot)
+  tree[0].widgets[slot].alive = 0
+  tree[0].widgets[slot].visible = 0
+  tree[0].widgets[slot].dirty = 0
+  tree[0].widgets[slot].id = 0
+  tree[0].widgets[slot].order = 0
+  if tree[0].widget_count > 0:
+    tree[0].widget_count = tree[0].widget_count - 1
+  ret 0
+
+fn widget_mark_dirty(tree:*TzWidgetTree, widget_id:int) -> int:
+  slot:int = _tree_widget_slot_by_id(tree, widget_id)
+  if slot < 0:
+    ret 0 - 1
+  tree[0].widgets[slot].dirty = 1
+  ret _tree_widget_mark_rect(tree, slot)
+
+fn tree_collect_damage(tree:*TzWidgetTree, out:*TzDamage) -> int:
+  if tree == 0 || out == 0:
+    ret 0 - 1
+  frame.tz_damage_reset(out)
+  n:int = frame.tz_damage_count(&tree[0].damage)
+  i:int = 0
+  while i < n:
+    r:TzRect
+    if frame.tz_damage_take(&tree[0].damage, i, &r) != 0:
+      frame.tz_damage_add_rect(out, &r)
+    i = i + 1
+  ret frame.tz_damage_count(out)
+
+fn tree_dirty_pixels(tree:*TzWidgetTree) -> int:
+  if tree == 0:
+    ret 0
+  n:int = frame.tz_damage_count(&tree[0].damage)
+  sum:int = 0
+  i:int = 0
+  while i < n:
+    r:TzRect
+    if frame.tz_damage_take(&tree[0].damage, i, &r) != 0:
+      sum = sum + (r.w * r.h)
+    i = i + 1
+  ret sum
+
+fn _tree_sort_widgets(tree:*TzWidgetTree, idxs:*int, n:int) -> int:
+  if tree == 0 || idxs == 0 || n <= 1:
+    ret 0
+  i:int = 1
+  while i < n:
+    key:int = idxs[i]
+    j:int = i - 1
+    while j >= 0:
+      a:int = idxs[j]
+      az:int = tree[0].widgets[a].z
+      kz:int = tree[0].widgets[key].z
+      ao:int = tree[0].widgets[a].order
+      ko:int = tree[0].widgets[key].order
+      if az < kz:
+        break
+      if az == kz && ao < ko:
+        break
+      idxs[j + 1] = idxs[j]
+      j = j - 1
+    idxs[j + 1] = key
+    i = i + 1
+  ret 0
+
+fn _tree_draw_widget(tree:*TzWidgetTree, surface:*GuiSurface, slot:int) -> int:
+  if tree == 0 || surface == 0:
+    ret 0 - 1
+  if slot < 0 || slot >= TZ_WIDGET_MAX:
+    ret 0 - 1
+  if tree[0].widgets[slot].alive == 0 || tree[0].widgets[slot].visible == 0:
+    ret 0
+  x:int = tree[0].widgets[slot].x
+  y:int = tree[0].widgets[slot].y
+  w:int = tree[0].widgets[slot].w
+  h:int = tree[0].widgets[slot].h
+  if w <= 0 || h <= 0:
+    ret 0
+  bg:int = tree[0].widgets[slot].bg
+  fg:int = tree[0].widgets[slot].fg
+  if fg == 0:
+    fg = 16777215
+  kind:int = tree[0].widgets[slot].kind
+  if kind == TZ_WIDGET_LABEL:
+    gui.gui_text(surface, x, y, &tree[0].widgets[slot].text[0], fg)
+    ret 0
+  if kind == TZ_WIDGET_BUTTON:
+    inset:int = bg + 2236962
+    gui.gui_rect(surface, x, y, w, h, bg)
+    if w > 4 && h > 4:
+      gui.gui_rect(surface, x + 2, y + 2, w - 4, h - 4, inset)
+    gui.gui_text(surface, x + 6, y + 6, &tree[0].widgets[slot].text[0], fg)
+    ret 0
+  gui.gui_rect(surface, x, y, w, h, bg)
+  if tree[0].widgets[slot].text[0] != 0 as char:
+    gui.gui_text(surface, x + 4, y + 4, &tree[0].widgets[slot].text[0], fg)
+  ret 0
+
+fn tree_render_dirty(tree:*TzWidgetTree, surface:*GuiSurface) -> int:
+  if tree == 0 || surface == 0:
+    ret 0 - 1
+  n:int = frame.tz_damage_count(&tree[0].damage)
+  if n <= 0:
+    ret 0
+  idxs:[int;256]
+  d_i:int = 0
+  while d_i < n:
+    dr:TzRect
+    if frame.tz_damage_take(&tree[0].damage, d_i, &dr) != 0:
+      gui.gui_rect(surface, dr.x, dr.y, dr.w, dr.h, tree[0].clear_color)
+      w_i:int = 0
+      c:int = 0
+      while w_i < TZ_WIDGET_MAX:
+        if tree[0].widgets[w_i].alive != 0 && tree[0].widgets[w_i].visible != 0:
+          wr:TzRect
+          ir:TzRect
+          wr.x = tree[0].widgets[w_i].x
+          wr.y = tree[0].widgets[w_i].y
+          wr.w = tree[0].widgets[w_i].w
+          wr.h = tree[0].widgets[w_i].h
+          if frame.tz_rect_intersect(&ir, &wr, &dr) != 0:
+            idxs[c] = w_i
+            c = c + 1
+        w_i = w_i + 1
+      _tree_sort_widgets(tree, &idxs[0], c)
+      j:int = 0
+      while j < c:
+        _tree_draw_widget(tree, surface, idxs[j])
+        tree[0].widgets[idxs[j]].dirty = 0
+        j = j + 1
+    d_i = d_i + 1
+  frame.tz_damage_reset(&tree[0].damage)
+  tree[0].full_redraw_reason = TZ_FULL_REDRAW_NONE
+  ret n
+
+fn tree_present_dirty(tree:*TzWidgetTree, surface:*GuiSurface) -> int:
+  n:int = tree_render_dirty(tree, surface)
+  gui.gui_end(surface)
+  ret n

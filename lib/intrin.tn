@@ -1,0 +1,287 @@
+// intrin module: low-level intrinsics and explicit SIMD kernels
+// Bit operations route directly to hardware builtins (POPCNT, BSF, BSR, BSWAP)
+// for maximum performance. Pure-TN fallbacks are used only as documentation.
+import "simd"
+
+// ---------------------------------------------------------------------------
+// Bit intrinsics — map to hardware instructions via IR builtins
+// ---------------------------------------------------------------------------
+
+// Population count: number of set bits in x
+fn popcnt(x:int) -> int:
+  ret bit_popcnt(x)
+
+// Count leading zeros (from MSB)
+fn clz(x:int) -> int:
+  ret bit_clz(x)
+
+// Count trailing zeros (from LSB)
+fn ctz(x:int) -> int:
+  ret bit_ctz(x)
+
+// Byte swap (endian flip) for 64-bit value
+fn bswap(x:int) -> int:
+  ret bit_bswap(x)
+
+// Rotate left by shift bits
+fn rotl(x:int, shift:int) -> int:
+  ret bit_rotl(x, shift)
+
+// Rotate right by shift bits
+fn rotr(x:int, shift:int) -> int:
+  ret bit_rotr(x, shift)
+
+// ---------------------------------------------------------------------------
+// CPU feature detection
+// ---------------------------------------------------------------------------
+
+fn has_sse2() -> int:
+  ret cpu_has_sse2()
+
+fn has_avx2() -> int:
+  ret cpu_has_avx2()
+
+fn has_fma() -> int:
+  ret cpu_has_fma()
+
+fn has_neon() -> int:
+  ret cpu_has_neon()
+
+fn has_simd() -> int:
+  if has_avx2() != 0 || has_sse2() != 0 || has_neon() != 0:
+    ret 1
+  ret 0
+
+// ---------------------------------------------------------------------------
+// Bit manipulation helpers
+// ---------------------------------------------------------------------------
+
+// Check if x is a power of two (> 0)
+fn is_pow2(x:int) -> int:
+  if x <= 0:
+    ret 0
+  ret (x & (x - 1)) == 0
+
+// Round up n to the next power of two
+fn next_pow2(x:int) -> int:
+  if x <= 1:
+    ret 1
+  x = x - 1
+  x = x | (x >> 1)
+  x = x | (x >> 2)
+  x = x | (x >> 4)
+  x = x | (x >> 8)
+  x = x | (x >> 16)
+  x = x | (x >> 32)
+  ret x + 1
+
+// Lowest set bit only (isolate LSB)
+fn lsb(x:int) -> int:
+  ret x & (0 - x)
+
+// Clear the lowest set bit
+fn clear_lsb(x:int) -> int:
+  ret x & (x - 1)
+
+// Log2 of a power-of-two value (via count-trailing-zeros)
+fn log2_pow2(x:int) -> int:
+  ret ctz(x)
+
+// Bit-reverse a 64-bit integer
+fn bit_reverse(x:int) -> int:
+  ret bswap(x)
+
+// Extract bits [hi:lo] inclusive from x
+fn bit_extract(x:int, lo:int, hi:int) -> int:
+  width:int = hi - lo + 1
+  mask:int = (1 << width) - 1
+  ret (x >> lo) & mask
+
+// Set bit at position pos
+fn bit_set(x:int, pos:int) -> int:
+  ret x | (1 << pos)
+
+// Clear bit at position pos
+fn bit_clear(x:int, pos:int) -> int:
+  mask:int = (1 << pos) ^ (0 - 1)
+  ret x & mask
+
+// Toggle bit at position pos
+fn bit_toggle(x:int, pos:int) -> int:
+  ret x ^ (1 << pos)
+
+// Test if bit at position pos is set
+fn bit_test(x:int, pos:int) -> int:
+  ret (x >> pos) & 1
+
+// ---------------------------------------------------------------------------
+// SIMD vectorized array operations
+// ---------------------------------------------------------------------------
+
+fn simd_add_f64(out:*float, a:*float, b:*float, n:int) -> int:
+  if out == 0 || a == 0 || b == 0 || n <= 0:
+    ret 0
+  i:int = 0
+  while i + 3 < n:
+    simd.v4f_add(out + i, a + i, b + i)
+    i = i + 4
+  while i < n:
+    unsafe:
+      out[i] = a[i] + b[i]
+    i = i + 1
+  ret 0
+
+fn simd_sub_f64(out:*float, a:*float, b:*float, n:int) -> int:
+  if out == 0 || a == 0 || b == 0 || n <= 0:
+    ret 0
+  i:int = 0
+  while i + 3 < n:
+    simd.v4f_sub(out + i, a + i, b + i)
+    i = i + 4
+  while i < n:
+    unsafe:
+      out[i] = a[i] - b[i]
+    i = i + 1
+  ret 0
+
+fn simd_mul_f64(out:*float, a:*float, b:*float, n:int) -> int:
+  if out == 0 || a == 0 || b == 0 || n <= 0:
+    ret 0
+  i:int = 0
+  while i + 3 < n:
+    simd.v4f_mul(out + i, a + i, b + i)
+    i = i + 4
+  while i < n:
+    unsafe:
+      out[i] = a[i] * b[i]
+    i = i + 1
+  ret 0
+
+fn simd_fma_f64(out:*float, a:*float, b:*float, c:*float, n:int) -> int:
+  if out == 0 || a == 0 || b == 0 || c == 0 || n <= 0:
+    ret 0
+  i:int = 0
+  tmp:[float;4]
+  while i + 3 < n:
+    simd.v4f_mul(tmp, a + i, b + i)
+    simd.v4f_add(out + i, tmp, c + i)
+    i = i + 4
+  while i < n:
+    unsafe:
+      out[i] = a[i] * b[i] + c[i]
+    i = i + 1
+  ret 0
+
+fn simd_dot_f64(a:*float, b:*float, n:int) -> float:
+  if a == 0 || b == 0 || n <= 0:
+    ret 0.0
+  i:int = 0
+  acc:float = 0.0
+  while i + 3 < n:
+    acc = acc + simd.v4f_dot(a + i, b + i)
+    i = i + 4
+  while i < n:
+    unsafe:
+      acc = acc + a[i] * b[i]
+    i = i + 1
+  ret acc
+
+fn simd_add_i64(out:*int, a:*int, b:*int, n:int) -> int:
+  if out == 0 || a == 0 || b == 0 || n <= 0:
+    ret 0
+  i:int = 0
+  while i + 3 < n:
+    simd.v4i_add(out + i, a + i, b + i)
+    i = i + 4
+  while i < n:
+    unsafe:
+      out[i] = a[i] + b[i]
+    i = i + 1
+  ret 0
+
+fn simd_mul_i64(out:*int, a:*int, b:*int, n:int) -> int:
+  if out == 0 || a == 0 || b == 0 || n <= 0:
+    ret 0
+  i:int = 0
+  while i + 3 < n:
+    simd.v4i_mul(out + i, a + i, b + i)
+    i = i + 4
+  while i < n:
+    unsafe:
+      out[i] = a[i] * b[i]
+    i = i + 1
+  ret 0
+
+// ---------------------------------------------------------------------------
+// AoS/SoA helpers (float)
+// ---------------------------------------------------------------------------
+
+fn aos3f_to_soa(x:*float, y:*float, z:*float, aos:*float, n:int) -> int:
+  if x == 0 || y == 0 || z == 0 || aos == 0 || n <= 0:
+    ret 0
+  i:int = 0
+  tx:[float;4]
+  ty:[float;4]
+  tz:[float;4]
+  while i + 3 < n:
+    base:int = i * 3
+    unsafe:
+      tx[0] = aos[base]
+      ty[0] = aos[base + 1]
+      tz[0] = aos[base + 2]
+      tx[1] = aos[base + 3]
+      ty[1] = aos[base + 4]
+      tz[1] = aos[base + 5]
+      tx[2] = aos[base + 6]
+      ty[2] = aos[base + 7]
+      tz[2] = aos[base + 8]
+      tx[3] = aos[base + 9]
+      ty[3] = aos[base + 10]
+      tz[3] = aos[base + 11]
+    simd.v4f_store(x + i, tx)
+    simd.v4f_store(y + i, ty)
+    simd.v4f_store(z + i, tz)
+    i = i + 4
+  while i < n:
+    base2:int = i * 3
+    unsafe:
+      x[i] = aos[base2]
+      y[i] = aos[base2 + 1]
+      z[i] = aos[base2 + 2]
+    i = i + 1
+  ret 0
+
+fn soa3f_to_aos(aos:*float, x:*float, y:*float, z:*float, n:int) -> int:
+  if aos == 0 || x == 0 || y == 0 || z == 0 || n <= 0:
+    ret 0
+  i:int = 0
+  tx:[float;4]
+  ty:[float;4]
+  tz:[float;4]
+  while i + 3 < n:
+    simd.v4f_load(tx, x + i)
+    simd.v4f_load(ty, y + i)
+    simd.v4f_load(tz, z + i)
+    base:int = i * 3
+    unsafe:
+      aos[base] = tx[0]
+      aos[base + 1] = ty[0]
+      aos[base + 2] = tz[0]
+      aos[base + 3] = tx[1]
+      aos[base + 4] = ty[1]
+      aos[base + 5] = tz[1]
+      aos[base + 6] = tx[2]
+      aos[base + 7] = ty[2]
+      aos[base + 8] = tz[2]
+      aos[base + 9] = tx[3]
+      aos[base + 10] = ty[3]
+      aos[base + 11] = tz[3]
+    i = i + 4
+  while i < n:
+    base2:int = i * 3
+    unsafe:
+      aos[base2] = x[i]
+      aos[base2 + 1] = y[i]
+      aos[base2 + 2] = z[i]
+    i = i + 1
+  ret 0

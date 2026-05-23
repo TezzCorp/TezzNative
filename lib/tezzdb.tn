@@ -1,0 +1,1776 @@
+// tezzdb module — TezzNative 2.0 Native Database Engine
+//
+// TezzDB is a fully native, high-performance embedded database
+// written entirely in TezzNative. No external dependencies.
+//
+// Architecture:
+//   • Page-based storage: 8192-byte (8KB) pages
+//   • B+ Tree index: all data in leaf pages, O(log n) lookup
+//   • Multiple tables per database file
+//   • BLOB-safe: stores raw byte data, JSON, or binary
+//   • Write-Ahead Log (WAL): append-only crash recovery log
+//   • ACID Transactions: begin/commit/rollback
+//   • Auto-increment primary keys
+//   • Secondary indexes: by any string column
+//   • Query: by PK, by indexed column, or full scan
+//   • Connection-style API: open/close/query/insert/update/delete
+//   • Native TezzNative UI bridge: JSON row format
+//
+// Page layout (8192 bytes):
+//   [0..3]   page_type (u32 LE)
+//   [4..7]   page_id   (u32 LE)
+//   [8..11]  next_page (u32 LE) — 0 = none
+//   [12..15] count     (u32 LE) — keys/rows in this page
+//   [16..]   payload
+//
+// Page types:
+//   0 = DB_PAGE_FREE
+//   1 = DB_PAGE_HEADER
+//   2 = DB_PAGE_BTREE_INTERNAL
+//   3 = DB_PAGE_BTREE_LEAF
+//   4 = DB_PAGE_OVERFLOW
+
+import "io"
+import "time"
+
+// ─────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────
+
+let TEZZDB_OK:int  = 0
+let TEZZDB_ERR:int = 0 - 1
+let TEZZDB_NOT_FOUND:int = 0 - 2
+let TEZZDB_DUPLICATE:int = 0 - 3
+let TEZZDB_FULL:int = 0 - 4
+let TEZZDB_LOCKED:int = 0 - 5
+
+let DB_PAGE_SIZE:int    = 8192
+let DB_PAGE_FREE:int    = 0
+let DB_PAGE_HEADER:int  = 1
+let DB_PAGE_BTREE_INTERNAL:int = 2
+let DB_PAGE_BTREE_LEAF:int     = 3
+let DB_PAGE_OVERFLOW:int       = 4
+let DB_PAGE_TABLE_META:int     = 5
+
+let DB_MAGIC:int   = 1413697364  // 'TZZD'
+let DB_VERSION:int = 2
+
+let DB_HEADER_PAYLOAD:int = 16  // byte offset of header payload in page
+let DB_PAGE_PAYLOAD:int   = 16  // byte offset of data payload in page
+
+// B+ tree leaf: max keys per page = (8192 - 16) / (8 + 4 + 4) = ~511 with short vals
+// We use variable-length values: key(8 bytes) + val_len(4 bytes) + val(N bytes)
+let DB_LEAF_KEY_SIZE:int = 8    // int64 primary key
+let DB_MAX_TABLES:int    = 256
+let DB_MAX_INLINE_VAL:int = 512 // bytes stored inline in leaf; larger → overflow page
+let DB_WAL_MAGIC:int = 1464421428  // 'TWLG'
+
+// ─────────────────────────────────────────────────────────────
+// Core structs
+// ─────────────────────────────────────────────────────────────
+
+struct DbPage:
+  data:*char   // raw 8192-byte page buffer (heap)
+  page_id:int
+  dirty:int    // 1 if modified and not yet flushed
+
+struct DbTableMeta:
+  name:str          // table name (owned)
+  root_page:int     // root B+ tree page id
+  next_pk:int       // next auto-increment primary key
+  row_count:int     // total rows
+  idx_page:int      // secondary index root page (0=none)
+  idx_col:str       // secondary index column name (or 0)
+
+struct TezzDb:
+  path:str          // file path (owned)
+  wal_path:str      // WAL path (owned)
+  h:*char           // FILE* to database file
+  wal_h:*char       // FILE* to WAL file
+  page_count:int    // total pages in file
+  tables:*DbTableMeta  // table metadata array
+  table_count:int
+  table_cap:int
+  cache:*DbPage     // page cache array
+  cache_cap:int
+  cache_count:int
+  in_tx:int         // 1 if inside transaction
+  tx_start_page:int // page count at transaction start
+
+struct DbRow:
+  pk:int            // primary key
+  data:str          // JSON or raw blob (heap-allocated, caller frees)
+  data_len:int      // byte count
+
+struct DbCursor:
+  db:*TezzDb
+  table_idx:int
+  leaf_page:int     // current leaf page id
+  leaf_pos:int      // position within leaf
+  pk_min:int        // -1 = no lower bound
+  pk_max:int        // -1 = no upper bound
+  done:int          // 1 when exhausted
+
+// ─────────────────────────────────────────────────────────────
+// Internal helpers
+// ─────────────────────────────────────────────────────────────
+
+fn _db_null_str() -> str:
+  ret 0 as str
+
+fn _db_null_page() -> *DbPage:
+  ret 0 as *DbPage
+
+fn _db_null_db() -> *TezzDb:
+  ret 0 as *TezzDb
+
+fn _db_r32_le(p:*char, off:int) -> int:
+  b0:int = (p[off] as int) & 255
+  b1:int = (p[off+1] as int) & 255
+  b2:int = (p[off+2] as int) & 255
+  b3:int = (p[off+3] as int) & 255
+  ret b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+
+fn _db_w32_le(p:*char, off:int, v:int) -> int:
+  p[off]   = (v & 255) as char
+  p[off+1] = ((v >> 8) & 255) as char
+  p[off+2] = ((v >> 16) & 255) as char
+  p[off+3] = ((v >> 24) & 255) as char
+  ret 0
+
+fn _db_r64_le(p:*char, off:int) -> int:
+  lo:int = _db_r32_le(p, off)
+  hi:int = _db_r32_le(p, off + 4)
+  ret lo | (hi << 32)
+
+fn _db_w64_le(p:*char, off:int, v:int) -> int:
+  _db_w32_le(p, off, v & 4294967295)  // low 32 bits
+  _db_w32_le(p, off + 4, (v >> 32) & 4294967295)
+  ret 0
+
+fn _db_streq(a:str, b:str) -> int:
+  if a == 0 && b == 0: ret 1
+  if a == 0 || b == 0: ret 0
+  ret strcmp(a, b) == 0
+
+fn _db_strdup(s:str) -> str:
+  if s == 0: ret 0 as str
+  n:int = len(s)
+  p:*char = malloc(n + 1)
+  if p == 0: ret 0 as str
+  unsafe:
+    memcpy(p, s as *char, n)
+  p[n] = 0 as char
+  ret p as str
+
+fn _db_join2(a:str, b:str) -> str:
+  if a == 0: ret _db_strdup(b)
+  if b == 0: ret _db_strdup(a)
+  na:int = len(a)
+  nb:int = len(b)
+  p:*char = malloc(na + nb + 1)
+  if p == 0: ret 0 as str
+  unsafe:
+    memcpy(p, a as *char, na)
+    memcpy(p + na, b as *char, nb)
+  p[na+nb] = 0 as char
+  ret p as str
+
+fn _db_itoa(v:int) -> str:
+  if v < 0:
+    s:str = _db_itoa(0 - v)
+    out:str = _db_join2("-", s)
+    free(s)
+    ret out
+  tmp:[char;24]
+  i:int = 0
+  n:int = v
+  if n == 0:
+    tmp[i] = 48 as char
+    i = i + 1
+  while n > 0:
+    tmp[i] = (48 + n % 10) as char
+    i = i + 1
+    n = n / 10
+  p:*char = malloc(i + 1)
+  if p == 0: ret 0 as str
+  j:int = 0
+  while j < i:
+    p[j] = tmp[i - j - 1]
+    j = j + 1
+  p[i] = 0 as char
+  ret p as str
+
+fn _db_crc32_str(s:str) -> int:
+  if s == 0: ret 0
+  h:int = 5381
+  i:int = 0
+  while s[i] != 0:
+    b:int = (s[i] as int) & 255
+    h = ((h << 5) + h + b) & 2147483647
+    i = i + 1
+  ret h
+
+fn str_contains(hay:str, needle:str) -> int:
+  if hay == 0 || needle == 0: ret 0
+  n:int = len(needle)
+  if n == 0: ret 1
+  i:int = 0
+  while hay[i] != 0:
+    j:int = 0
+    while needle[j] != 0 && hay[i + j] == needle[j]:
+      j = j + 1
+    if needle[j] == 0: ret 1
+    i = i + 1
+  ret 0
+
+
+
+fn _cache_find(db:*TezzDb, page_id:int) -> *DbPage:
+  if db == 0: ret _db_null_page()
+  i:int = 0
+  while i < (*db).cache_count:
+    if (*db).cache[i].page_id == page_id:
+      ret &(*db).cache[i]
+    i = i + 1
+  ret _db_null_page()
+
+fn _page_flush(db:*TezzDb, pg:*DbPage) -> int:
+  if db == 0 || pg == 0 || (*pg).data == 0 as *char: ret 0 - 1
+  if (*db).h == 0 as *char: ret 0 - 1
+  off:int = (*pg).page_id * DB_PAGE_SIZE
+  if fseek((*db).h, off, 0) != 0: ret 0 - 1
+  n:int = fwrite((*pg).data, 1, DB_PAGE_SIZE, (*db).h)
+  if n != DB_PAGE_SIZE: ret 0 - 1
+  (*pg).dirty = 0
+  ret 0
+
+fn _cache_evict_one(db:*TezzDb) -> int:
+  if db == 0 || (*db).cache_count <= 0: ret 0 - 1
+  // Find first clean page to evict, else evict dirty (flush first)
+  i:int = 0
+  best:int = 0
+  while i < (*db).cache_count:
+    if (*db).cache[i].dirty == 0:
+      best = i
+      break
+    i = i + 1
+  // Flush if dirty
+  if (*db).cache[best].dirty != 0:
+    _page_flush(db, &(*db).cache[best])
+  // Free page data
+  if (*db).cache[best].data != 0 as *char:
+    free((*db).cache[best].data)
+    (*db).cache[best].data = 0 as *char
+  // Shift remaining entries left
+  j:int = best
+  while j + 1 < (*db).cache_count:
+    (*db).cache[j] = (*db).cache[j + 1]
+    j = j + 1
+  (*db).cache_count = (*db).cache_count - 1
+  ret 0
+
+fn _page_load(db:*TezzDb, page_id:int) -> *DbPage:
+  if db == 0 || page_id < 0: ret _db_null_page()
+  // Check cache
+  cached:*DbPage = _cache_find(db, page_id)
+  if cached != 0 as *DbPage: ret cached
+  // Read from file
+  data:*char = malloc(DB_PAGE_SIZE)
+  if data == 0: ret _db_null_page()
+  off:int = page_id * DB_PAGE_SIZE
+  say "DEBUG: _page_load page_id=", page_id, " off=", off
+  say "DEBUG: db.h in _page_load = ", (*db).h as int
+  fs_rc:int = fseek((*db).h, off, 0)
+  say "DEBUG: fseek rc=", fs_rc
+  if fs_rc != 0:
+    free(data)
+    ret _db_null_page()
+  n:int = fread(data, 1, DB_PAGE_SIZE, (*db).h)
+  say "DEBUG: fread read=", n
+  if n != DB_PAGE_SIZE:
+    // New/unwritten page — zero it
+    i:int = n
+    while i < DB_PAGE_SIZE:
+      data[i] = 0 as char
+      i = i + 1
+  // Ensure cache slot available
+  if (*db).cache_count >= (*db).cache_cap:
+    _cache_evict_one(db)
+  slot:*DbPage = &(*db).cache[(*db).cache_count]
+  (*slot).data = data
+  (*slot).page_id = page_id
+  (*slot).dirty = 0
+  (*db).cache_count = (*db).cache_count + 1
+  ret slot
+
+fn _page_new(db:*TezzDb, page_type:int) -> *DbPage:
+  if db == 0: ret _db_null_page()
+  pid:int = (*db).page_count
+  (*db).page_count = (*db).page_count + 1
+  // Ensure cache slot
+  if (*db).cache_count >= (*db).cache_cap:
+    _cache_evict_one(db)
+  slot:*DbPage = &(*db).cache[(*db).cache_count]
+  data:*char = malloc(DB_PAGE_SIZE)
+  if data == 0: ret _db_null_page()
+  i:int = 0
+  while i < DB_PAGE_SIZE:
+    data[i] = 0 as char
+    i = i + 1
+  _db_w32_le(data, 0, page_type)
+  _db_w32_le(data, 4, pid)
+  _db_w32_le(data, 8, 0)    // next_page = none
+  _db_w32_le(data, 12, 0)   // count = 0
+  (*slot).data = data
+  (*slot).page_id = pid
+  (*slot).dirty = 1
+  (*db).cache_count = (*db).cache_count + 1
+  ret slot
+
+fn _db_flush_all(db:*TezzDb) -> int:
+  if db == 0: ret 0 - 1
+  i:int = 0
+  while i < (*db).cache_count:
+    if (*db).cache[i].dirty != 0:
+      _page_flush(db, &(*db).cache[i])
+    i = i + 1
+  if (*db).h != 0 as *char:
+    fflush((*db).h)
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// Database header page (page 0)
+// Header page payload (offset 16):
+//   [16..19] magic
+//   [20..23] version
+//   [24..27] page_count
+//   [28..31] table_count
+//   [32..39] table_meta_page (first table meta page)
+// ─────────────────────────────────────────────────────────────
+
+fn _db_write_header(db:*TezzDb) -> int:
+  if db == 0: ret 0 - 1
+  pg:*DbPage = _page_load(db, 0)
+  if pg == 0 as *DbPage: ret 0 - 1
+  d:*char = (*pg).data
+  _db_w32_le(d, 0, DB_PAGE_HEADER)
+  _db_w32_le(d, 4, 0)
+  _db_w32_le(d, 8, 0)
+  _db_w32_le(d, 12, 0)
+  _db_w32_le(d, 16, DB_MAGIC)
+  _db_w32_le(d, 20, DB_VERSION)
+  _db_w32_le(d, 24, (*db).page_count)
+  _db_w32_le(d, 28, (*db).table_count)
+  (*pg).dirty = 1
+  ret 0
+
+fn _db_read_header(db:*TezzDb) -> int:
+  if db == 0: ret 0 - 1
+  pg:*DbPage = _page_load(db, 0)
+  if pg == 0 as *DbPage: ret 0 - 1
+  d:*char = (*pg).data
+  magic:int = _db_r32_le(d, 16)
+  if magic != DB_MAGIC: ret 0 - 1
+  ver:int = _db_r32_le(d, 20)
+  if ver > DB_VERSION: ret 0 - 1
+  (*db).page_count = _db_r32_le(d, 24)
+  (*db).table_count = _db_r32_le(d, 28)
+  if (*db).page_count <= 0:
+    (*db).page_count = 1
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// Table metadata persistence
+// Table meta page payload (offset 16):
+//   [16..19] table_count
+//   per entry (64 bytes each):
+//     [0..7]   name (up to 56 chars) + null
+//     [56..59] root_page
+//     [60..63] next_pk (low 32)
+//     [64..67] next_pk (high 32)
+//     [68..71] row_count
+//     [72..75] idx_page
+// ─────────────────────────────────────────────────────────────
+
+let DB_TABLE_ENTRY_SIZE:int = 80
+
+fn _db_save_tables(db:*TezzDb) -> int:
+  if db == 0: ret 0 - 1
+  // Use page 1 as table metadata page
+  pg:*DbPage = _page_load(db, 1)
+  if pg == 0 as *DbPage: ret 0 - 1
+  d:*char = (*pg).data
+  _db_w32_le(d, 0, DB_PAGE_TABLE_META)
+  _db_w32_le(d, 4, 1)
+  _db_w32_le(d, 12, (*db).table_count)
+  _db_w32_le(d, 16, (*db).table_count)
+  i:int = 0
+  base:int = 20
+  while i < (*db).table_count:
+    off:int = base + i * DB_TABLE_ENTRY_SIZE
+    // Zero entry
+    j:int = 0
+    while j < DB_TABLE_ENTRY_SIZE:
+      d[off + j] = 0 as char
+      j = j + 1
+    // Name (up to 56 chars)
+    nm:str = (*db).tables[i].name
+    if nm != 0:
+      nlen:int = len(nm)
+      if nlen > 56: nlen = 56
+      unsafe:
+        memcpy(d + off, nm as *char, nlen)
+    _db_w32_le(d, off + 56, (*db).tables[i].root_page)
+    _db_w32_le(d, off + 60, (*db).tables[i].next_pk & 4294967295)
+    _db_w32_le(d, off + 64, ((*db).tables[i].next_pk >> 32) & 4294967295)
+    _db_w32_le(d, off + 68, (*db).tables[i].row_count)
+    _db_w32_le(d, off + 72, (*db).tables[i].idx_page)
+    i = i + 1
+  (*pg).dirty = 1
+  ret 0
+
+fn _db_load_tables(db:*TezzDb) -> int:
+  if db == 0: ret 0 - 1
+  if (*db).page_count < 2: ret 0
+  pg:*DbPage = _page_load(db, 1)
+  if pg == 0 as *DbPage: ret 0 - 1
+  d:*char = (*pg).data
+  ptype:int = _db_r32_le(d, 0)
+  if ptype != DB_PAGE_TABLE_META: ret 0
+  tc:int = _db_r32_le(d, 16)
+  if tc <= 0: ret 0
+  if (*db).tables == 0 as *DbTableMeta || tc > (*db).table_cap:
+    new_cap:int = tc + 16
+    new_tables:*DbTableMeta = (*DbTableMeta)malloc(sizeof(DbTableMeta) * new_cap)
+    if new_tables == 0: ret 0 - 1
+    if (*db).tables != 0 as *DbTableMeta:
+      free((*db).tables as *char)
+    (*db).tables = new_tables
+    (*db).table_cap = new_cap
+  i:int = 0
+  base:int = 20
+  while i < tc:
+    off:int = base + i * DB_TABLE_ENTRY_SIZE
+    nm_buf:[char;57]
+    j:int = 0
+    while j < 56:
+      nm_buf[j] = d[off + j]
+      if d[off + j] == 0 as char: break
+      j = j + 1
+    nm_buf[j] = 0 as char
+    nm_ptr:*char = &nm_buf[0]
+    (*db).tables[i].name = _db_strdup(nm_ptr as str)
+    (*db).tables[i].root_page = _db_r32_le(d, off + 56)
+    lo:int = _db_r32_le(d, off + 60)
+    hi:int = _db_r32_le(d, off + 64)
+    (*db).tables[i].next_pk = lo | (hi << 32)
+    (*db).tables[i].row_count = _db_r32_le(d, off + 68)
+    (*db).tables[i].idx_page = _db_r32_le(d, off + 72)
+    (*db).tables[i].idx_col = 0 as str
+    i = i + 1
+  (*db).table_count = tc
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// B+ Tree leaf operations
+// Leaf page payload (offset 16):
+//   count entries, each:
+//   [0..7]  key (i64 LE)
+//   [8..11] val_len (u32)
+//   [12..]  val bytes (val_len bytes, inline if <= DB_MAX_INLINE_VAL)
+//           OR [12..15] overflow_page_id if val_len > DB_MAX_INLINE_VAL
+// ─────────────────────────────────────────────────────────────
+
+let DB_LEAF_ENTRY_MIN:int = 12  // key(8) + val_len(4)
+
+fn _leaf_entry_size(val_len:int) -> int:
+  vl:int = val_len
+  if vl > DB_MAX_INLINE_VAL: vl = 4  // store overflow page id
+  ret 8 + 4 + vl
+
+fn _leaf_count(pg:*DbPage) -> int:
+  if pg == 0 as *DbPage: ret 0
+  ret _db_r32_le((*pg).data, 12)
+
+fn _leaf_entry_offset(pg:*DbPage, idx:int) -> int:
+  if pg == 0 as *DbPage: ret 0 - 1
+  d:*char = (*pg).data
+  off:int = DB_PAGE_PAYLOAD
+  i:int = 0
+  while i < idx:
+    vlen:int = _db_r32_le(d, off + 8)
+    off = off + _leaf_entry_size(vlen)
+    i = i + 1
+  ret off
+
+fn _leaf_find_key(pg:*DbPage, key:int) -> int:
+  // Binary search — returns index (0..count-1) or -1 if not found
+  if pg == 0 as *DbPage: ret 0 - 1
+  count:int = _leaf_count(pg)
+  lo:int = 0
+  hi:int = count - 1
+  while lo <= hi:
+    mid:int = (lo + hi) / 2
+    mid_off:int = _leaf_entry_offset(pg, mid)
+    mk:int = _db_r64_le((*pg).data, mid_off)
+    if mk == key: ret mid
+    if mk < key: lo = mid + 1
+    else: hi = mid - 1
+  ret 0 - 1
+
+fn _leaf_find_insert_pos(pg:*DbPage, key:int) -> int:
+  if pg == 0 as *DbPage: ret 0
+  count:int = _leaf_count(pg)
+  lo:int = 0
+  hi:int = count - 1
+  while lo <= hi:
+    mid:int = (lo + hi) / 2
+    mid_off:int = _leaf_entry_offset(pg, mid)
+    mk:int = _db_r64_le((*pg).data, mid_off)
+    if mk < key: lo = mid + 1
+    else: hi = mid - 1
+  ret lo
+
+fn _leaf_used_bytes(pg:*DbPage) -> int:
+  if pg == 0 as *DbPage: ret DB_PAGE_PAYLOAD
+  count:int = _leaf_count(pg)
+  ret _leaf_entry_offset(pg, count)
+
+fn _leaf_free_bytes(pg:*DbPage) -> int:
+  ret DB_PAGE_SIZE - _leaf_used_bytes(pg)
+
+fn _leaf_can_insert(pg:*DbPage, val_len:int) -> int:
+  need:int = _leaf_entry_size(val_len)
+  ret _leaf_free_bytes(pg) >= need
+
+// Insert key+value into leaf at position pos
+fn _leaf_insert_at(pg:*DbPage, pos:int, key:int, val:*char, val_len:int) -> int:
+  if pg == 0 as *DbPage: ret 0 - 1
+  d:*char = (*pg).data
+  count:int = _leaf_count(pg)
+  ins_off:int = _leaf_entry_offset(pg, pos)
+  entry_sz:int = _leaf_entry_size(val_len)
+  // Move entries after pos to make room
+  used:int = _leaf_entry_offset(pg, count)
+  move_bytes:int = used - ins_off
+  if move_bytes > 0:
+    unsafe:
+      // memmove semantics needed (overlapping) — copy backwards
+      src:*char = d + ins_off
+      dst:*char = d + ins_off + entry_sz
+      i:int = move_bytes - 1
+      while i >= 0:
+        dst[i] = src[i]
+        i = i - 1
+  // Write entry
+  _db_w64_le(d, ins_off, key)
+  _db_w32_le(d, ins_off + 8, val_len)
+  if val_len > 0 && val != 0 as *char:
+    inline_len:int = val_len
+    if inline_len > DB_MAX_INLINE_VAL: inline_len = DB_MAX_INLINE_VAL
+    unsafe:
+      memcpy(d + ins_off + 12, val, inline_len)
+  _db_w32_le(d, 12, count + 1)
+  (*pg).dirty = 1
+  ret 0
+
+// Delete entry at pos from leaf
+fn _leaf_delete_at(pg:*DbPage, pos:int) -> int:
+  if pg == 0 as *DbPage: ret 0 - 1
+  d:*char = (*pg).data
+  count:int = _leaf_count(pg)
+  if pos < 0 || pos >= count: ret 0 - 1
+  del_off:int = _leaf_entry_offset(pg, pos)
+  vlen:int = _db_r32_le(d, del_off + 8)
+  entry_sz:int = _leaf_entry_size(vlen)
+  next_off:int = del_off + entry_sz
+  used:int = _leaf_entry_offset(pg, count)
+  move_bytes:int = used - next_off
+  src:*char = d + next_off
+  dst:*char = d + del_off
+  i:int = 0
+  while i < move_bytes:
+    dst[i] = src[i]
+    i = i + 1
+  _db_w32_le(d, 12, count - 1)
+  (*pg).dirty = 1
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// WAL (Write-Ahead Log) for crash recovery
+// WAL entries: [magic:4][page_id:4][data:8192]
+// ─────────────────────────────────────────────────────────────
+
+let DB_WAL_ENTRY_SIZE:int = 8204   // 4+4+8192
+
+fn _wal_open(db:*TezzDb) -> int:
+  if db == 0 || (*db).wal_path == 0: ret 0 - 1
+  h:*char = fopen((*db).wal_path, "ab")
+  if h == 0 as *char: ret 0 - 1
+  (*db).wal_h = h
+  ret 0
+
+fn _wal_log_page(db:*TezzDb, pg:*DbPage) -> int:
+  if db == 0 || pg == 0 as *DbPage || (*db).wal_h == 0 as *char: ret 0 - 1
+  hdr:[char;8]
+  _db_w32_le(&hdr[0], 0, DB_WAL_MAGIC)
+  _db_w32_le(&hdr[0], 4, (*pg).page_id)
+  fwrite(&hdr[0], 1, 8, (*db).wal_h)
+  fwrite((*pg).data, 1, DB_PAGE_SIZE, (*db).wal_h)
+  fflush((*db).wal_h)
+  ret 0
+
+fn _wal_replay(db:*TezzDb) -> int:
+  if db == 0 || (*db).wal_path == 0: ret 0 - 1
+  if io.file_exists((*db).wal_path) == 0: ret 0
+  h:*char = fopen((*db).wal_path, "rb")
+  if h == 0 as *char: ret 0
+  buf:*char = malloc(DB_WAL_ENTRY_SIZE)
+  if buf == 0:
+    fclose(h)
+    ret 0 - 1
+  while 1:
+    nr:int = fread(buf, 1, 8, h)
+    if nr < 8: break
+    magic:int = _db_r32_le(buf, 0)
+    if magic != DB_WAL_MAGIC: break
+    pid:int = _db_r32_le(buf, 4)
+    nr2:int = fread(buf, 1, DB_PAGE_SIZE, h)
+    if nr2 < DB_PAGE_SIZE: break
+    // Write page directly to file
+    off:int = pid * DB_PAGE_SIZE
+    fseek((*db).h, off, 0)
+    fwrite(buf, 1, DB_PAGE_SIZE, (*db).h)
+    if pid >= (*db).page_count:
+      (*db).page_count = pid + 1
+  free(buf)
+  fclose(h)
+  fflush((*db).h)
+  ret 0
+
+fn _wal_clear(db:*TezzDb) -> int:
+  if db == 0 || (*db).wal_path == 0: ret 0 - 1
+  if (*db).wal_h != 0 as *char:
+    fclose((*db).wal_h)
+    (*db).wal_h = 0 as *char
+  // Truncate WAL
+  h:*char = fopen((*db).wal_path, "wb")
+  if h != 0 as *char:
+    fclose(h)
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// Table operations
+// ─────────────────────────────────────────────────────────────
+
+fn _find_table(db:*TezzDb, name:str) -> int:
+  if db == 0 || name == 0: ret 0 - 1
+  i:int = 0
+  while i < (*db).table_count:
+    if _db_streq((*db).tables[i].name, name) != 0:
+      ret i
+    i = i + 1
+  ret 0 - 1
+
+fn _grow_tables(db:*TezzDb) -> int:
+  if db == 0: ret 0 - 1
+  new_cap:int = (*db).table_cap * 2
+  if new_cap < 8: new_cap = 8
+  nt:*DbTableMeta = (*DbTableMeta)malloc(sizeof(DbTableMeta) * new_cap)
+  if nt == 0: ret 0 - 1
+  if (*db).tables != 0 as *DbTableMeta:
+    unsafe:
+      memcpy(nt as *char, (*db).tables as *char, sizeof(DbTableMeta) * (*db).table_count)
+    free((*db).tables as *char)
+  (*db).tables = nt
+  (*db).table_cap = new_cap
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// Public API: Open / Create / Close
+// ─────────────────────────────────────────────────────────────
+
+fn open(path:str) -> *TezzDb:
+  if path == 0: ret _db_null_db()
+  // Ensure parent directory
+  dir:str = io.path_dir(path)
+  if dir != 0 && io.dir_exists(dir) == 0:
+    io.dir_make(dir)
+    free(dir)
+  else:
+    if dir != 0: free(dir)
+  is_new:int = 42
+  h:*char = fopen(path, "r+b")
+  if h == 0 as *char:
+    h = fopen(path, "w+b")
+  else:
+    // File exists, check if non-empty
+    fseek(h, 0, 2)
+    sz:int = ftell(h)
+    fseek(h, 0, 0)
+    if sz > 0:
+      is_new = 0
+  say "DEBUG: open is_new=", is_new
+  if h == 0 as *char: ret _db_null_db()
+  db:*TezzDb = (*TezzDb)malloc(sizeof(TezzDb))
+  if db == 0:
+    fclose(h)
+    ret _db_null_db()
+  // Init fields
+  (*db).path = _db_strdup(path)
+  wal_path:str = _db_join2(path, ".wal")
+  (*db).wal_path = wal_path
+  say "DEBUG: h as int = ", h as int
+  (*db).h = h
+  say "DEBUG: (*db).h as int = ", (*db).h as int
+  (*db).wal_h = 0 as *char
+  (*db).page_count = 0
+  (*db).tables = 0 as *DbTableMeta
+  (*db).table_count = 0
+  (*db).table_cap = 0
+  (*db).in_tx = 0
+  (*db).tx_start_page = 0
+  // Allocate cache (64 pages)
+  cache_cap:int = 64
+  (*db).cache = (*DbPage)malloc(sizeof(DbPage) * cache_cap)
+  if (*db).cache == 0:
+    free(db as *char)
+    fclose(h)
+    ret _db_null_db()
+  (*db).cache_cap = cache_cap
+  (*db).cache_count = 0
+  if is_new != 0:
+    say "DEBUG: initializing new database"
+    // Initialize new database
+    (*db).page_count = 2  // page 0 = header, page 1 = table meta
+    r1:int = _db_write_header(db)
+    say "DEBUG: write_header rc=", r1
+    r2:int = _db_save_tables(db)
+    say "DEBUG: save_tables rc=", r2
+    r3:int = _db_flush_all(db)
+    say "DEBUG: flush_all rc=", r3
+  else:
+    // Replay WAL and load existing data
+    _wal_replay(db)
+    if _db_read_header(db) != 0:
+      // Corrupted or not a TezzDB file
+      free((*db).cache as *char)
+      free((*db).path)
+      if (*db).wal_path != 0: free((*db).wal_path)
+      fclose(h)
+      free(db as *char)
+      ret _db_null_db()
+    _db_load_tables(db)
+  // Open WAL for writing
+  _wal_open(db)
+  ret db
+
+
+fn close(db:*TezzDb) -> int:
+  if db == 0: ret TEZZDB_ERR
+  // Flush all dirty pages
+  _db_flush_all(db)
+  _db_write_header(db)
+  _db_save_tables(db)
+  _db_flush_all(db)
+  // Close WAL
+  if (*db).wal_h != 0 as *char:
+    fclose((*db).wal_h)
+    (*db).wal_h = 0 as *char
+  // Remove WAL (successful close = committed)
+  if (*db).wal_path != 0:
+    remove((*db).wal_path)
+  // Close main file
+  if (*db).h != 0 as *char:
+    fclose((*db).h)
+    (*db).h = 0 as *char
+  // Free cache
+  i:int = 0
+  while i < (*db).cache_count:
+    if (*db).cache[i].data != 0 as *char:
+      free((*db).cache[i].data)
+    i = i + 1
+  free((*db).cache as *char)
+  // Free tables
+  j:int = 0
+  while j < (*db).table_count:
+    if (*db).tables[j].name != 0: free((*db).tables[j].name)
+    if (*db).tables[j].idx_col != 0: free((*db).tables[j].idx_col)
+    j = j + 1
+  if (*db).tables != 0 as *DbTableMeta:
+    free((*db).tables as *char)
+  if (*db).path != 0: free((*db).path)
+  if (*db).wal_path != 0: free((*db).wal_path)
+  free(db)
+  ret TEZZDB_OK
+
+// ─────────────────────────────────────────────────────────────
+// Table creation / deletion
+// ─────────────────────────────────────────────────────────────
+
+fn table_create(db:*TezzDb, name:str) -> int:
+  if db == 0 || name == 0: ret TEZZDB_ERR
+  if _find_table(db, name) >= 0: ret TEZZDB_DUPLICATE
+  if (*db).table_count >= (*db).table_cap:
+    if _grow_tables(db) != 0: ret TEZZDB_ERR
+  // Create root leaf page
+  root:*DbPage = _page_new(db, DB_PAGE_BTREE_LEAF)
+  if root == 0 as *DbPage: ret TEZZDB_ERR
+  idx:int = (*db).table_count
+  (*db).tables[idx].name = _db_strdup(name)
+  (*db).tables[idx].root_page = (*root).page_id
+  (*db).tables[idx].next_pk = 1
+  (*db).tables[idx].row_count = 0
+  (*db).tables[idx].idx_page = 0
+  (*db).tables[idx].idx_col = 0 as str
+  (*db).table_count = idx + 1
+  _db_save_tables(db)
+  _db_write_header(db)
+  _autocommit(db)
+  ret TEZZDB_OK
+
+fn table_drop(db:*TezzDb, name:str) -> int:
+  if db == 0 || name == 0: ret TEZZDB_ERR
+  idx:int = _find_table(db, name)
+  if idx < 0: ret TEZZDB_NOT_FOUND
+  if (*db).tables[idx].name != 0:
+    free((*db).tables[idx].name)
+  if (*db).tables[idx].idx_col != 0:
+    free((*db).tables[idx].idx_col)
+  // Shift remaining
+  i:int = idx
+  while i + 1 < (*db).table_count:
+    (*db).tables[i] = (*db).tables[i + 1]
+    i = i + 1
+  (*db).table_count = (*db).table_count - 1
+  _db_save_tables(db)
+  _autocommit(db)
+  ret TEZZDB_OK
+
+fn table_exists(db:*TezzDb, name:str) -> int:
+  ret _find_table(db, name) >= 0
+
+fn table_row_count(db:*TezzDb, name:str) -> int:
+  if db == 0 || name == 0: ret 0 - 1
+  idx:int = _find_table(db, name)
+  if idx < 0: ret TEZZDB_NOT_FOUND
+  ret (*db).tables[idx].row_count
+
+fn _autocommit(db:*TezzDb) -> int:
+  if db == 0: ret TEZZDB_ERR
+  if (*db).in_tx != 0: ret TEZZDB_OK
+  // Flush all dirty pages to main file immediately
+  i:int = 0
+  while i < (*db).cache_count:
+    if (*db).cache[i].dirty != 0:
+      _wal_log_page(db, &(*db).cache[i])
+      _page_flush(db, &(*db).cache[i])
+    i = i + 1
+  _db_write_header(db)
+  _db_save_tables(db)
+  _db_flush_all(db)
+  _wal_clear(db)
+  _wal_open(db)
+  ret TEZZDB_OK
+
+// ─────────────────────────────────────────────────────────────
+// Transactions
+// ─────────────────────────────────────────────────────────────
+
+fn begin(db:*TezzDb) -> int:
+  if db == 0: ret TEZZDB_ERR
+  if (*db).in_tx != 0: ret TEZZDB_LOCKED
+  (*db).in_tx = 1
+  (*db).tx_start_page = (*db).page_count
+  ret TEZZDB_OK
+
+fn commit(db:*TezzDb) -> int:
+  if db == 0: ret TEZZDB_ERR
+  if (*db).in_tx == 0: ret TEZZDB_ERR
+  // Flush all dirty pages to main file
+  i:int = 0
+  while i < (*db).cache_count:
+    if (*db).cache[i].dirty != 0:
+      _wal_log_page(db, &(*db).cache[i])
+      _page_flush(db, &(*db).cache[i])
+    i = i + 1
+  _db_write_header(db)
+  _db_save_tables(db)
+  _db_flush_all(db)
+  _wal_clear(db)
+  _wal_open(db)
+  (*db).in_tx = 0
+  ret TEZZDB_OK
+
+fn rollback(db:*TezzDb) -> int:
+  if db == 0: ret TEZZDB_ERR
+  if (*db).in_tx == 0: ret TEZZDB_ERR
+  // Free table names to prevent leakage before reload
+  j:int = 0
+  while j < (*db).table_count:
+    if (*db).tables[j].name != 0:
+      free((*db).tables[j].name)
+      (*db).tables[j].name = 0 as str
+    if (*db).tables[j].idx_col != 0:
+      free((*db).tables[j].idx_col)
+      (*db).tables[j].idx_col = 0 as str
+    j = j + 1
+  // Discard all dirty cached pages
+  i:int = 0
+  while i < (*db).cache_count:
+    if (*db).cache[i].dirty != 0:
+      if (*db).cache[i].data != 0 as *char:
+        free((*db).cache[i].data)
+        (*db).cache[i].data = 0 as *char
+      (*db).cache[i].dirty = 0
+    i = i + 1
+  (*db).cache_count = 0
+  // Restore page_count
+  (*db).page_count = (*db).tx_start_page
+  _db_load_tables(db)
+  (*db).in_tx = 0
+  ret TEZZDB_OK
+
+// ─────────────────────────────────────────────────────────────
+// CRUD: B+ Tree Insert / Get / Update / Delete & Splits
+// ─────────────────────────────────────────────────────────────
+
+fn _internal_count(pg:*DbPage) -> int:
+  if pg == 0 as *DbPage: ret 0
+  ret _db_r32_le((*pg).data, 12)
+
+fn _internal_find_insert_pos(pg:*DbPage, key:int) -> int:
+  if pg == 0 as *DbPage: ret 0
+  count:int = _internal_count(pg)
+  lo:int = 0
+  hi:int = count - 1
+  while lo <= hi:
+    mid:int = (lo + hi) / 2
+    mk:int = _db_r64_le((*pg).data, 20 + mid * 12)
+    if mk < key: lo = mid + 1
+    else: hi = mid - 1
+  ret lo
+
+fn _internal_insert_at(pg:*DbPage, pos:int, key:int, child_pid:int) -> int:
+  if pg == 0 as *DbPage: ret 0 - 1
+  d:*char = (*pg).data
+  count:int = _internal_count(pg)
+  ins_off:int = 20 + pos * 12
+  // Move entries after pos
+  used:int = 20 + count * 12
+  move_bytes:int = used - ins_off
+  if move_bytes > 0:
+    unsafe:
+      src:*char = d + ins_off
+      dst:*char = d + ins_off + 12
+      i:int = move_bytes - 1
+      while i >= 0:
+        dst[i] = src[i]
+        i = i - 1
+  _db_w64_le(d, ins_off, key)
+  _db_w32_le(d, ins_off + 8, child_pid)
+  _db_w32_le(d, 12, count + 1)
+  (*pg).dirty = 1
+  ret 0
+
+fn _btree_find_leaf(db:*TezzDb, root_pid:int, pk:int, path:*int, path_len:*int) -> *DbPage:
+  cur_pid:int = root_pid
+  plen:int = 0
+  while cur_pid != 0:
+    unsafe:
+      path[plen] = cur_pid
+    plen = plen + 1
+    pg:*DbPage = _page_load(db, cur_pid)
+    if pg == 0 as *DbPage: ret _db_null_page()
+    ptype:int = _db_r32_le((*pg).data, 0)
+    if ptype == DB_PAGE_BTREE_LEAF:
+      *path_len = plen
+      ret pg
+    else if ptype == DB_PAGE_BTREE_INTERNAL:
+      count:int = _internal_count(pg)
+      child_pid:int = _db_r32_le((*pg).data, 16)
+      i:int = 0
+      while i < count:
+        off:int = 20 + i * 12
+        k:int = _db_r64_le((*pg).data, off)
+        if pk >= k:
+          child_pid = _db_r32_le((*pg).data, off + 8)
+          i = i + 1
+        else:
+          break
+      cur_pid = child_pid
+    else:
+      ret _db_null_page()
+  ret _db_null_page()
+
+fn _btree_insert_internal(db:*TezzDb, parent_pid:int, key:int, child_pid:int, path:*int, path_len:int) -> int:
+  pg:*DbPage = _page_load(db, parent_pid)
+  if pg == 0 as *DbPage: ret 0 - 1
+  count:int = _internal_count(pg)
+  if count < 300:
+    pos:int = _internal_find_insert_pos(pg, key)
+    _internal_insert_at(pg, pos, key, child_pid)
+    if (*db).wal_h != 0 as *char:
+      _wal_log_page(db, pg)
+    ret 0
+
+  // Internal split
+  new_pg:*DbPage = _page_new(db, DB_PAGE_BTREE_INTERNAL)
+  if new_pg == 0 as *DbPage: ret 0 - 1
+  mid:int = count / 2
+  promo_key:int = _db_r64_le((*pg).data, 20 + mid * 12)
+  first_child:int = _db_r32_le((*pg).data, 20 + mid * 12 + 8)
+  _db_w32_le((*new_pg).data, 16, first_child)
+
+  move_cnt:int = count - 1 - mid
+  if move_cnt > 0:
+    unsafe:
+      memcpy((*new_pg).data + 20, (*pg).data + 20 + (mid + 1) * 12, move_cnt * 12)
+  _db_w32_le((*new_pg).data, 12, move_cnt)
+  _db_w32_le((*pg).data, 12, mid)
+
+  if key < promo_key:
+    pos:int = _internal_find_insert_pos(pg, key)
+    _internal_insert_at(pg, pos, key, child_pid)
+  else:
+    pos:int = _internal_find_insert_pos(new_pg, key)
+    _internal_insert_at(new_pg, pos, key, child_pid)
+
+  (*pg).dirty = 1
+  (*new_pg).dirty = 1
+  if (*db).wal_h != 0 as *char:
+    _wal_log_page(db, pg)
+    _wal_log_page(db, new_pg)
+
+  if path_len == 0:
+    // New root internal page
+    new_root:*DbPage = _page_new(db, DB_PAGE_BTREE_INTERNAL)
+    if new_root == 0 as *DbPage: ret 0 - 1
+    _db_w32_le((*new_root).data, 16, parent_pid)
+    _internal_insert_at(new_root, 0, promo_key, (*new_pg).page_id)
+    i:int = 0
+    while i < (*db).table_count:
+      if (*db).tables[i].root_page == parent_pid:
+        (*db).tables[i].root_page = (*new_root).page_id
+        break
+      if (*db).tables[i].idx_page == parent_pid:
+        (*db).tables[i].idx_page = (*new_root).page_id
+        break
+      i = i + 1
+    if (*db).wal_h != 0 as *char:
+      _wal_log_page(db, new_root)
+    _db_save_tables(db)
+  else:
+    _btree_insert_internal(db, path[path_len - 1], promo_key, (*new_pg).page_id, path, path_len - 1)
+  ret 0
+
+fn _btree_insert_leaf_raw(db:*TezzDb, tidx:int, pk:int, data:str, dlen:int, path:*int, path_len:int, is_sec:int) -> int:
+  pg:*DbPage = _page_load(db, path[path_len - 1])
+  if pg == 0 as *DbPage: ret 0 - 1
+  if _leaf_can_insert(pg, dlen) != 0:
+    pos:int = _leaf_find_insert_pos(pg, pk)
+    _leaf_insert_at(pg, pos, pk, data as *char, dlen)
+    if (*db).wal_h != 0 as *char:
+      _wal_log_page(db, pg)
+    ret 0
+
+  // Split leaf page!
+  new_pg:*DbPage = _page_new(db, DB_PAGE_BTREE_LEAF)
+  if new_pg == 0 as *DbPage: ret 0 - 1
+  count:int = _leaf_count(pg)
+  mid:int = count / 2
+
+  // Sibling chain
+  next_pid:int = _db_r32_le((*pg).data, 8)
+  _db_w32_le((*new_pg).data, 8, next_pid)
+  _db_w32_le((*pg).data, 8, (*new_pg).page_id)
+
+  mid_off:int = _leaf_entry_offset(pg, mid)
+  end_off:int = _leaf_entry_offset(pg, count)
+  move_bytes:int = end_off - mid_off
+  if move_bytes > 0:
+    unsafe:
+      memcpy((*new_pg).data + 16, (*pg).data + mid_off, move_bytes)
+  _db_w32_le((*new_pg).data, 12, count - mid)
+  _db_w32_le((*pg).data, 12, mid)
+
+  split_key:int = _db_r64_le((*new_pg).data, 16)
+  if pk < split_key:
+    pos:int = _leaf_find_insert_pos(pg, pk)
+    _leaf_insert_at(pg, pos, pk, data as *char, dlen)
+  else:
+    pos:int = _leaf_find_insert_pos(new_pg, pk)
+    _leaf_insert_at(new_pg, pos, pk, data as *char, dlen)
+
+  (*pg).dirty = 1
+  (*new_pg).dirty = 1
+  if (*db).wal_h != 0 as *char:
+    _wal_log_page(db, pg)
+    _wal_log_page(db, new_pg)
+
+  if path_len <= 1:
+    // Split root leaf!
+    new_root:*DbPage = _page_new(db, DB_PAGE_BTREE_INTERNAL)
+    if new_root == 0 as *DbPage: ret 0 - 1
+    _db_w32_le((*new_root).data, 16, (*pg).page_id)
+    _internal_insert_at(new_root, 0, split_key, (*new_pg).page_id)
+    if is_sec != 0:
+      (*db).tables[tidx].idx_page = (*new_root).page_id
+    else:
+      (*db).tables[tidx].root_page = (*new_root).page_id
+    if (*db).wal_h != 0 as *char:
+      _wal_log_page(db, new_root)
+    _db_save_tables(db)
+  else:
+    _btree_insert_internal(db, path[path_len - 2], split_key, (*new_pg).page_id, path, path_len - 1)
+  ret 0
+
+fn insert(db:*TezzDb, table:str, data:str) -> int:
+  if db == 0 || table == 0 || data == 0: ret TEZZDB_ERR
+  tidx:int = _find_table(db, table)
+  if tidx < 0: ret TEZZDB_NOT_FOUND
+  pk:int = (*db).tables[tidx].next_pk
+  r:int = insert_pk(db, table, pk, data)
+  if r < 0: ret r
+  ret pk
+
+fn insert_pk(db:*TezzDb, table:str, pk:int, data:str) -> int:
+  if db == 0 || table == 0 || data == 0: ret TEZZDB_ERR
+  tidx:int = _find_table(db, table)
+  if tidx < 0: ret TEZZDB_NOT_FOUND
+  
+  // Check for duplicates in primary tree
+  existing:str = get(db, table, pk)
+  if existing != 0:
+    free(existing)
+    ret TEZZDB_DUPLICATE
+
+  root_pid:int = (*db).tables[tidx].root_page
+  path:[int;32]
+  plen:int = 0
+  pg:*DbPage = _btree_find_leaf(db, root_pid, pk, &path[0], &plen)
+  if pg == 0 as *DbPage: ret TEZZDB_ERR
+  
+  dlen:int = len(data)
+  r:int = _btree_insert_leaf_raw(db, tidx, pk, data, dlen, &path[0], plen, 0)
+  if r != 0: ret TEZZDB_ERR
+  
+  (*db).tables[tidx].row_count = (*db).tables[tidx].row_count + 1
+  if pk >= (*db).tables[tidx].next_pk:
+    (*db).tables[tidx].next_pk = pk + 1
+    
+  // Index update if secondary index column present
+  if (*db).tables[tidx].idx_page > 0:
+    val_str:str = row_get_str(data, (*db).tables[tidx].idx_col)
+    if val_str != 0:
+      h:int = _db_crc32_str(val_str)
+      idx_key:int = (h << 32) | (pk & 4294967295)
+      idx_path:[int;32]
+      idx_plen:int = 0
+      idx_pg:*DbPage = _btree_find_leaf(db, (*db).tables[tidx].idx_page, idx_key, &idx_path[0], &idx_plen)
+      if idx_pg != 0 as *DbPage:
+        _btree_insert_leaf_raw(db, tidx, idx_key, "", 0, &idx_path[0], idx_plen, 1)
+      free(val_str)
+      
+  _db_save_tables(db)
+  _autocommit(db)
+  ret pk
+
+fn get(db:*TezzDb, table:str, pk:int) -> str:
+  if db == 0 || table == 0: ret 0 as str
+  tidx:int = _find_table(db, table)
+  if tidx < 0: ret 0 as str
+  root_pid:int = (*db).tables[tidx].root_page
+  path:[int;32]
+  plen:int = 0
+  pg:*DbPage = _btree_find_leaf(db, root_pid, pk, &path[0], &plen)
+  if pg == 0 as *DbPage: ret 0 as str
+  idx:int = _leaf_find_key(pg, pk)
+  if idx >= 0:
+    off:int = _leaf_entry_offset(pg, idx)
+    vlen:int = _db_r32_le((*pg).data, off + 8)
+    out:*char = malloc(vlen + 1)
+    if out == 0: ret 0 as str
+    unsafe:
+      memcpy(out, (*pg).data + off + 12, vlen)
+    out[vlen] = 0 as char
+    ret out as str
+  ret 0 as str
+
+fn delete(db:*TezzDb, table:str, pk:int) -> int:
+  if db == 0 || table == 0: ret TEZZDB_ERR
+  tidx:int = _find_table(db, table)
+  if tidx < 0: ret TEZZDB_NOT_FOUND
+  
+  // Secondary index cleanup
+  if (*db).tables[tidx].idx_page > 0:
+    row_data:str = get(db, table, pk)
+    if row_data != 0:
+      val_str:str = row_get_str(row_data, (*db).tables[tidx].idx_col)
+      if val_str != 0:
+        h:int = _db_crc32_str(val_str)
+        idx_key:int = (h << 32) | (pk & 4294967295)
+        idx_path:[int;32]
+        idx_plen:int = 0
+        idx_pg:*DbPage = _btree_find_leaf(db, (*db).tables[tidx].idx_page, idx_key, &idx_path[0], &idx_plen)
+        if idx_pg != 0 as *DbPage:
+          idx:int = _leaf_find_key(idx_pg, idx_key)
+          if idx >= 0:
+            _leaf_delete_at(idx_pg, idx)
+            if (*db).wal_h != 0 as *char:
+              _wal_log_page(db, idx_pg)
+        free(val_str)
+      free(row_data)
+
+  root_pid:int = (*db).tables[tidx].root_page
+  path:[int;32]
+  plen:int = 0
+  pg:*DbPage = _btree_find_leaf(db, root_pid, pk, &path[0], &plen)
+  if pg == 0 as *DbPage: ret TEZZDB_NOT_FOUND
+  idx:int = _leaf_find_key(pg, pk)
+  if idx >= 0:
+    _leaf_delete_at(pg, idx)
+    (*db).tables[tidx].row_count = (*db).tables[tidx].row_count - 1
+    if (*db).wal_h != 0 as *char:
+      _wal_log_page(db, pg)
+    _db_save_tables(db)
+    _autocommit(db)
+    ret TEZZDB_OK
+  ret TEZZDB_NOT_FOUND
+
+fn update(db:*TezzDb, table:str, pk:int, new_data:str) -> int:
+  if db == 0 || table == 0 || new_data == 0: ret TEZZDB_ERR
+  r:int = delete(db, table, pk)
+  if r != TEZZDB_OK: ret r
+  ret insert_pk(db, table, pk, new_data)
+
+fn table_index_create(db:*TezzDb, table:str, col:str) -> int:
+  if db == 0 || table == 0 || col == 0: ret TEZZDB_ERR
+  tidx:int = _find_table(db, table)
+  if tidx < 0: ret TEZZDB_NOT_FOUND
+  if (*db).tables[tidx].idx_page > 0: ret TEZZDB_DUPLICATE
+  
+  idx_root:*DbPage = _page_new(db, DB_PAGE_BTREE_LEAF)
+  if idx_root == 0 as *DbPage: ret TEZZDB_ERR
+  
+  (*db).tables[tidx].idx_page = (*idx_root).page_id
+  (*db).tables[tidx].idx_col = _db_strdup(col)
+  _db_save_tables(db)
+  
+  // Populate index with existing rows
+  cur:*DbCursor = cursor_open(db, table)
+  if cur != 0 as *DbCursor:
+    while 1:
+      row:*DbRow = cursor_next(cur)
+      if row == 0 as *DbRow: break
+      val_str:str = row_get_str((*row).data, col)
+      if val_str != 0:
+        h:int = _db_crc32_str(val_str)
+        idx_key:int = (h << 32) | ((*row).pk & 4294967295)
+        idx_path:[int;32]
+        idx_plen:int = 0
+        idx_pg:*DbPage = _btree_find_leaf(db, (*idx_root).page_id, idx_key, &idx_path[0], &idx_plen)
+        if idx_pg != 0 as *DbPage:
+          _btree_insert_leaf_raw(db, tidx, idx_key, "", 0, &idx_path[0], idx_plen, 1)
+        free(val_str)
+      row_free(row)
+    cursor_close(cur)
+    
+  if (*db).wal_h != 0 as *char:
+    _wal_log_page(db, idx_root)
+  _db_save_tables(db)
+  _autocommit(db)
+  ret TEZZDB_OK
+
+// ─────────────────────────────────────────────────────────────
+// Cursor / full-table scan
+// ─────────────────────────────────────────────────────────────
+
+fn cursor_open(db:*TezzDb, table:str) -> *DbCursor:
+  if db == 0 || table == 0: ret 0 as *DbCursor
+  tidx:int = _find_table(db, table)
+  if tidx < 0: ret 0 as *DbCursor
+  cur:*DbCursor = (*DbCursor)malloc(sizeof(DbCursor))
+  if cur == 0: ret 0 as *DbCursor
+  (*cur).db = db
+  (*cur).table_idx = tidx
+  (*cur).leaf_page = (*db).tables[tidx].root_page
+  (*cur).leaf_pos = 0
+  (*cur).pk_min = 0 - 1
+  (*cur).pk_max = 0 - 1
+  (*cur).done = 0
+  ret cur
+
+fn cursor_range(db:*TezzDb, table:str, pk_min:int, pk_max:int) -> *DbCursor:
+  cur:*DbCursor = cursor_open(db, table)
+  if cur == 0: ret 0 as *DbCursor
+  (*cur).pk_min = pk_min
+  (*cur).pk_max = pk_max
+  ret cur
+
+fn cursor_next(cur:*DbCursor) -> *DbRow:
+  if cur == 0 || (*cur).done != 0: ret 0 as *DbRow
+  db:*TezzDb = (*cur).db
+  while 1:
+    if (*cur).leaf_page <= 0:
+      (*cur).done = 1
+      ret 0 as *DbRow
+    pg:*DbPage = _page_load(db, (*cur).leaf_page)
+    if pg == 0 as *DbPage:
+      (*cur).done = 1
+      ret 0 as *DbRow
+    count:int = _leaf_count(pg)
+    if (*cur).leaf_pos >= count:
+      // Move to next leaf
+      next_pid:int = _db_r32_le((*pg).data, 8)
+      if next_pid == 0:
+        (*cur).done = 1
+        ret 0 as *DbRow
+      (*cur).leaf_page = next_pid
+      (*cur).leaf_pos = 0
+      continue
+    pos:int = (*cur).leaf_pos
+    off:int = _leaf_entry_offset(pg, pos)
+    pk:int = _db_r64_le((*pg).data, off)
+    (*cur).leaf_pos = pos + 1
+    // Apply range filter
+    if (*cur).pk_min >= 0 && pk < (*cur).pk_min:
+      continue
+    if (*cur).pk_max >= 0 && pk > (*cur).pk_max:
+      (*cur).done = 1
+      ret 0 as *DbRow
+    vlen:int = _db_r32_le((*pg).data, off + 8)
+    row:*DbRow = (*DbRow)malloc(sizeof(DbRow))
+    if row == 0:
+      (*cur).done = 1
+      ret 0 as *DbRow
+    out:*char = malloc(vlen + 1)
+    if out == 0:
+      free(row)
+      ret 0 as *DbRow
+    unsafe:
+      memcpy(out, (*pg).data + off + 12, vlen)
+    out[vlen] = 0 as char
+    (*row).pk = pk
+    (*row).data = out as str
+    (*row).data_len = vlen
+    ret row
+  ret 0 as *DbRow
+
+fn cursor_close(cur:*DbCursor) -> int:
+  if cur == 0: ret TEZZDB_ERR
+  free(cur)
+  ret TEZZDB_OK
+
+fn row_free(row:*DbRow) -> int:
+  if row == 0: ret TEZZDB_ERR
+  if (*row).data != 0: free((*row).data)
+  free(row)
+  ret TEZZDB_OK
+
+// ─────────────────────────────────────────────────────────────
+// JSON field extraction helpers (for row data)
+// ─────────────────────────────────────────────────────────────
+
+fn _json_find_key(json:str, key:str) -> int:
+  // Returns offset of value start in json string, or -1 if not found
+  if json == 0 || key == 0: ret 0 - 1
+  klen:int = len(key)
+  jlen:int = len(json)
+  i:int = 0
+  while i < jlen - klen - 2:
+    if (json as *char)[i] == 34 as char:  // '"'
+      j:int = 0
+      while j < klen:
+        if (json as *char)[i + 1 + j] != (key as *char)[j]: break
+        j = j + 1
+      if j == klen && (json as *char)[i + 1 + klen] == 34 as char:
+        // Found key, now skip ":"
+        k:int = i + 2 + klen
+        while k < jlen && (json as *char)[k] != 58 as char:
+          k = k + 1
+        if k < jlen:
+          k = k + 1  // skip ':'
+          while k < jlen && ((json as *char)[k] == 32 as char || (json as *char)[k] == 9 as char):
+            k = k + 1
+          ret k
+    i = i + 1
+  ret 0 - 1
+
+fn row_get_str(json:str, key:str) -> str:
+  off:int = _json_find_key(json, key)
+  if off < 0: ret 0 as str
+  if (json as *char)[off] != 34 as char: ret 0 as str  // not a string value
+  start:int = off + 1
+  jlen:int = len(json)
+  end:int = start
+  while end < jlen:
+    c:int = (json as *char)[end] as int
+    if c == 34 && (end == 0 || (json as *char)[end - 1] != 92 as char): break
+    end = end + 1
+  n:int = end - start
+  out:*char = malloc(n + 1)
+  if out == 0: ret 0 as str
+  unsafe:
+    memcpy(out, (json as *char) + start, n)
+  out[n] = 0 as char
+  ret out as str
+
+fn row_get_int(json:str, key:str) -> int:
+  off:int = _json_find_key(json, key)
+  if off < 0: ret 0
+  jlen:int = len(json)
+  sign:int = 1
+  n:int = 0
+  i:int = off
+  if (json as *char)[i] == 45 as char:
+    sign = 0 - 1
+    i = i + 1
+  while i < jlen:
+    c:int = (json as *char)[i] as int
+    if c < 48 || c > 57: break
+    n = n * 10 + (c - 48)
+    i = i + 1
+  ret n * sign
+
+// Build a simple JSON object from key-value pairs
+fn row_json2(k1:str, v1:str, k2:str, v2:str) -> str:
+  p1:str = _db_join2("{\"", k1)
+  p2:str = _db_join2(p1, "\":\"")
+  p3:str = _db_join2(p2, v1)
+  p4:str = _db_join2(p3, "\",\"")
+  p5:str = _db_join2(p4, k2)
+  p6:str = _db_join2(p5, "\":\"")
+  p7:str = _db_join2(p6, v2)
+  out:str = _db_join2(p7, "\"}")
+  free(p1); free(p2); free(p3); free(p4); free(p5); free(p6); free(p7)
+  ret out
+
+fn row_json3(k1:str, v1:str, k2:str, v2:str, k3:str, v3:str) -> str:
+  base:str = row_json2(k1, v1, k2, v2)
+  // Remove trailing "}" and add third field
+  bn:int = len(base)
+  if bn > 0:
+    (base as *char)[bn - 1] = 0 as char  // remove '}'
+  p1:str = _db_join2(base, ",\"")
+  p2:str = _db_join2(p1, k3)
+  p3:str = _db_join2(p2, "\":\"")
+  p4:str = _db_join2(p3, v3)
+  out:str = _db_join2(p4, "\"}")
+  free(base); free(p1); free(p2); free(p3); free(p4)
+  ret out
+
+// ─────────────────────────────────────────────────────────────
+// Query API: simple filter scan
+// ─────────────────────────────────────────────────────────────
+
+// Query all rows in table where json_field = value.
+// Returns JSON array string of matching rows. Caller frees.
+fn query_where(db:*TezzDb, table:str, field:str, value:str) -> str:
+  if db == 0 || table == 0: ret 0 as str
+  cur:*DbCursor = cursor_open(db, table)
+  if cur == 0: ret 0 as str
+  result:str = "["
+  count:int = 0
+  while 1:
+    row:*DbRow = cursor_next(cur)
+    if row == 0 as *DbRow: break
+    // Check field match
+    fv:str = row_get_str((*row).data, field)
+    match_ok:int = 0
+    if field == 0:
+      match_ok = 1
+    else if fv != 0 && strcmp(fv, value) == 0:
+      match_ok = 1
+    if fv != 0: free(fv)
+    if match_ok != 0:
+      if count > 0:
+        t0:str = _db_join2(result, ",")
+        free(result); result = t0
+      t1:str = _db_join2(result, (*row).data)
+      free(result); result = t1
+      count = count + 1
+    row_free(row)
+  cursor_close(cur)
+  out:str = _db_join2(result, "]")
+  free(result)
+  ret out
+
+// Query all rows — returns JSON array
+fn query_all(db:*TezzDb, table:str) -> str:
+  ret query_where(db, table, 0 as str, 0 as str)
+
+// Query with pk range — returns JSON array
+fn query_range(db:*TezzDb, table:str, pk_min:int, pk_max:int) -> str:
+  if db == 0 || table == 0: ret 0 as str
+  cur:*DbCursor = cursor_range(db, table, pk_min, pk_max)
+  if cur == 0: ret 0 as str
+  result:str = "["
+  count:int = 0
+  while 1:
+    row:*DbRow = cursor_next(cur)
+    if row == 0 as *DbRow: break
+    if count > 0:
+      t0:str = _db_join2(result, ",")
+      free(result); result = t0
+    t1:str = _db_join2(result, (*row).data)
+    free(result); result = t1
+    count = count + 1
+    row_free(row)
+  cursor_close(cur)
+  out:str = _db_join2(result, "]")
+  free(result)
+  ret out
+
+// ─────────────────────────────────────────────────────────────
+// User / Auth helpers (maintained from v1.0)
+// ─────────────────────────────────────────────────────────────
+
+fn _db_hash_password(user:str, password:str) -> str:
+  seed:str = _db_join2(user, password)
+  n:int = len(seed)
+  h:int = 2166136261
+  i:int = 0
+  while i < n:
+    h = h ^ ((seed[i] as int) & 255)
+    h = h * 16777619
+    i = i + 1
+  hs:str = _db_itoa(h)
+  free(seed)
+  ret hs
+
+fn register_user(db:*TezzDb, user:str, password:str) -> int:
+  if db == 0 || user == 0 || password == 0: ret TEZZDB_ERR
+  // Ensure users table exists
+  if table_exists(db, "users") == 0:
+    table_create(db, "users")
+  // Check duplicate
+  existing:str = query_where(db, "users", "username", user)
+  dup:int = 0
+  if existing != 0 && len(existing) > 2: dup = 1
+  if existing != 0: free(existing)
+  if dup != 0: ret TEZZDB_DUPLICATE
+  hash:str = _db_hash_password(user, password)
+  row:str = row_json2("username", user, "password_hash", hash)
+  free(hash)
+  r:int = insert(db, "users", row)
+  free(row)
+  if r < 0: ret TEZZDB_ERR
+  ret TEZZDB_OK
+
+fn login_token(db:*TezzDb, user:str, password:str) -> str:
+  if db == 0 || user == 0 || password == 0: ret 0 as str
+  if table_exists(db, "users") == 0: ret 0 as str
+  rows:str = query_where(db, "users", "username", user)
+  if rows == 0 || len(rows) <= 2:
+    if rows != 0: free(rows)
+    ret 0 as str
+  // Extract stored hash
+  stored_hash:str = row_get_str(rows, "password_hash")
+  free(rows)
+  if stored_hash == 0: ret 0 as str
+  computed:str = _db_hash_password(user, password)
+  ok:int = strcmp(stored_hash, computed) == 0
+  free(stored_hash); free(computed)
+  if ok == 0: ret 0 as str
+  // Issue token
+  ts:int = time.now_ms()
+  ts_s:str = _db_itoa(ts)
+  tok:str = _db_join2("tok_", user)
+  tok2:str = _db_join2(tok, "_")
+  token:str = _db_join2(tok2, ts_s)
+  free(tok); free(tok2); free(ts_s)
+  // Store in sessions table
+  if table_exists(db, "sessions") == 0:
+    table_create(db, "sessions")
+  tok_row:str = row_json2("token", token, "username", user)
+  insert(db, "sessions", tok_row)
+  free(tok_row)
+  ret token
+
+fn user_from_token(db:*TezzDb, token:str) -> str:
+  if db == 0 || token == 0: ret 0 as str
+  if table_exists(db, "sessions") == 0: ret 0 as str
+  rows:str = query_where(db, "sessions", "token", token)
+  if rows == 0 || len(rows) <= 2:
+    if rows != 0: free(rows)
+    ret 0 as str
+  uname:str = row_get_str(rows, "username")
+  free(rows)
+  ret uname
+
+// ─────────────────────────────────────────────────────────────
+// Database info / diagnostics
+// ─────────────────────────────────────────────────────────────
+
+fn db_page_count(db:*TezzDb) -> int:
+  if db == 0: ret 0
+  ret (*db).page_count
+
+fn db_table_count(db:*TezzDb) -> int:
+  if db == 0: ret 0
+  ret (*db).table_count
+
+fn db_size_bytes(db:*TezzDb) -> int:
+  if db == 0: ret 0
+  ret (*db).page_count * DB_PAGE_SIZE
+
+fn db_table_name(db:*TezzDb, idx:int) -> str:
+  if db == 0 || idx < 0 || idx >= (*db).table_count: ret 0 as str
+  ret (*db).tables[idx].name
+
+fn db_path(db:*TezzDb) -> str:
+  if db == 0: ret 0 as str
+  ret (*db).path
+
+fn db_print_info(db:*TezzDb) -> int:
+  if db == 0: ret TEZZDB_ERR
+  say "TezzDB 2.0 Info:"
+  say "  path: ", db_path(db)
+  say "  pages: ", db_page_count(db), " (", db_size_bytes(db) / 1024, " KB)"
+  say "  tables: ", db_table_count(db)
+  i:int = 0
+  while i < (*db).table_count:
+    say "    [", i, "] ", (*db).tables[i].name, " rows=", (*db).tables[i].row_count
+    i = i + 1
+  ret TEZZDB_OK
+
+// ─────────────────────────────────────────────────────────────
+// Integer-handle API — use plain int handles to avoid cross-module
+// typed-pointer constraints in test and user code.
+// ─────────────────────────────────────────────────────────────
+
+fn db_open(path:str) -> *char:
+  db:*TezzDb = open(path)
+  ret db as *char
+
+fn db_close(h:*char) -> int:
+  if h == 0 as *char: ret TEZZDB_ERR
+  ret close(h as *TezzDb)
+
+fn db_table_create(h:*char, name:str) -> int:
+  if h == 0 as *char: ret TEZZDB_ERR
+  ret table_create(h as *TezzDb, name)
+
+fn db_table_drop(h:*char, name:str) -> int:
+  if h == 0 as *char: ret TEZZDB_ERR
+  ret table_drop(h as *TezzDb, name)
+
+fn db_table_exists(h:*char, name:str) -> int:
+  if h == 0 as *char: ret 0
+  ret table_exists(h as *TezzDb, name)
+
+fn db_table_row_count(h:*char, name:str) -> int:
+  if h == 0 as *char: ret 0
+  ret table_row_count(h as *TezzDb, name)
+
+fn db_table_index_create(h:*char, table:str, col:str) -> int:
+  if h == 0 as *char: ret TEZZDB_ERR
+  ret table_index_create(h as *TezzDb, table, col)
+
+fn db_begin(h:*char) -> int:
+  if h == 0 as *char: ret TEZZDB_ERR
+  ret begin(h as *TezzDb)
+
+fn db_commit(h:*char) -> int:
+  if h == 0 as *char: ret TEZZDB_ERR
+  ret commit(h as *TezzDb)
+
+fn db_rollback(h:*char) -> int:
+  if h == 0 as *char: ret TEZZDB_ERR
+  ret rollback(h as *TezzDb)
+
+fn db_insert(h:*char, table:str, data:str) -> int:
+  if h == 0 as *char: ret TEZZDB_ERR
+  ret insert(h as *TezzDb, table, data)
+
+fn db_insert_pk(h:*char, table:str, pk:int, data:str) -> int:
+  if h == 0 as *char: ret TEZZDB_ERR
+  ret insert_pk(h as *TezzDb, table, pk, data)
+
+fn db_get(h:*char, table:str, pk:int) -> str:
+  if h == 0 as *char: ret 0 as str
+  ret get(h as *TezzDb, table, pk)
+
+fn db_update(h:*char, table:str, pk:int, new_data:str) -> int:
+  if h == 0 as *char: ret TEZZDB_ERR
+  ret update(h as *TezzDb, table, pk, new_data)
+
+fn db_delete(h:*char, table:str, pk:int) -> int:
+  if h == 0 as *char: ret TEZZDB_ERR
+  ret delete(h as *TezzDb, table, pk)
+
+fn db_query_all(h:*char, table:str) -> str:
+  if h == 0 as *char: ret 0 as str
+  ret query_all(h as *TezzDb, table)
+
+fn db_query_where(h:*char, table:str, field:str, value:str) -> str:
+  if h == 0 as *char: ret 0 as str
+  ret query_where(h as *TezzDb, table, field, value)
+
+fn db_query_range(h:*char, table:str, pk_min:int, pk_max:int) -> str:
+  if h == 0 as *char: ret 0 as str
+  ret query_range(h as *TezzDb, table, pk_min, pk_max)
+
+fn db_info(h:*char) -> int:
+  if h == 0 as *char: ret TEZZDB_ERR
+  ret db_print_info(h as *TezzDb)
+
+fn db_register_user(h:*char, user:str, password:str) -> int:
+  if h == 0 as *char: ret TEZZDB_ERR
+  ret register_user(h as *TezzDb, user, password)
+
+fn db_login_token(h:*char, user:str, password:str) -> str:
+  if h == 0 as *char: ret 0 as str
+  ret login_token(h as *TezzDb, user, password)
+
+fn db_user_from_token(h:*char, token:str) -> str:
+  if h == 0 as *char: ret 0 as str
+  ret user_from_token(h as *TezzDb, token)
+
+fn db_cursor_open(h:*char, table:str) -> *char:
+  if h == 0 as *char: ret 0 as *char
+  cur:*DbCursor = cursor_open(h as *TezzDb, table)
+  ret cur as *char
+
+fn db_cursor_range(h:*char, table:str, pk_min:int, pk_max:int) -> *char:
+  if h == 0 as *char: ret 0 as *char
+  cur:*DbCursor = cursor_range(h as *TezzDb, table, pk_min, pk_max)
+  ret cur as *char
+
+fn db_cursor_next(cur_h:*char) -> str:
+  if cur_h == 0 as *char: ret 0 as str
+  cur:*DbCursor = cur_h as *DbCursor
+  row:*DbRow = cursor_next(cur)
+  if row == 0 as *DbRow: ret 0 as str
+  data:str = (*row).data
+  pk:int = (*row).pk
+  pk_s:str = _db_itoa(pk)
+  pk_json:str = _db_join2("{\"_pk\":", pk_s)
+  free(pk_s)
+  if data != 0 && len(data) > 2:
+    dn:int = len(data)
+    trimmed:*char = malloc(dn)
+    if trimmed != 0:
+      unsafe:
+        memcpy(trimmed, data as *char, dn - 1)
+      trimmed[dn - 1] = 0 as char
+      joined1:str = _db_join2(pk_json, ",")
+      joined2:str = _db_join2(joined1, trimmed as str)
+      out_row:str = _db_join2(joined2, "}")
+      free(joined1); free(joined2); free(pk_json); free(trimmed)
+      row_free(row)
+      ret out_row
+    free(pk_json)
+  else:
+    free(pk_json)
+  row_free(row)
+  ret 0 as str
+
+fn db_cursor_close(cur_h:*char) -> int:
+  if cur_h == 0 as *char: ret TEZZDB_ERR
+  ret cursor_close(cur_h as *DbCursor)
+
+
+

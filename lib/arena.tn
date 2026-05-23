@@ -1,0 +1,147 @@
+// arena module — bump/arena allocator for fast batch allocation
+// Arenas allocate from a contiguous buffer and free all at once.
+// Use for temporary computation, parser state, request lifetime, etc.
+//
+// Usage:
+//   a:*Arena = arena_new(1024 * 1024)   // 1 MB arena
+//   buf:*char = arena_alloc(a, 256)     // bump-allocate 256 bytes
+//   arena_reset(a)                       // free all at once (O(1))
+//   arena_free(a)                        // release arena itself
+
+struct Arena:
+  buf:*char
+  pos:int
+  cap:int
+  owns_buf:int
+
+// Create a new arena with given capacity in bytes
+fn arena_new(cap:int) -> *Arena:
+  if cap <= 0:
+    ret 0 as *Arena
+  a:*Arena = (*Arena)malloc(sizeof(Arena))
+  if a == 0:
+    ret 0 as *Arena
+  (*a).buf = malloc(cap)
+  if (*a).buf == 0:
+    free(a)
+    ret 0 as *Arena
+  (*a).pos = 0
+  (*a).cap = cap
+  (*a).owns_buf = 1
+  ret a
+
+// Create an arena wrapping an existing buffer (no ownership)
+fn arena_from_buf(buf:*char, cap:int) -> *Arena:
+  if buf == 0 || cap <= 0:
+    ret 0 as *Arena
+  a:*Arena = (*Arena)malloc(sizeof(Arena))
+  if a == 0:
+    ret 0 as *Arena
+  (*a).buf = buf
+  (*a).pos = 0
+  (*a).cap = cap
+  (*a).owns_buf = 0
+  ret a
+
+// Allocate n bytes from the arena (8-byte aligned)
+fn arena_alloc(a:*Arena, n:int) -> *char:
+  if a == 0 || n <= 0:
+    ret 0 as *char
+  // Align pos to 8 bytes
+  pos:int = (*a).pos
+  aligned:int = (pos + 7) & (0 - 8)
+  if aligned + n > (*a).cap:
+    ret 0 as *char    // out of space
+  (*a).pos = aligned + n
+  unsafe:
+    ret (*a).buf + aligned
+
+// Allocate n bytes aligned to align_to bytes (must be power of 2)
+fn arena_alloc_aligned(a:*Arena, n:int, align_to:int) -> *char:
+  if a == 0 || n <= 0 || align_to <= 0:
+    ret 0 as *char
+  pos:int = (*a).pos
+  mask:int = align_to - 1
+  aligned:int = (pos + mask) & (0 - align_to)
+  if aligned + n > (*a).cap:
+    ret 0 as *char
+  (*a).pos = aligned + n
+  unsafe:
+    ret (*a).buf + aligned
+
+// Reset arena: reclaim all space (O(1), no individual frees)
+fn arena_reset(a:*Arena) -> int:
+  if a == 0:
+    ret 0 - 1
+  (*a).pos = 0
+  ret 0
+
+// Free the arena and its buffer
+fn arena_free(a:*Arena) -> int:
+  if a == 0:
+    ret 0 - 1
+  if (*a).owns_buf != 0 && (*a).buf != 0:
+    free((*a).buf)
+  free(a)
+  ret 0
+
+// Return remaining bytes in the arena
+fn arena_remaining(a:*Arena) -> int:
+  if a == 0:
+    ret 0
+  ret (*a).cap - (*a).pos
+
+// Return bytes used
+fn arena_used(a:*Arena) -> int:
+  if a == 0:
+    ret 0
+  ret (*a).pos
+
+// Return total capacity
+fn arena_cap(a:*Arena) -> int:
+  if a == 0:
+    ret 0
+  ret (*a).cap
+
+// Duplicate a string into the arena (no null check on result)
+fn arena_strdup(a:*Arena, s:str) -> str:
+  if a == 0 || s == 0:
+    ret 0 as str
+  n:int = len(s)
+  p:*char = arena_alloc(a, n + 1)
+  if p == 0:
+    ret 0 as str
+  unsafe:
+    memcpy(p, s, n)
+    p[n] = 0 as char
+  ret p as str
+
+// Copy n bytes into the arena
+fn arena_memdup(a:*Arena, src:*char, n:int) -> *char:
+  if a == 0 || src == 0 || n <= 0:
+    ret 0 as *char
+  p:*char = arena_alloc(a, n)
+  if p == 0:
+    ret 0 as *char
+  unsafe:
+    memcpy(p, src, n)
+  ret p
+
+// -------------------------
+// Stack (mark/release) API
+// -------------------------
+
+// Save current arena position (for temporary sub-allocations)
+fn arena_mark(a:*Arena) -> int:
+  if a == 0:
+    ret 0 - 1
+  ret (*a).pos
+
+// Release back to a saved mark (undo sub-allocations)
+fn arena_release(a:*Arena, mark:int) -> int:
+  if a == 0 || mark < 0:
+    ret 0 - 1
+  if mark > (*a).cap:
+    ret 0 - 1
+  (*a).pos = mark
+  ret 0

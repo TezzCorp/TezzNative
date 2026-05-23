@@ -1,0 +1,21 @@
+// time module: sleep + time/date helpers
+
+fn sleep(sec:int) -> int:
+  if sec < 0:
+    ret 0
+  ret sleep_ms(sec * 1000)
+
+fn now() -> int:
+  ret time_now()
+
+fn now_ms() -> int:
+  ret time_now_ms()
+
+fn now_ns() -> int:
+  ret time_now_ns()
+
+fn date_local() -> str:
+  ret date_now()
+
+fn date_utc() -> str:
+  ret date_now_utc()

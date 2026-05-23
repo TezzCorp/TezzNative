@@ -1,0 +1,187 @@
+// gpu module: GPU compute abstraction for TezzNative.
+//
+// Provides a unified interface for GPU-accelerated matrix math
+// targeting both NVIDIA (CUDA) and AMD/Intel (Vulkan Compute).
+//
+// Architecture:
+//   - All heavy lifting is done by the native runtime (tnrt.c).
+//   - The .tn layer exposes a clean, portable API.
+//   - If no GPU is present, all ops automatically fall back to
+//     the SIMD-accelerated CPU path in tensor.tn.
+//
+// Use cases:
+//   - Offloading LLM matrix multiplications to GPU VRAM.
+//   - Running CUDA kernels from TezzNative programs.
+//   - Vulkan Compute for cross-vendor GPU math.
+
+import "io"
+
+// ─────────────────────────────────────────────
+// Runtime extern hooks (implemented in tnrt.c)
+// ─────────────────────────────────────────────
+
+extern fn tn_gpu_available() -> int
+extern fn tn_gpu_vendor() -> int
+extern fn tn_gpu_device_name() -> str
+extern fn tn_gpu_vram_total() -> int
+extern fn tn_gpu_vram_free() -> int
+extern fn tn_gpu_init() -> int
+extern fn tn_gpu_shutdown() -> int
+extern fn tn_gpu_alloc(bytes:int) -> *char
+extern fn tn_gpu_free(ptr:*char) -> int
+extern fn tn_gpu_upload(host:*char, device:*char, bytes:int) -> int
+extern fn tn_gpu_download(device:*char, host:*char, bytes:int) -> int
+extern fn tn_gpu_sgemm(A:*char, B:*char, C:*char, M:int, N:int, K:int) -> int
+extern fn tn_gpu_relu(dst:*char, src:*char, n:int) -> int
+extern fn tn_gpu_gelu(dst:*char, src:*char, n:int) -> int
+extern fn tn_gpu_softmax(dst:*char, src:*char, rows:int, cols:int) -> int
+extern fn tn_gpu_sync() -> int
+extern fn tn_gpu_backend_name() -> str
+
+// ─────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────
+
+let GPU_VENDOR_NONE:int    = 0
+let GPU_VENDOR_NVIDIA:int  = 1
+let GPU_VENDOR_AMD:int     = 2
+let GPU_VENDOR_INTEL:int   = 3
+let GPU_VENDOR_APPLE:int   = 4
+
+let GPU_BACKEND_NONE:int   = 0
+let GPU_BACKEND_CUDA:int   = 1
+let GPU_BACKEND_VULKAN:int = 2
+let GPU_BACKEND_METAL:int  = 3
+
+// ─────────────────────────────────────────────
+// GPU Device Info
+// ─────────────────────────────────────────────
+
+// Returns 1 if a GPU is detected and compute is available, 0 otherwise.
+fn available() -> int:
+  ret tn_gpu_available()
+
+// Returns the vendor constant (GPU_VENDOR_*).
+fn vendor() -> int:
+  ret tn_gpu_vendor()
+
+// Returns a human-readable GPU name (e.g. "NVIDIA GeForce RTX 4090").
+fn device_name() -> str:
+  ret tn_gpu_device_name()
+
+// Returns total VRAM in bytes.
+fn vram_total() -> int:
+  ret tn_gpu_vram_total()
+
+// Returns free VRAM in bytes.
+fn vram_free() -> int:
+  ret tn_gpu_vram_free()
+
+// Returns the active backend name (e.g. "CUDA 12.4", "Vulkan 1.3").
+fn backend_name() -> str:
+  ret tn_gpu_backend_name()
+
+// Print GPU device summary to stdout.
+fn device_info() -> int:
+  if tn_gpu_available() == 0:
+    say "[GPU] No GPU detected. Using CPU fallback."
+    ret 0
+  say "[GPU] Device    : ", tn_gpu_device_name()
+  say "[GPU] Backend   : ", tn_gpu_backend_name()
+  vram_mb:int = tn_gpu_vram_total() / (1024 * 1024)
+  free_mb:int = tn_gpu_vram_free() / (1024 * 1024)
+  say "[GPU] VRAM Total: ", vram_mb, " MB"
+  say "[GPU] VRAM Free : ", free_mb, " MB"
+  ret 0
+
+// ─────────────────────────────────────────────
+// Lifecycle
+// ─────────────────────────────────────────────
+
+// Initialize the GPU compute context.
+// Must be called before any gpu.alloc() or gpu.sgemm() calls.
+fn init() -> int:
+  if tn_gpu_available() == 0:
+    ret 0
+  ret tn_gpu_init()
+
+// Shut down the GPU compute context and free all internal resources.
+fn shutdown() -> int:
+  ret tn_gpu_shutdown()
+
+// ─────────────────────────────────────────────
+// VRAM Memory Management
+// ─────────────────────────────────────────────
+
+// Allocate 'bytes' of memory in GPU VRAM.
+// Returns a device pointer (not a CPU pointer! Do not read directly.)
+fn alloc(bytes:int) -> *char:
+  if bytes <= 0:
+    ret 0 as *char
+  ret tn_gpu_alloc(bytes)
+
+// Free a GPU VRAM buffer previously allocated with gpu.alloc().
+fn free_buf(ptr:*char) -> int:
+  if ptr == 0:
+    ret 0
+  ret tn_gpu_free(ptr)
+
+// ─────────────────────────────────────────────
+// Data Transfer (CPU <-> GPU)
+// ─────────────────────────────────────────────
+
+// Upload data from CPU RAM to GPU VRAM.
+// host   = source CPU pointer (e.g. a tensor.data buffer)
+// device = destination GPU pointer (from gpu.alloc())
+// bytes  = number of bytes to copy
+fn upload(host:*char, device:*char, bytes:int) -> int:
+  if host == 0 || device == 0 || bytes <= 0:
+    ret 0 - 1
+  ret tn_gpu_upload(host, device, bytes)
+
+// Download data from GPU VRAM back to CPU RAM.
+fn download(device:*char, host:*char, bytes:int) -> int:
+  if device == 0 || host == 0 || bytes <= 0:
+    ret 0 - 1
+  ret tn_gpu_download(device, host, bytes)
+
+// ─────────────────────────────────────────────
+// GPU Compute Kernels
+// ─────────────────────────────────────────────
+
+// SGEMM: Single-precision General Matrix Multiplication.
+// C = A * B  where A is MxK, B is KxN, C is MxN.
+// All three pointers must be GPU device pointers!
+// This is the core LLM inference operation.
+fn sgemm(A:*char, B:*char, C:*char, M:int, N:int, K:int) -> int:
+  if A == 0 || B == 0 || C == 0:
+    ret 0 - 1
+  if M <= 0 || N <= 0 || K <= 0:
+    ret 0 - 1
+  ret tn_gpu_sgemm(A, B, C, M, N, K)
+
+// Apply ReLU activation on a GPU buffer.
+// n = number of float elements (NOT bytes).
+fn relu(dst:*char, src:*char, n:int) -> int:
+  if dst == 0 || src == 0 || n <= 0:
+    ret 0 - 1
+  ret tn_gpu_relu(dst, src, n)
+
+// Apply GELU activation on a GPU buffer.
+// Used in Transformer layers (GPT, LLaMA, Gemma).
+fn gelu(dst:*char, src:*char, n:int) -> int:
+  if dst == 0 || src == 0 || n <= 0:
+    ret 0 - 1
+  ret tn_gpu_gelu(dst, src, n)
+
+// Apply Softmax on GPU. Used for attention score normalization.
+// rows, cols define the 2D tensor shape.
+fn softmax(dst:*char, src:*char, rows:int, cols:int) -> int:
+  if dst == 0 || src == 0 || rows <= 0 || cols <= 0:
+    ret 0 - 1
+  ret tn_gpu_softmax(dst, src, rows, cols)
+
+// Block until all pending GPU operations are complete.
+// Always call this before reading results back to the CPU.
+fn sync() -> int:
+  ret tn_gpu_sync()

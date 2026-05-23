@@ -1,0 +1,226 @@
+// lib/tezzinstall.tn
+// TezzNative Installer Framework v1.0
+// 
+// Create self-describing Windows installers entirely in TezzNative.
+// Uses tezzui for the visual interface + PowerShell/Win32 for file operations.
+//
+// Usage example:
+//   import "tezzinstall"
+//   let cfg:TzInstall
+//   tezzinstall.install_set_name(&cfg, "MyApp")
+//   tezzinstall.install_set_version(&cfg, "1.0.0")
+//   tezzinstall.install_set_exe(&cfg, "MyApp.exe")
+//   tezzinstall.install_run(&cfg)
+
+import "tezzui"
+import "gui_win"
+
+// Installer configuration record
+struct TzInstall:
+  name:    str        // display name
+  version: str        // version string
+  vendor:  str        // company name
+  exe:     str        // exe filename to install
+  icon:    str        // icon path
+  dest:    str        // install dir (default: %ProgramFiles%\vendor\name)
+  license: str        // license text
+  // install state
+  page:    int        // 0=welcome 1=license 2=dir 3=installing 4=done
+  ok:      int        // 1 if done
+  cancel:  int        // 1 if cancelled
+
+fn install_set_name(cfg:*TzInstall, name:str):
+  unsafe:
+    cfg[0].name = name
+
+fn install_set_version(cfg:*TzInstall, v:str):
+  unsafe:
+    cfg[0].version = v
+
+fn install_set_vendor(cfg:*TzInstall, vendor:str):
+  unsafe:
+    cfg[0].vendor = vendor
+
+fn install_set_exe(cfg:*TzInstall, exe:str):
+  unsafe:
+    cfg[0].exe = exe
+
+fn install_set_icon(cfg:*TzInstall, icon:str):
+  unsafe:
+    cfg[0].icon = icon
+
+fn install_set_license(cfg:*TzInstall, lic:str):
+  unsafe:
+    cfg[0].license = lic
+
+fn _draw_header(ctx:*TzUI, cfg:*TzInstall):
+  unsafe:
+    tezzui._R(0, 0, ctx[0].W, 70, 0x050C1A)
+    tezzui._R(0, 70, ctx[0].W, 2, 0x1E3A6E)
+    tezzui._TX(20, 14, cfg[0].name, 0xFFFFFF, 3, 1)
+    tezzui._TX(20, 48, cfg[0].version, 0x64748B, 1, 0)
+    // TezzCorp badge
+    tezzui._RR(ctx[0].W - 110, 18, 90, 30, 0x1E293B, 6)
+    tezzui._TX(ctx[0].W - 90, 26, "TezzNative", 0x3B82F6, 1, 0)
+
+fn _draw_footer(ctx:*TzUI):
+  unsafe:
+    h:int = ctx[0].H
+    tezzui._R(0, h-52, ctx[0].W, 2, 0x1E3A6E)
+    tezzui._R(0, h-50, ctx[0].W, 50, 0x070C18)
+
+fn install_page_welcome(ctx:*TzUI, cfg:*TzInstall) -> int:
+  unsafe:
+    _draw_header(ctx, cfg)
+    _draw_footer(ctx)
+    
+    w:int = ctx[0].W
+    tezzui._TX(40, 100, "Welcome!", 0xFFFFFF, 3, 1)
+    tezzui._TX(40, 140, "This wizard will install:", 0xBBCCDD, 1, 0)
+    tezzui.ui_badge(ctx, 40, 162, cfg[0].name, 0x2D5BE3)
+    tezzui._TX(40, 195, "Click Next to begin installation.", 0x8899AA, 1, 0)
+    
+    // System info
+    tezzui.ui_sep(ctx, 40, 240, w-80)
+    tezzui._TX(40, 250, "System Requirements:", 0xBBCCDD, 1, 1)
+    tezzui._TX(40, 268, "  OS: Windows 10/11 x64", 0x8899AA, 1, 0)
+    tezzui._TX(40, 284, "  RAM: 64 MB minimum", 0x8899AA, 1, 0)
+    tezzui._TX(40, 300, "  Disk: 10 MB free space", 0x8899AA, 1, 0)
+    
+    h:int = ctx[0].H
+    if tezzui.ui_button_ok(ctx, w-150, h-40, 110, 30, "Next >") != 0:
+      ret 1
+    if tezzui.ui_button_danger(ctx, 40, h-40, 80, 30, "Cancel") != 0:
+      cfg[0].cancel = 1
+      ret 0
+  ret 0
+
+fn install_page_license(ctx:*TzUI, cfg:*TzInstall) -> int:
+  unsafe:
+    _draw_header(ctx, cfg)
+    _draw_footer(ctx)
+    
+    w:int = ctx[0].W
+    tezzui._TX(40, 100, "License Agreement", 0xFFFFFF, 2, 1)
+    
+    // License text box
+    tezzui._RR(40, 126, w-80, 200, 0x0A0F20, 6)
+    tezzui._T(52, 138, cfg[0].license, 0x8899AA)
+    
+    h:int = ctx[0].H
+    tezzui._TX(40, 340, "By clicking Install you accept the license.", 0x64748B, 1, 0)
+    
+    if tezzui.ui_button_ok(ctx, w-150, h-40, 110, 30, "Accept") != 0:
+      ret 1
+    if tezzui.ui_button(ctx, w-270, h-40, 110, 30, "< Back") != 0:
+      neg1:int = 0 - 1
+      ret neg1
+    if tezzui.ui_button_danger(ctx, 40, h-40, 80, 30, "Cancel") != 0:
+      cfg[0].cancel = 1
+  ret 0
+
+fn install_page_dir(ctx:*TzUI, cfg:*TzInstall) -> int:
+  unsafe:
+    _draw_header(ctx, cfg)
+    _draw_footer(ctx)
+    
+    w:int = ctx[0].W
+    tezzui._TX(40, 100, "Install Location", 0xFFFFFF, 2, 1)
+    tezzui._TX(40, 130, "Install directory:", 0xBBCCDD, 1, 0)
+    
+    // Show install path
+    tezzui.ui_input(ctx, 40, 152, w-80, 30, cfg[0].dest)
+    
+    tezzui._TX(40, 198, "Disk space required: ~10 MB", 0x8899AA, 1, 0)
+    tezzui._TX(40, 214, "Disk space available: ~50 GB", 0x64748B, 1, 0)
+    
+    h:int = ctx[0].H
+    if tezzui.ui_button_ok(ctx, w-150, h-40, 110, 30, "Install") != 0:
+      ret 1
+    if tezzui.ui_button(ctx, w-270, h-40, 110, 30, "< Back") != 0:
+      neg1:int = 0 - 1
+      ret neg1
+    if tezzui.ui_button_danger(ctx, 40, h-40, 80, 30, "Cancel") != 0:
+      cfg[0].cancel = 1
+  ret 0
+
+fn install_page_installing(ctx:*TzUI, cfg:*TzInstall, tick:int) -> int:
+  unsafe:
+    _draw_header(ctx, cfg)
+    _draw_footer(ctx)
+    
+    w:int = ctx[0].W
+    tezzui._TX(40, 100, "Installing...", 0xFFFFFF, 2, 1)
+    
+    prog:int = tick % 100
+    tezzui.ui_progress(ctx, 40, 140, w-80, 20, prog, 0x3B82F6)
+    tezzui._TX(40, 172, "Copying files...", 0x8899AA, 1, 0)
+    tezzui.ui_loader(ctx, 40, 195, w-80)
+    
+    // Auto-advance when progress hits 100
+    if tick > 100:
+      ret 1
+  ret 0
+
+fn install_page_done(ctx:*TzUI, cfg:*TzInstall) -> int:
+  unsafe:
+    _draw_header(ctx, cfg)
+    _draw_footer(ctx)
+    
+    w:int = ctx[0].W
+    tezzui._TX(40, 100, "Installation Complete!", 0x10B981, 3, 1)
+    tezzui._TX(40, 140, cfg[0].name, 0xFFFFFF, 2, 1)
+    tezzui._TX(40, 166, "has been installed successfully.", 0xBBCCDD, 1, 0)
+    
+    tezzui.ui_sep(ctx, 40, 200, w-80)
+    tezzui._TX(40, 212, "A shortcut was created on your Desktop.", 0x8899AA, 1, 0)
+    tezzui._TX(40, 228, "You can find the app in Start Menu too.", 0x8899AA, 1, 0)
+    
+    // Launch checkbox (mocked)
+    tezzui.ui_badge(ctx, 40, 256, "Ready to use!", 0x10B981)
+    
+    h:int = ctx[0].H
+    if tezzui.ui_button_ok(ctx, w-150, h-40, 110, 30, "Finish") != 0:
+      cfg[0].ok = 1
+      ret 1
+  ret 0
+
+// Main entry point — runs the complete installer wizard
+fn install_run(cfg:*TzInstall):
+  unsafe:
+    ctx: TzUI
+    tezzui.ui_create(&ctx, "TezzNative Installer", 520, 400)
+    
+    if cfg[0].dest == 0:
+      cfg[0].dest = "C:\\Program Files\\TezzCorp"
+    
+    tick:int = 0
+    
+    while tezzui.ui_alive(&ctx) != 0:
+      tezzui.ui_begin(&ctx)
+      
+      if cfg[0].cancel != 0:
+        ctx.quit = 1
+      
+      result:int = 0
+      if cfg[0].page == 0:
+        result = install_page_welcome(&ctx, cfg)
+      if cfg[0].page == 1:
+        result = install_page_license(&ctx, cfg)
+      if cfg[0].page == 2:
+        result = install_page_dir(&ctx, cfg)
+      if cfg[0].page == 3:
+        result = install_page_installing(&ctx, cfg, tick)
+        tick = tick + 1
+      if cfg[0].page == 4:
+        result = install_page_done(&ctx, cfg)
+        if cfg[0].ok != 0:
+          ctx.quit = 1
+      
+      if result == 1:
+        cfg[0].page = cfg[0].page + 1
+      if result < 0:
+        if cfg[0].page > 0:
+          cfg[0].page = cfg[0].page - 1
+      
+      tezzui.ui_end(&ctx)

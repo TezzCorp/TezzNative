@@ -1,0 +1,37 @@
+// event module: deterministic UI/input event queue primitives.
+// Hosted runtime lanes implement these via builtins for stability.
+
+struct TzEvent:
+  kind:int
+  key:int
+  x:int
+  y:int
+  buttons:int
+  mods:int
+  data:int
+
+struct TzEventQueue:
+  head:int
+  tail:int
+  len:int
+  dropped:int
+
+let TZ_EVENT_NONE:int = 0
+let TZ_EVENT_KEY:int = 1
+let TZ_EVENT_POINTER:int = 2
+let TZ_EVENT_BUTTON:int = 3
+let TZ_EVENT_CUSTOM:int = 4
+let TZ_EVENT_IME:int = 5
+let TZ_EVENT_WINDOW:int = 6
+let TZ_EVENT_QUEUE_CAP:int = 256
+
+extern fn tz_event_queue_init(q:*TzEventQueue) -> int
+extern fn tz_event_queue_clear(q:*TzEventQueue) -> int
+extern fn tz_event_queue_len(q:*TzEventQueue) -> int
+extern fn tz_event_queue_dropped(q:*TzEventQueue) -> int
+extern fn tz_event_push(q:*TzEventQueue, kind:int, key:int, x:int, y:int, buttons:int, mods:int, data:int) -> int
+extern fn tz_event_push_key(q:*TzEventQueue, key:int) -> int
+extern fn tz_event_push_pointer(q:*TzEventQueue, x:int, y:int, buttons:int, mods:int) -> int
+extern fn tz_event_push_button(q:*TzEventQueue, x:int, y:int, buttons:int, mods:int) -> int
+extern fn tz_event_pop(q:*TzEventQueue, out:*TzEvent) -> int
+extern fn tz_event_peek(q:*TzEventQueue, out:*TzEvent) -> int

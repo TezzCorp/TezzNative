@@ -1,0 +1,283 @@
+// frame module: deterministic rect + damage-region utilities for GUI compositors.
+
+struct TzRect:
+  x:int
+  y:int
+  w:int
+  h:int
+
+struct TzDamage:
+  rects:[TzRect;128]
+  n:int
+  overflow:int
+
+let TZ_DAMAGE_MAX:int = 128
+
+fn _tz_min(a:int, b:int) -> int:
+  if a < b:
+    ret a
+  ret b
+
+fn _tz_max(a:int, b:int) -> int:
+  if a > b:
+    ret a
+  ret b
+
+fn tz_rect_set(out:*TzRect, x:int, y:int, w:int, h:int) -> int:
+  if out == 0:
+    ret 0 - 1
+  out[0].x = x
+  out[0].y = y
+  out[0].w = w
+  out[0].h = h
+  ret 0
+
+fn tz_rect_valid(r:*TzRect) -> int:
+  if r == 0:
+    ret 0
+  if r[0].w <= 0 || r[0].h <= 0:
+    ret 0
+  ret 1
+
+fn tz_rect_intersect(out:*TzRect, a:*TzRect, b:*TzRect) -> int:
+  if out == 0 || a == 0 || b == 0:
+    ret 0
+  if tz_rect_valid(a) == 0 || tz_rect_valid(b) == 0:
+    ret 0
+  ax2:int = a[0].x + a[0].w
+  ay2:int = a[0].y + a[0].h
+  bx2:int = b[0].x + b[0].w
+  by2:int = b[0].y + b[0].h
+  x1:int = _tz_max(a[0].x, b[0].x)
+  y1:int = _tz_max(a[0].y, b[0].y)
+  x2:int = _tz_min(ax2, bx2)
+  y2:int = _tz_min(ay2, by2)
+  w:int = x2 - x1
+  h:int = y2 - y1
+  if w <= 0 || h <= 0:
+    ret 0
+  out[0].x = x1
+  out[0].y = y1
+  out[0].w = w
+  out[0].h = h
+  ret 1
+
+fn tz_rect_union(out:*TzRect, a:*TzRect, b:*TzRect) -> int:
+  if out == 0 || a == 0 || b == 0:
+    ret 0 - 1
+  a_ok:int = tz_rect_valid(a)
+  b_ok:int = tz_rect_valid(b)
+  if a_ok == 0 && b_ok == 0:
+    out[0].x = 0
+    out[0].y = 0
+    out[0].w = 0
+    out[0].h = 0
+    ret 0
+  if a_ok == 0:
+    out[0].x = b[0].x
+    out[0].y = b[0].y
+    out[0].w = b[0].w
+    out[0].h = b[0].h
+    ret 1
+  if b_ok == 0:
+    out[0].x = a[0].x
+    out[0].y = a[0].y
+    out[0].w = a[0].w
+    out[0].h = a[0].h
+    ret 1
+  ax2:int = a[0].x + a[0].w
+  ay2:int = a[0].y + a[0].h
+  bx2:int = b[0].x + b[0].w
+  by2:int = b[0].y + b[0].h
+  x1:int = _tz_min(a[0].x, b[0].x)
+  y1:int = _tz_min(a[0].y, b[0].y)
+  x2:int = _tz_max(ax2, bx2)
+  y2:int = _tz_max(ay2, by2)
+  out[0].x = x1
+  out[0].y = y1
+  out[0].w = x2 - x1
+  out[0].h = y2 - y1
+  ret 1
+
+fn tz_rect_touch_or_overlap(a:*TzRect, b:*TzRect) -> int:
+  if a == 0 || b == 0:
+    ret 0
+  if tz_rect_valid(a) == 0 || tz_rect_valid(b) == 0:
+    ret 0
+  ax2:int = a[0].x + a[0].w
+  ay2:int = a[0].y + a[0].h
+  bx2:int = b[0].x + b[0].w
+  by2:int = b[0].y + b[0].h
+  if ax2 < b[0].x:
+    ret 0
+  if bx2 < a[0].x:
+    ret 0
+  if ay2 < b[0].y:
+    ret 0
+  if by2 < a[0].y:
+    ret 0
+  ret 1
+
+fn tz_rect_clip(out:*TzRect, r:*TzRect, max_w:int, max_h:int) -> int:
+  if out == 0 || r == 0:
+    ret 0
+  if max_w <= 0 || max_h <= 0:
+    ret 0
+  if tz_rect_valid(r) == 0:
+    ret 0
+  x1:int = _tz_max(r[0].x, 0)
+  y1:int = _tz_max(r[0].y, 0)
+  x2:int = _tz_min(r[0].x + r[0].w, max_w)
+  y2:int = _tz_min(r[0].y + r[0].h, max_h)
+  if x2 <= x1 || y2 <= y1:
+    ret 0
+  out[0].x = x1
+  out[0].y = y1
+  out[0].w = x2 - x1
+  out[0].h = y2 - y1
+  ret 1
+
+fn tz_damage_reset(d:*TzDamage) -> int:
+  if d == 0:
+    ret 0 - 1
+  d[0].n = 0
+  d[0].overflow = 0
+  ret 0
+
+fn tz_damage_count(d:*TzDamage) -> int:
+  if d == 0:
+    ret 0
+  ret d[0].n
+
+fn tz_damage_overflow(d:*TzDamage) -> int:
+  if d == 0:
+    ret 0
+  ret d[0].overflow
+
+fn _tz_damage_remove_idx(d:*TzDamage, idx:int) -> int:
+  if d == 0:
+    ret 0 - 1
+  if idx < 0 || idx >= d[0].n:
+    ret 0 - 1
+  i:int = idx
+  while i < d[0].n - 1:
+    d[0].rects[i].x = d[0].rects[i + 1].x
+    d[0].rects[i].y = d[0].rects[i + 1].y
+    d[0].rects[i].w = d[0].rects[i + 1].w
+    d[0].rects[i].h = d[0].rects[i + 1].h
+    i = i + 1
+  d[0].n = d[0].n - 1
+  ret 0
+
+fn _tz_damage_full_bbox(d:*TzDamage, add:*TzRect, out:*TzRect) -> int:
+  if d == 0 || add == 0 || out == 0:
+    ret 0 - 1
+  if d[0].n <= 0:
+    out[0].x = add[0].x
+    out[0].y = add[0].y
+    out[0].w = add[0].w
+    out[0].h = add[0].h
+    ret 0
+  out[0].x = d[0].rects[0].x
+  out[0].y = d[0].rects[0].y
+  out[0].w = d[0].rects[0].w
+  out[0].h = d[0].rects[0].h
+  i:int = 1
+  while i < d[0].n:
+    tz_rect_union(out, out, &d[0].rects[i])
+    i = i + 1
+  tz_rect_union(out, out, add)
+  ret 0
+
+fn tz_damage_add_rect(d:*TzDamage, r:*TzRect) -> int:
+  if d == 0 || r == 0:
+    ret 0 - 1
+  if tz_rect_valid(r) == 0:
+    ret 0
+  merge_idx:int = 0 - 1
+  i:int = 0
+  while i < d[0].n:
+    if tz_rect_touch_or_overlap(&d[0].rects[i], r) != 0:
+      merge_idx = i
+      break
+    i = i + 1
+  if merge_idx >= 0:
+    tz_rect_union(&d[0].rects[merge_idx], &d[0].rects[merge_idx], r)
+    // Coalesce with other rectangles until stable.
+    i = 0
+    while i < d[0].n:
+      if i != merge_idx && tz_rect_touch_or_overlap(&d[0].rects[merge_idx], &d[0].rects[i]) != 0:
+        tz_rect_union(&d[0].rects[merge_idx], &d[0].rects[merge_idx], &d[0].rects[i])
+        _tz_damage_remove_idx(d, i)
+        if i < merge_idx:
+          merge_idx = merge_idx - 1
+        continue
+      i = i + 1
+    ret 1
+  if d[0].n < TZ_DAMAGE_MAX:
+    idx:int = d[0].n
+    d[0].rects[idx].x = r[0].x
+    d[0].rects[idx].y = r[0].y
+    d[0].rects[idx].w = r[0].w
+    d[0].rects[idx].h = r[0].h
+    d[0].n = d[0].n + 1
+    ret 1
+  d[0].overflow = 1
+  full:TzRect
+  _tz_damage_full_bbox(d, r, &full)
+  d[0].rects[0].x = full.x
+  d[0].rects[0].y = full.y
+  d[0].rects[0].w = full.w
+  d[0].rects[0].h = full.h
+  d[0].n = 1
+  ret 1
+
+fn tz_damage_add(d:*TzDamage, x:int, y:int, w:int, h:int) -> int:
+  r:TzRect
+  r.x = x
+  r.y = y
+  r.w = w
+  r.h = h
+  ret tz_damage_add_rect(d, &r)
+
+fn tz_damage_add_clipped(d:*TzDamage, x:int, y:int, w:int, h:int, max_w:int, max_h:int) -> int:
+  in_r:TzRect
+  clip_r:TzRect
+  in_r.x = x
+  in_r.y = y
+  in_r.w = w
+  in_r.h = h
+  if tz_rect_clip(&clip_r, &in_r, max_w, max_h) == 0:
+    ret 0
+  ret tz_damage_add_rect(d, &clip_r)
+
+fn tz_damage_take(d:*TzDamage, idx:int, out:*TzRect) -> int:
+  if d == 0 || out == 0:
+    ret 0
+  if idx < 0 || idx >= d[0].n:
+    ret 0
+  out[0].x = d[0].rects[idx].x
+  out[0].y = d[0].rects[idx].y
+  out[0].w = d[0].rects[idx].w
+  out[0].h = d[0].rects[idx].h
+  ret 1
+
+fn tz_damage_bbox(d:*TzDamage, out:*TzRect) -> int:
+  if d == 0 || out == 0:
+    ret 0
+  if d[0].n <= 0:
+    out[0].x = 0
+    out[0].y = 0
+    out[0].w = 0
+    out[0].h = 0
+    ret 0
+  out[0].x = d[0].rects[0].x
+  out[0].y = d[0].rects[0].y
+  out[0].w = d[0].rects[0].w
+  out[0].h = d[0].rects[0].h
+  i:int = 1
+  while i < d[0].n:
+    tz_rect_union(out, out, &d[0].rects[i])
+    i = i + 1
+  ret 1
+

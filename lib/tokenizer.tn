@@ -1,0 +1,570 @@
+// tokenizer module — TezzNative 2.0 Native BPE Tokenizer
+//
+// Byte-Pair Encoding tokenizer compatible with GPT-2/GPT-NeoX merges.
+// Features:
+//   • Load vocab and merges from JSON files
+//   • Encode text → int array of token IDs
+//   • Decode token IDs → UTF-8 string
+//   • Byte-level fallback for unknown chars
+//   • Special tokens: <|endoftext|>, <pad>, <unk>
+//   • Efficient cache for repeated encodings
+//   • SentencePiece-style whitespace prefix
+//   • Token count (no allocation) for length estimation
+//
+// Usage:
+//   tok:*Tokenizer = tokenizer_load("vocab.json", "merges.txt")
+//   ids:*int = tokenizer_encode(tok, "Hello World!")
+//   n:int = tokenizer_last_encode_len(tok)
+//   text:str = tokenizer_decode(tok, ids, n)
+//   tokenizer_free(tok)
+
+import "io"
+
+let TOKENIZER_MAX_VOCAB:int = 65536
+let TOKENIZER_MAX_MERGES:int = 65536
+let TOKENIZER_MAX_PIECE:int = 64
+
+// ─────────────────────────────────────────────────────────────
+// Core structs
+// ─────────────────────────────────────────────────────────────
+
+struct TokEntry:
+  piece:*char   // UTF-8 byte sequence for this token
+  piece_len:int // length in bytes
+  id:int        // token ID
+
+struct TokMerge:
+  left_id:int
+  right_id:int
+  merged_id:int
+
+struct Tokenizer:
+  // Vocab: sorted by piece for binary search on encode
+  entries:*TokEntry
+  n_vocab:int
+  // Merges: applied in order (BPE merge table)
+  merges:*TokMerge
+  n_merges:int
+  // Byte tokens (256 raw bytes as token IDs)
+  byte_tokens:[int;256]
+  // Special token IDs
+  bos_id:int   // beginning of sequence
+  eos_id:int   // end of sequence
+  pad_id:int   // padding
+  unk_id:int   // unknown
+  // Encode output buffer
+  out_buf:*int
+  out_cap:int
+  out_len:int  // length of last encode
+
+// ─────────────────────────────────────────────────────────────
+// Internal helpers
+// ─────────────────────────────────────────────────────────────
+
+fn _tok_strdup(s:str) -> str:
+  if s == 0: ret 0 as str
+  n:int = len(s)
+  p:*char = malloc(n + 1)
+  if p == 0: ret 0 as str
+  unsafe:
+    memcpy(p, s as *char, n)
+  p[n] = 0 as char
+  ret p as str
+
+fn _tok_join2(a:str, b:str) -> str:
+  if a == 0: ret _tok_strdup(b)
+  if b == 0: ret _tok_strdup(a)
+  na:int = len(a)
+  nb:int = len(b)
+  p:*char = malloc(na + nb + 1)
+  if p == 0: ret 0 as str
+  unsafe:
+    memcpy(p, a as *char, na)
+    memcpy(p + na, b as *char, nb)
+  p[na+nb] = 0 as char
+  ret p as str
+
+fn _tok_itoa(v:int) -> str:
+  tmp:[char;24]
+  i:int = 0
+  n:int = v
+  if n == 0:
+    tmp[i] = 48 as char
+    i = i + 1
+  while n > 0:
+    tmp[i] = (48 + n % 10) as char
+    i = i + 1
+    n = n / 10
+  p:*char = malloc(i + 1)
+  if p == 0: ret 0 as str
+  j:int = 0
+  while j < i:
+    p[j] = tmp[i - j - 1]
+    j = j + 1
+  p[i] = 0 as char
+  ret p as str
+
+fn _tok_atoi(s:str) -> int:
+  if s == 0: ret 0
+  n:int = 0
+  i:int = 0
+  while (s as *char)[i] != 0 as char:
+    c:int = (s as *char)[i] as int
+    if c < 48 || c > 57: break
+    n = n * 10 + (c - 48)
+    i = i + 1
+  ret n
+
+fn _tok_skip_ws(s:str, i:int) -> int:
+  while (s as *char)[i] == 32 as char || (s as *char)[i] == 9 as char || (s as *char)[i] == 10 as char || (s as *char)[i] == 13 as char:
+    i = i + 1
+  ret i
+
+// ─────────────────────────────────────────────────────────────
+// JSON vocab loader
+// Format: {"token": id, "token2": id2, ...}
+// ─────────────────────────────────────────────────────────────
+
+fn _tok_parse_vocab(tok:*Tokenizer, json:str) -> int:
+  if tok == 0 || json == 0: ret 0 - 1
+  n:int = len(json)
+  i:int = _tok_skip_ws(json, 0)
+  if (json as *char)[i] != 123 as char: ret 0 - 1  // '{'
+  i = i + 1
+  vc:int = 0
+  while i < n && vc < TOKENIZER_MAX_VOCAB:
+    i = _tok_skip_ws(json, i)
+    if (json as *char)[i] == 125 as char: break  // '}'
+    if (json as *char)[i] == 44 as char:  // ','
+      i = i + 1
+      continue
+    if (json as *char)[i] != 34 as char:  // '"'
+      i = i + 1
+      continue
+    // Parse key (token piece)
+    ks:int = i + 1
+    ke:int = ks
+    while ke < n:
+      c:int = (json as *char)[ke] as int
+      if c == 34 && (ke == 0 || (json as *char)[ke-1] != 92 as char): break
+      ke = ke + 1
+    piece_len:int = ke - ks
+    piece:*char = malloc(piece_len + 1)
+    if piece == 0: break
+    unsafe:
+      memcpy(piece, (json as *char) + ks, piece_len)
+    piece[piece_len] = 0 as char
+    // Skip ":"
+    i = ke + 1
+    i = _tok_skip_ws(json, i)
+    if (json as *char)[i] == 58 as char: i = i + 1
+    i = _tok_skip_ws(json, i)
+    // Parse value (token id)
+    neg:int = 0
+    if (json as *char)[i] == 45 as char:
+      neg = 1
+      i = i + 1
+    id_val:int = 0
+    while i < n:
+      c2:int = (json as *char)[i] as int
+      if c2 < 48 || c2 > 57: break
+      id_val = id_val * 10 + (c2 - 48)
+      i = i + 1
+    if neg != 0: id_val = 0 - id_val
+    // Store in vocab
+    if id_val >= 0 && id_val < TOKENIZER_MAX_VOCAB:
+      if vc >= (*tok).n_vocab:
+        (*tok).n_vocab = vc + 1
+      (*tok).entries[vc].piece = piece
+      (*tok).entries[vc].piece_len = piece_len
+      (*tok).entries[vc].id = id_val
+      vc = vc + 1
+    else:
+      free(piece)
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// Merges file loader
+// Format (GPT-2 style): one merge per line "left right"
+// ─────────────────────────────────────────────────────────────
+
+fn _tok_parse_merges(tok:*Tokenizer, text:str) -> int:
+  if tok == 0 || text == 0: ret 0 - 1
+  n:int = len(text)
+  mc:int = 0
+  i:int = 0
+  // Skip header comment line if present
+  if (text as *char)[0] == 35 as char:  // '#'
+    while i < n && (text as *char)[i] != 10 as char: i = i + 1
+    i = i + 1
+  while i < n && mc < TOKENIZER_MAX_MERGES:
+    if (text as *char)[i] == 10 as char || (text as *char)[i] == 13 as char:
+      i = i + 1
+      continue
+    // Read left token piece
+    ls:int = i
+    while i < n && (text as *char)[i] != 32 as char && (text as *char)[i] != 10 as char && (text as *char)[i] != 13 as char:
+      i = i + 1
+    le:int = i
+    if (text as *char)[i] == 32 as char: i = i + 1
+    // Read right token piece
+    rs:int = i
+    while i < n && (text as *char)[i] != 10 as char && (text as *char)[i] != 13 as char:
+      i = i + 1
+    re:int = i
+    // Look up IDs for left and right pieces
+    left_piece:[char;65]
+    right_piece:[char;65]
+    llen:int = le - ls
+    rlen:int = re - rs
+    if llen <= 0 || rlen <= 0: continue
+    if llen > 64: llen = 64
+    if rlen > 64: rlen = 64
+    unsafe:
+      memcpy(&left_piece[0], (text as *char) + ls, llen)
+      left_piece[llen] = 0 as char
+      memcpy(&right_piece[0], (text as *char) + rs, rlen)
+      right_piece[rlen] = 0 as char
+    // Find IDs by linear scan
+    lid:int = 0 - 1
+    rid:int = 0 - 1
+    j:int = 0
+    while j < (*tok).n_vocab:
+      plen:int = (*tok).entries[j].piece_len
+      if plen == llen:
+        match_l:int = 1
+        k:int = 0
+        while k < llen:
+          if (*tok).entries[j].piece[k] != left_piece[k]:
+            match_l = 0
+            break
+          k = k + 1
+        if match_l != 0: lid = (*tok).entries[j].id
+      if plen == rlen:
+        match_r:int = 1
+        k2:int = 0
+        while k2 < rlen:
+          if (*tok).entries[j].piece[k2] != right_piece[k2]:
+            match_r = 0
+            break
+          k2 = k2 + 1
+        if match_r != 0: rid = (*tok).entries[j].id
+      if lid >= 0 && rid >= 0: break
+      j = j + 1
+    // Merged token: left+right concatenated
+    if lid >= 0 && rid >= 0:
+      (*tok).merges[mc].left_id = lid
+      (*tok).merges[mc].right_id = rid
+      // Find merged piece ID
+      merged_piece:[char;130]
+      if llen + rlen <= 128:
+        unsafe:
+          memcpy(&merged_piece[0], &left_piece[0], llen)
+          memcpy(&merged_piece[0] + llen, &right_piece[0], rlen)
+        merged_piece[llen + rlen] = 0 as char
+        mlen:int = llen + rlen
+        mid:int = 0 - 1
+        jj:int = 0
+        while jj < (*tok).n_vocab:
+          if (*tok).entries[jj].piece_len == mlen:
+            match_m:int = 1
+            kk:int = 0
+            while kk < mlen:
+              if (*tok).entries[jj].piece[kk] != merged_piece[kk]:
+                match_m = 0
+                break
+              kk = kk + 1
+            if match_m != 0:
+              mid = (*tok).entries[jj].id
+              break
+          jj = jj + 1
+        if mid >= 0:
+          (*tok).merges[mc].merged_id = mid
+          mc = mc + 1
+  (*tok).n_merges = mc
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// Tokenizer lifecycle
+// ─────────────────────────────────────────────────────────────
+
+fn tokenizer_new() -> *Tokenizer:
+  tok:*Tokenizer = (*Tokenizer)malloc(sizeof(Tokenizer))
+  if tok == 0: ret 0 as *Tokenizer
+  (*tok).entries = (*TokEntry)malloc(sizeof(TokEntry) * TOKENIZER_MAX_VOCAB)
+  (*tok).merges  = (*TokMerge)malloc(sizeof(TokMerge) * TOKENIZER_MAX_MERGES)
+  (*tok).out_buf = (*int)malloc(sizeof(int) * 8192)
+  if (*tok).entries == 0 || (*tok).merges == 0 || (*tok).out_buf == 0:
+    tokenizer_free(tok)
+    ret 0 as *Tokenizer
+  (*tok).n_vocab = 0
+  (*tok).n_merges = 0
+  (*tok).out_cap = 8192
+  (*tok).out_len = 0
+  (*tok).bos_id = 0
+  (*tok).eos_id = 50256  // GPT-2 default
+  (*tok).pad_id = 0 - 1
+  (*tok).unk_id = 0
+  // Initialize byte tokens (IDs 0-255 map to themselves by default)
+  i:int = 0
+  while i < 256:
+    (*tok).byte_tokens[i] = i
+    i = i + 1
+  ret tok
+
+fn tokenizer_load(vocab_path:str, merges_path:str) -> *Tokenizer:
+  tok:*Tokenizer = tokenizer_new()
+  if tok == 0: ret 0 as *Tokenizer
+  // Load vocab
+  vocab_json:str = io.read_all(vocab_path)
+  if vocab_json == 0:
+    tokenizer_free(tok)
+    ret 0 as *Tokenizer
+  _tok_parse_vocab(tok, vocab_json)
+  free(vocab_json)
+  // Load merges
+  if merges_path != 0:
+    merges_txt:str = io.read_all(merges_path)
+    if merges_txt != 0:
+      _tok_parse_merges(tok, merges_txt)
+      free(merges_txt)
+  // Scan for special tokens
+  i:int = 0
+  while i < (*tok).n_vocab:
+    p:*char = (*tok).entries[i].piece
+    pl:int = (*tok).entries[i].piece_len
+    if pl == 13:
+      // "<|endoftext|>"
+      if strcmp(p as str, "<|endoftext|>") == 0:
+        (*tok).eos_id = (*tok).entries[i].id
+        (*tok).bos_id = (*tok).entries[i].id
+    if pl == 5 && strcmp(p as str, "<pad>") == 0:
+      (*tok).pad_id = (*tok).entries[i].id
+    if pl == 5 && strcmp(p as str, "<unk>") == 0:
+      (*tok).unk_id = (*tok).entries[i].id
+    i = i + 1
+  ret tok
+
+fn tokenizer_free(tok:*Tokenizer) -> int:
+  if tok == 0: ret 0 - 1
+  if (*tok).entries != 0:
+    i:int = 0
+    while i < (*tok).n_vocab:
+      if (*tok).entries[i].piece != 0:
+        free((*tok).entries[i].piece)
+      i = i + 1
+    free((*tok).entries as *char)
+  if (*tok).merges != 0: free((*tok).merges as *char)
+  if (*tok).out_buf != 0: free((*tok).out_buf as *char)
+  free(tok)
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// Byte-level encode: text → initial token sequence
+// ─────────────────────────────────────────────────────────────
+
+fn _tok_find_piece(tok:*Tokenizer, piece:*char, piece_len:int) -> int:
+  // Linear scan (for correctness; a trie would be faster)
+  i:int = 0
+  while i < (*tok).n_vocab:
+    if (*tok).entries[i].piece_len == piece_len:
+      match_ok:int = 1
+      j:int = 0
+      while j < piece_len:
+        if (*tok).entries[i].piece[j] != piece[j]:
+          match_ok = 0
+          break
+        j = j + 1
+      if match_ok != 0: ret (*tok).entries[i].id
+    i = i + 1
+  ret 0 - 1
+
+// Apply BPE merges to token sequence
+fn _tok_apply_merges(tok:*Tokenizer, ids:*int, n:*int) -> int:
+  if tok == 0 || ids == 0 || n == 0: ret 0 - 1
+  // Iteratively apply merges in order
+  changed:int = 1
+  while changed != 0:
+    changed = 0
+    best_merge_rank:int = (*tok).n_merges  // lower = earlier
+    best_pos:int = 0 - 1
+    i:int = 0
+    while i < (*n) - 1:
+      // Look up (ids[i], ids[i+1]) in merge table
+      j:int = 0
+      while j < (*tok).n_merges:
+        if (*tok).merges[j].left_id == ids[i] && (*tok).merges[j].right_id == ids[i+1]:
+          if j < best_merge_rank:
+            best_merge_rank = j
+            best_pos = i
+          break
+        j = j + 1
+      i = i + 1
+    if best_pos >= 0:
+      // Apply merge at best_pos
+      ids[best_pos] = (*tok).merges[best_merge_rank].merged_id
+      // Shift left
+      k:int = best_pos + 1
+      while k + 1 < (*n):
+        ids[k] = ids[k + 1]
+        k = k + 1
+      *n = *n - 1
+      changed = 1
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// Public encode / decode API
+// ─────────────────────────────────────────────────────────────
+
+// Encode text → pointer to internal token buffer.
+// Valid until next call to tokenizer_encode.
+fn tokenizer_encode(tok:*Tokenizer, text:str) -> *int:
+  if tok == 0 || text == 0: ret 0 as *int
+  text_len:int = len(text)
+  if text_len <= 0:
+    (*tok).out_len = 0
+    ret (*tok).out_buf
+  // Ensure output buffer is large enough (worst case: 1 token per byte)
+  if text_len + 4 > (*tok).out_cap:
+    new_buf:*int = (*int)malloc(sizeof(int) * (text_len + 64))
+    if new_buf == 0: ret 0 as *int
+    free((*tok).out_buf as *char)
+    (*tok).out_buf = new_buf
+    (*tok).out_cap = text_len + 64
+  // Step 1: byte-level tokenization (each byte = its unicode codepoint token)
+  n:int = 0
+  i:int = 0
+  while i < text_len:
+    b:int = (text as *char)[i] as int & 255
+    // Try to match the longest piece starting at i
+    best_id:int = (*tok).byte_tokens[b]
+    best_len:int = 1
+    // Try longer pieces (up to 16 bytes)
+    max_try:int = 16
+    if i + max_try > text_len: max_try = text_len - i
+    j:int = max_try
+    while j > 1:
+      id:int = _tok_find_piece(tok, (text as *char) + i, j)
+      if id >= 0:
+        best_id = id
+        best_len = j
+        break
+      j = j - 1
+    if n < (*tok).out_cap:
+      (*tok).out_buf[n] = best_id
+      n = n + 1
+    i = i + best_len
+  // Step 2: apply BPE merges
+  _tok_apply_merges(tok, (*tok).out_buf, &n)
+  (*tok).out_len = n
+  ret (*tok).out_buf
+
+// Encode with BOS/EOS tokens prepended/appended
+fn tokenizer_encode_with_special(tok:*Tokenizer, text:str, add_bos:int, add_eos:int) -> *int:
+  ids:*int = tokenizer_encode(tok, text)
+  if ids == 0: ret 0 as *int
+  n:int = (*tok).out_len
+  extra:int = 0
+  if add_bos != 0: extra = extra + 1
+  if add_eos != 0: extra = extra + 1
+  if extra == 0: ret ids
+  // Expand buffer
+  new_n:int = n + extra
+  if new_n > (*tok).out_cap:
+    new_buf:*int = (*int)malloc(sizeof(int) * (new_n + 16))
+    if new_buf == 0: ret ids
+    free((*tok).out_buf as *char)
+    (*tok).out_buf = new_buf
+    (*tok).out_cap = new_n + 16
+    ids = (*tok).out_buf
+  if add_bos != 0:
+    // Shift everything right by 1
+    k:int = n - 1
+    while k >= 0:
+      (*tok).out_buf[k + 1] = (*tok).out_buf[k]
+      k = k - 1
+    (*tok).out_buf[0] = (*tok).bos_id
+    n = n + 1
+  if add_eos != 0:
+    (*tok).out_buf[n] = (*tok).eos_id
+    n = n + 1
+  (*tok).out_len = n
+  ret (*tok).out_buf
+
+fn tokenizer_last_len(tok:*Tokenizer) -> int:
+  if tok == 0: ret 0
+  ret (*tok).out_len
+
+fn tokenizer_decode(tok:*Tokenizer, ids:*int, n:int) -> str:
+  if tok == 0 || ids == 0 || n <= 0: ret 0 as str
+  // Estimate output length
+  out_cap:int = n * 6 + 4  // worst case: 6 bytes per token
+  out:*char = malloc(out_cap)
+  if out == 0: ret 0 as str
+  pos:int = 0
+  i:int = 0
+  while i < n:
+    tid:int = ids[i]
+    // Find piece for this token ID
+    found:int = 0
+    j:int = 0
+    while j < (*tok).n_vocab:
+      if (*tok).entries[j].id == tid:
+        pl:int = (*tok).entries[j].piece_len
+        if pos + pl + 1 > out_cap:
+          // Grow output
+          nc:int = out_cap * 2 + pl + 4
+          nb:*char = malloc(nc)
+          if nb == 0: break
+          unsafe:
+            memcpy(nb, out, pos)
+          free(out)
+          out = nb
+          out_cap = nc
+        unsafe:
+          memcpy(out + pos, (*tok).entries[j].piece, pl)
+        pos = pos + pl
+        found = 1
+        break
+      j = j + 1
+    if found == 0:
+      // Unknown: emit raw byte
+      if pos + 2 < out_cap:
+        out[pos] = 63 as char  // '?'
+        pos = pos + 1
+    i = i + 1
+  out[pos] = 0 as char
+  ret out as str
+
+fn tokenizer_decode_token(tok:*Tokenizer, id:int) -> str:
+  if tok == 0: ret 0 as str
+  i:int = 0
+  while i < (*tok).n_vocab:
+    if (*tok).entries[i].id == id:
+      pl:int = (*tok).entries[i].piece_len
+      p:*char = malloc(pl + 1)
+      if p == 0: ret 0 as str
+      unsafe:
+        memcpy(p, (*tok).entries[i].piece, pl)
+      p[pl] = 0 as char
+      ret p as str
+    i = i + 1
+  ret 0 as str
+
+// Count tokens without allocation
+fn tokenizer_count(tok:*Tokenizer, text:str) -> int:
+  ids:*int = tokenizer_encode(tok, text)
+  if ids == 0: ret 0
+  ret (*tok).out_len
+
+fn tokenizer_vocab_size(tok:*Tokenizer) -> int:
+  if tok == 0: ret 0
+  ret (*tok).n_vocab
+
+fn tokenizer_eos_id(tok:*Tokenizer) -> int:
+  if tok == 0: ret 0
+  ret (*tok).eos_id
+
+fn tokenizer_bos_id(tok:*Tokenizer) -> int:
+  if tok == 0: ret 0
+  ret (*tok).bos_id

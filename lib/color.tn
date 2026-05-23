@@ -1,0 +1,761 @@
+// color module — TezzNative 2.0 Native Color & Style System
+//
+// Full TrueColor (24-bit RGB) ANSI terminal support for CLI and GUI programs.
+// Auto-detects TrueColor capability. Falls back gracefully to 256-color or basic.
+//
+// Features:
+//   • RGB TrueColor foreground/background
+//   • 256-color palette (xterm256)
+//   • Standard 16 named colors
+//   • Text styles: bold, italic, underline, dim, blink, reverse, strikethrough
+//   • Styled string builder: compose multi-attribute styled text
+//   • Progress bar renderer (animated, colored)
+//   • Table renderer (bordered, colored headers)
+//   • Gradient text renderer
+//   • Pixel-native RGBA color packing/unpacking
+//   • CLI spinner animation frames
+//   • Color detection: TrueColor / 256 / 16 / none
+
+import "std"
+
+extern fn get_env(name:str) -> str
+extern fn color_is_tty_stdout() -> int
+
+// ─────────────────────────────────────────────────────────────
+// ANSI escape sequence primitives
+// ─────────────────────────────────────────────────────────────
+
+let _ESC:str    = "\x1b["
+let _RESET:str  = "\x1b[0m"
+let _BOLD:str   = "\x1b[1m"
+let _DIM:str    = "\x1b[2m"
+let _ITALIC:str = "\x1b[3m"
+let _ULINE:str  = "\x1b[4m"
+let _BLINK:str  = "\x1b[5m"
+let _REV:str    = "\x1b[7m"
+let _STRIKE:str = "\x1b[9m"
+let _NOBOLD:str = "\x1b[22m"
+let _NOITALIC:str = "\x1b[23m"
+let _NOULINE:str  = "\x1b[24m"
+
+// ─────────────────────────────────────────────────────────────
+// Color capability detection
+// ─────────────────────────────────────────────────────────────
+
+let COLOR_NONE:int    = 0
+let COLOR_16:int      = 1
+let COLOR_256:int     = 2
+let COLOR_TRUECOLOR:int = 3
+
+static let _color_cap:int = 0 - 1  // -1 = not detected yet
+
+fn _detect_color_cap() -> int:
+  // Try: TN_COLOR env var first
+  env_no:str = get_env("NO_COLOR")
+  if env_no != 0 && env_no[0] != 0 as char:
+    free(env_no)
+    ret COLOR_NONE
+  if env_no != 0:
+    free(env_no)
+  env_col:str = get_env("COLORTERM")
+  if env_col != 0:
+    is_tc:int = 0
+    if strcmp(env_col, "truecolor") == 0:
+      is_tc = 1
+    if strcmp(env_col, "24bit") == 0:
+      is_tc = 1
+    free(env_col)
+    if is_tc != 0:
+      ret COLOR_TRUECOLOR
+  env_term:str = get_env("TERM")
+  if env_term != 0:
+    // Common TrueColor terminals
+    is_256:int = 0
+    i:int = 0
+    n:int = len(env_term)
+    while i < n:
+      if env_term[i] == 50 as char && i + 2 < n: // '2'
+        if env_term[i+1] == 53 as char && env_term[i+2] == 54 as char: // '56'
+          is_256 = 1
+      i = i + 1
+    free(env_term)
+    if is_256 != 0:
+      ret COLOR_256
+  // Runtime TTY check
+  if color_is_tty_stdout() != 0:
+    ret COLOR_256  // conservative default for TTYs
+  ret COLOR_NONE
+
+fn color_cap() -> int:
+  if _color_cap >= 0:
+    ret _color_cap
+  _color_cap = _detect_color_cap()
+  ret _color_cap
+
+fn color_enabled() -> int:
+  ret color_cap() > COLOR_NONE
+
+fn color_truecolor() -> int:
+  ret color_cap() >= COLOR_TRUECOLOR
+
+// Force capability (useful for piped output with known terminal)
+fn color_force(cap:int) -> int:
+  _color_cap = cap
+  ret cap
+
+// ─────────────────────────────────────────────────────────────
+// RGBA pixel packing (for GUI / image buffers)
+// ─────────────────────────────────────────────────────────────
+
+fn rgba(r:int, g:int, b:int, a:int) -> int:
+  ret ((a & 255) << 24) | ((r & 255) << 16) | ((g & 255) << 8) | (b & 255)
+
+fn rgb(r:int, g:int, b:int) -> int:
+  ret rgba(r, g, b, 255)
+
+fn rgba_r(c:int) -> int: ret (c >> 16) & 255
+fn rgba_g(c:int) -> int: ret (c >> 8) & 255
+fn rgba_b(c:int) -> int: ret c & 255
+fn rgba_a(c:int) -> int: ret (c >> 24) & 255
+
+fn rgba_lerp(c0:int, c1:int, t_256:int) -> int:
+  // t_256 in 0..256 (0=c0, 256=c1)
+  r0:int = rgba_r(c0)
+  g0:int = rgba_g(c0)
+  b0:int = rgba_b(c0)
+  a0:int = rgba_a(c0)
+  r1:int = rgba_r(c1)
+  g1:int = rgba_g(c1)
+  b1:int = rgba_b(c1)
+  a1:int = rgba_a(c1)
+  rr:int = r0 + ((r1 - r0) * t_256) / 256
+  rg:int = g0 + ((g1 - g0) * t_256) / 256
+  rb:int = b0 + ((b1 - b0) * t_256) / 256
+  ra:int = a0 + ((a1 - a0) * t_256) / 256
+  ret rgba(rr, rg, rb, ra)
+
+fn rgba_blend(dst:int, src:int) -> int:
+  // Porter-Duff src-over compositing
+  sa:int = rgba_a(src)
+  da:int = rgba_a(dst)
+  if sa == 0:
+    ret dst
+  if sa == 255:
+    ret src
+  inv:int = 255 - sa
+  rr:int = (rgba_r(src) * sa + rgba_r(dst) * inv) / 255
+  rg:int = (rgba_g(src) * sa + rgba_g(dst) * inv) / 255
+  rb:int = (rgba_b(src) * sa + rgba_b(dst) * inv) / 255
+  ra:int = sa + (da * inv) / 255
+  ret rgba(rr, rg, rb, ra)
+
+// Common named colors (RGB)
+fn color_black() -> int:   ret rgb(0,0,0)
+fn color_white() -> int:   ret rgb(255,255,255)
+fn color_red() -> int:     ret rgb(220,50,47)
+fn color_green() -> int:   ret rgb(0,200,81)
+fn color_blue() -> int:    ret rgb(38,139,210)
+fn color_yellow() -> int:  ret rgb(255,215,0)
+fn color_orange() -> int:  ret rgb(255,128,0)
+fn color_cyan() -> int:    ret rgb(42,161,152)
+fn color_magenta() -> int: ret rgb(211,54,130)
+fn color_gray() -> int:    ret rgb(128,128,128)
+fn color_darkgray() -> int: ret rgb(48,48,48)
+fn color_lightgray() -> int: ret rgb(200,200,200)
+fn color_pink() -> int:    ret rgb(255,100,150)
+fn color_purple() -> int:  ret rgb(108,113,196)
+fn color_teal() -> int:    ret rgb(0,168,168)
+fn color_lime() -> int:    ret rgb(100,255,50)
+fn color_sky() -> int:     ret rgb(100,200,255)
+fn color_gold() -> int:    ret rgb(255,200,0)
+fn color_brown() -> int:   ret rgb(150,80,30)
+fn color_indigo() -> int:  ret rgb(75,0,130)
+
+// ─────────────────────────────────────────────────────────────
+// Internal string builder helpers
+// ─────────────────────────────────────────────────────────────
+
+fn _ci_join2(a:str, b:str) -> str:
+  if a == 0: ret b
+  if b == 0: ret a
+  na:int = len(a)
+  nb:int = len(b)
+  p:*char = malloc(na + nb + 1)
+  if p == 0: ret 0 as str
+  unsafe:
+    memcpy(p, a as *char, na)
+    memcpy(p + na, b as *char, nb)
+  p[na + nb] = 0 as char
+  ret p as str
+
+fn _ci_join3(a:str, b:str, c:str) -> str:
+  ab:str = _ci_join2(a, b)
+  out:str = _ci_join2(ab, c)
+  if ab != 0: free(ab)
+  ret out
+
+fn _ci_itoa(v:int) -> str:
+  if v < 0:
+    neg_s:str = _ci_itoa(0 - v)
+    out:str = _ci_join2("-", neg_s)
+    free(neg_s)
+    ret out
+  tmp:[char;24]
+  i:int = 0
+  n:int = v
+  if n == 0:
+    tmp[i] = 48 as char
+    i = i + 1
+  while n > 0:
+    tmp[i] = (48 + n % 10) as char
+    i = i + 1
+    n = n / 10
+  out:*char = malloc(i + 1)
+  if out == 0: ret 0 as str
+  j:int = 0
+  while j < i:
+    out[j] = tmp[i - j - 1]
+    j = j + 1
+  out[i] = 0 as char
+  ret out as str
+
+// ─────────────────────────────────────────────────────────────
+// ANSI TrueColor escape builders
+// (Return heap-allocated strings — caller frees)
+// ─────────────────────────────────────────────────────────────
+
+// "\x1b[38;2;<r>;<g>;<b>m"
+fn ansi_fg_rgb(r:int, g:int, b:int) -> str:
+  rs:str = _ci_itoa(r)
+  gs:str = _ci_itoa(g)
+  bs:str = _ci_itoa(b)
+  p1:str = _ci_join2("\x1b[38;2;", rs)
+  p2:str = _ci_join3(p1, ";", gs)
+  p3:str = _ci_join3(p2, ";", bs)
+  out:str = _ci_join2(p3, "m")
+  free(rs); free(gs); free(bs)
+  free(p1); free(p2); free(p3)
+  ret out
+
+// "\x1b[48;2;<r>;<g>;<b>m"
+fn ansi_bg_rgb(r:int, g:int, b:int) -> str:
+  rs:str = _ci_itoa(r)
+  gs:str = _ci_itoa(g)
+  bs:str = _ci_itoa(b)
+  p1:str = _ci_join2("\x1b[48;2;", rs)
+  p2:str = _ci_join3(p1, ";", gs)
+  p3:str = _ci_join3(p2, ";", bs)
+  out:str = _ci_join2(p3, "m")
+  free(rs); free(gs); free(bs)
+  free(p1); free(p2); free(p3)
+  ret out
+
+// From packed RGBA color
+fn ansi_fg(c:int) -> str:
+  ret ansi_fg_rgb(rgba_r(c), rgba_g(c), rgba_b(c))
+
+fn ansi_bg(c:int) -> str:
+  ret ansi_bg_rgb(rgba_r(c), rgba_g(c), rgba_b(c))
+
+// 256-color palette fg/bg
+fn ansi_fg_256(idx:int) -> str:
+  is:str = _ci_itoa(idx & 255)
+  out:str = _ci_join3("\x1b[38;5;", is, "m")
+  free(is)
+  ret out
+
+fn ansi_bg_256(idx:int) -> str:
+  is:str = _ci_itoa(idx & 255)
+  out:str = _ci_join3("\x1b[48;5;", is, "m")
+  free(is)
+  ret out
+
+// ─────────────────────────────────────────────────────────────
+// Styled text composer
+// ─────────────────────────────────────────────────────────────
+
+// Returns a styled, heap-allocated string ready for say/print.
+// Pass 0 for any color to skip that component.
+// Flags: bold=1, italic=2, underline=4, dim=8, strikethrough=16, blink=32
+fn styled(text:str, fg:int, bg:int, flags:int) -> str:
+  if color_cap() == COLOR_NONE:
+    ret text
+  out:str = ""
+  // Apply attributes
+  if flags & 1 != 0:
+    t0:str = _ci_join2(out, _BOLD)
+    if out != 0 as str && len(out) > 0: free(out)
+    out = t0
+  if flags & 2 != 0:
+    t1:str = _ci_join2(out, _ITALIC)
+    free(out); out = t1
+  if flags & 4 != 0:
+    t2:str = _ci_join2(out, _ULINE)
+    free(out); out = t2
+  if flags & 8 != 0:
+    t3:str = _ci_join2(out, _DIM)
+    free(out); out = t3
+  if flags & 16 != 0:
+    t4:str = _ci_join2(out, _STRIKE)
+    free(out); out = t4
+  if flags & 32 != 0:
+    t5:str = _ci_join2(out, _BLINK)
+    free(out); out = t5
+  // Foreground color
+  if fg != 0:
+    fg_seq:str = ansi_fg(fg)
+    t6:str = _ci_join2(out, fg_seq)
+    free(fg_seq); free(out); out = t6
+  // Background color
+  if bg != 0:
+    bg_seq:str = ansi_bg(bg)
+    t7:str = _ci_join2(out, bg_seq)
+    free(bg_seq); free(out); out = t7
+  // Text content
+  t8:str = _ci_join2(out, text)
+  free(out); out = t8
+  // Reset
+  t9:str = _ci_join2(out, _RESET)
+  free(out)
+  ret t9
+
+// Shorthand helpers
+fn bold(text:str) -> str:      ret styled(text, 0, 0, 1)
+fn italic(text:str) -> str:    ret styled(text, 0, 0, 2)
+fn underline(text:str) -> str: ret styled(text, 0, 0, 4)
+fn dim_text(text:str) -> str:  ret styled(text, 0, 0, 8)
+fn strike(text:str) -> str:    ret styled(text, 0, 0, 16)
+
+fn fg(text:str, c:int) -> str:       ret styled(text, c, 0, 0)
+fn bg(text:str, c:int) -> str:       ret styled(text, 0, c, 0)
+fn fg_bold(text:str, c:int) -> str:  ret styled(text, c, 0, 1)
+
+// Named color shortcuts
+fn red_text(s:str) -> str:     ret fg(s, color_red())
+fn green_text(s:str) -> str:   ret fg(s, color_green())
+fn blue_text(s:str) -> str:    ret fg(s, color_blue())
+fn yellow_text(s:str) -> str:  ret fg(s, color_yellow())
+fn cyan_text(s:str) -> str:    ret fg(s, color_cyan())
+fn magenta_text(s:str) -> str: ret fg(s, color_magenta())
+fn white_text(s:str) -> str:   ret fg(s, color_white())
+fn gray_text(s:str) -> str:    ret fg(s, color_gray())
+fn orange_text(s:str) -> str:  ret fg(s, color_orange())
+fn purple_text(s:str) -> str:  ret fg(s, color_purple())
+fn gold_text(s:str) -> str:    ret fg(s, color_gold())
+
+// ─────────────────────────────────────────────────────────────
+// Gradient text (horizontal left→right RGB gradient)
+// ─────────────────────────────────────────────────────────────
+
+fn gradient_text(text:str, c0:int, c1:int) -> str:
+  if text == 0:
+    ret 0 as str
+  n:int = len(text)
+  if n <= 0:
+    ret text
+  out:str = ""
+  i:int = 0
+  while i < n:
+    t256:int = 0
+    if n > 1:
+      t256 = (i * 256) / (n - 1)
+    c:int = rgba_lerp(c0, c1, t256)
+    fg_seq:str = ansi_fg(c)
+    ch:[char;2]
+    ch[0] = (text as *char)[i]
+    ch[1] = 0 as char
+    ch_p:*char = 0 as *char
+    unsafe:
+      ch_p = &ch[0]
+    t0:str = _ci_join2(out, fg_seq)
+    t1:str = _ci_join2(t0, ch_p as str)
+    free(fg_seq)
+    if len(out) > 0: free(out)
+    free(t0)
+    out = t1
+    i = i + 1
+  t_end:str = _ci_join2(out, _RESET)
+  free(out)
+  ret t_end
+
+// ─────────────────────────────────────────────────────────────
+// Progress bar renderer
+// ─────────────────────────────────────────────────────────────
+
+// Returns heap string: "[████████░░░░] 75% label"
+// bar_color: filled bar color (RGBA), empty_color: unfilled
+fn progress_bar(label:str, pct:int, width:int, bar_color:int, empty_color:int) -> str:
+  w:int = width
+  if w <= 0:
+    w = 40
+  if pct < 0:
+    pct = 0
+  if pct > 100:
+    pct = 100
+  filled:int = (w * pct) / 100
+  empty:int = w - filled
+  out:str = "["
+  // Filled portion
+  fill_seq:str = ansi_fg(bar_color)
+  t0:str = _ci_join2(out, fill_seq)
+  free(fill_seq)
+  if len(out) > 0: free(out)
+  out = t0
+  i:int = 0
+  while i < filled:
+    t1:str = _ci_join2(out, "█")
+    free(out); out = t1
+    i = i + 1
+  // Empty portion
+  empty_seq:str = ansi_fg(empty_color)
+  t2:str = _ci_join2(out, empty_seq)
+  free(empty_seq); free(out); out = t2
+  j:int = 0
+  while j < empty:
+    t3:str = _ci_join2(out, "░")
+    free(out); out = t3
+    j = j + 1
+  // Reset + bracket + percent
+  t4:str = _ci_join2(out, _RESET)
+  free(out); out = t4
+  t5:str = _ci_join2(out, "] ")
+  free(out); out = t5
+  pct_s:str = _ci_itoa(pct)
+  t6:str = _ci_join3(out, pct_s, "% ")
+  free(pct_s); free(out); out = t6
+  if label != 0:
+    t7:str = _ci_join2(out, label)
+    free(out); out = t7
+  ret out
+
+// Print progress bar in-place (carriage return, no newline)
+fn print_progress(label:str, pct:int, width:int, bar_color:int) -> int:
+  bar:str = progress_bar(label, pct, width, bar_color, color_darkgray())
+  // Carriage return to overwrite line
+  write_line(stdout(), "\r")
+  write_line(stdout(), bar)
+  free(bar)
+  ret 0
+
+fn _color_realloc_bytes(p:*char, old_bytes:int, new_bytes:int) -> *char:
+  if new_bytes <= 0:
+    if p != 0 as *char:
+      free(p)
+    ret 0 as *char
+  np:*char = malloc(new_bytes)
+  if np == 0 as *char:
+    if p != 0 as *char:
+      free(p)
+    ret 0 as *char
+  if p != 0 as *char:
+    copy_bytes:int = old_bytes
+    if copy_bytes > new_bytes:
+      copy_bytes = new_bytes
+    if copy_bytes > 0:
+      unsafe:
+        memcpy(np, p, copy_bytes)
+    free(p)
+  ret np
+
+fn _color_realloc_str(p:*str, old_n:int, new_n:int) -> *str:
+  ob:int = old_n * sizeof(str)
+  nb:int = new_n * sizeof(str)
+  ret _color_realloc_bytes(p as *char, ob, nb) as *str
+
+// ─────────────────────────────────────────────────────────────
+// Table renderer (bordered, colored headers)
+// ─────────────────────────────────────────────────────────────
+
+struct ColorTable:
+  headers:*str      // array of header strings
+  ncols:int
+  rows:*str         // flat array: row*ncols cells
+  nrows:int
+  col_widths:*int
+  header_color:int
+  border_color:int
+  alt_row_color:int  // 0 = no alternating rows
+
+fn color_table_new(ncols:int) -> *ColorTable:
+  t:*ColorTable = (*ColorTable)malloc(sizeof(ColorTable))
+  if t == 0: ret 0 as *ColorTable
+  (*t).headers = (*str)malloc(sizeof(str) * ncols)
+  (*t).col_widths = (*int)malloc(sizeof(int) * ncols)
+  if (*t).headers == 0 || (*t).col_widths == 0:
+    free(t)
+    ret 0 as *ColorTable
+  (*t).ncols = ncols
+  (*t).rows = 0 as *str
+  (*t).nrows = 0
+  (*t).header_color = color_cyan()
+  (*t).border_color = color_darkgray()
+  (*t).alt_row_color = 0
+  i:int = 0
+  while i < ncols:
+    (*t).headers[i] = 0 as str
+    (*t).col_widths[i] = 0
+    i = i + 1
+  ret t
+
+fn color_table_set_header(t:*ColorTable, col:int, s:str) -> int:
+  if t == 0 || col < 0 || col >= (*t).ncols:
+    ret 0 - 1
+  (*t).headers[col] = s
+  n:int = len(s)
+  if n > (*t).col_widths[col]:
+    (*t).col_widths[col] = n
+  ret 0
+
+fn color_table_add_row(t:*ColorTable, cells:*str) -> int:
+  if t == 0 || cells == 0:
+    ret 0 - 1
+  nc:int = (*t).ncols
+  new_n:int = (*t).nrows + 1
+  new_rows:*str = _color_realloc_str((*t).rows, (*t).nrows * nc, new_n * nc)
+  if new_rows == 0:
+    ret 0 - 1
+  (*t).rows = new_rows
+  row_off:int = (*t).nrows * nc
+  i:int = 0
+  while i < nc:
+    (*t).rows[row_off + i] = cells[i]
+    n:int = 0
+    if cells[i] != 0:
+      n = len(cells[i])
+    if n > (*t).col_widths[i]:
+      (*t).col_widths[i] = n
+    i = i + 1
+  (*t).nrows = new_n
+  ret 0
+
+fn _ct_repeat(ch:str, n:int) -> str:
+  if n <= 0: ret ""
+  p:*char = malloc(n + 1)
+  if p == 0: ret ""
+  i:int = 0
+  while i < n:
+    p[i] = (ch as *char)[0]
+    i = i + 1
+  p[n] = 0 as char
+  ret p as str
+
+fn _ct_pad(s:str, width:int) -> str:
+  n:int = 0
+  if s != 0: n = len(s)
+  pad:int = width - n
+  if pad <= 0: ret s
+  ps:str = _ct_repeat(" ", pad)
+  out:str = _ci_join2(s, ps)
+  free(ps)
+  ret out
+
+fn color_table_print(t:*ColorTable) -> int:
+  if t == 0: ret 0 - 1
+  nc:int = (*t).ncols
+  // Separator line
+  sep:str = "+"
+  i:int = 0
+  while i < nc:
+    dashes:str = _ct_repeat("-", (*t).col_widths[i] + 2)
+    t0:str = _ci_join2(sep, dashes)
+    free(sep); sep = t0
+    t1:str = _ci_join2(sep, "+")
+    free(sep); sep = t1
+    i = i + 1
+  // Print top border
+  border_fg:str = ansi_fg((*t).border_color)
+  t2:str = _ci_join3(border_fg, sep, _RESET)
+  free(border_fg)
+  say t2
+  free(t2)
+  // Print header
+  hdr_line:str = "|"
+  i = 0
+  while i < nc:
+    h:str = (*t).headers[i]
+    if h == 0: h = ""
+    padded:str = _ct_pad(h, (*t).col_widths[i])
+    hdr_fg:str = ansi_fg((*t).header_color)
+    cell:str = _ci_join3(" ", padded, " ")
+    bold_cell:str = _ci_join3(hdr_fg, cell, _RESET)
+    t3:str = _ci_join3(hdr_line, bold_cell, "|")
+    free(hdr_line)
+    free(hdr_fg); free(cell); free(bold_cell)
+    if len(padded) > 0: free(padded)
+    hdr_line = t3
+    i = i + 1
+  say hdr_line
+  free(hdr_line)
+  // Separator after header
+  border_fg2:str = ansi_fg((*t).border_color)
+  t4:str = _ci_join3(border_fg2, sep, _RESET)
+  free(border_fg2)
+  say t4
+  free(t4)
+  // Data rows
+  r:int = 0
+  while r < (*t).nrows:
+    row_off:int = r * nc
+    row_line:str = "|"
+    i = 0
+    while i < nc:
+      cell_s:str = (*t).rows[row_off + i]
+      if cell_s == 0: cell_s = ""
+      padded2:str = _ct_pad(cell_s, (*t).col_widths[i])
+      cell2:str = _ci_join3(" ", padded2, " ")
+      t5:str = _ci_join3(row_line, cell2, "|")
+      free(row_line)
+      free(cell2)
+      if len(padded2) > 0: free(padded2)
+      row_line = t5
+      i = i + 1
+    say row_line
+    free(row_line)
+    r = r + 1
+  // Bottom border
+  border_fg3:str = ansi_fg((*t).border_color)
+  t6:str = _ci_join3(border_fg3, sep, _RESET)
+  free(border_fg3)
+  say t6
+  free(t6)
+  free(sep)
+  ret 0
+
+fn color_table_free(t:*ColorTable) -> int:
+  if t == 0: ret 0 - 1
+  if (*t).headers != 0: free((*t).headers as *char)
+  if (*t).col_widths != 0: free((*t).col_widths as *char)
+  if (*t).rows != 0: free((*t).rows as *char)
+  free(t)
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// Spinner animation
+// ─────────────────────────────────────────────────────────────
+
+let SPINNER_FRAMES:str = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+let SPINNER_COUNT:int = 10
+
+static let _spinner_idx:int = 0
+
+fn spinner_next(label:str, c:int) -> int:
+  idx:int = _spinner_idx % SPINNER_COUNT
+  // Each spinner char is 3 bytes (UTF-8)
+  off:int = idx * 3
+  frame:[char;4]
+  frame_p:*char = 0 as *char
+  unsafe:
+    frame[0] = (SPINNER_FRAMES as *char)[off]
+    frame[1] = (SPINNER_FRAMES as *char)[off + 1]
+    frame[2] = (SPINNER_FRAMES as *char)[off + 2]
+    frame[3] = 0 as char
+    frame_p = &frame[0]
+  fg_seq:str = ansi_fg(c)
+  t0:str = _ci_join2(fg_seq, frame_p as str)
+  t1:str = _ci_join3(t0, _RESET, " ")
+  t2:str = _ci_join2(t1, label)
+  write_line(stdout(), "\r")
+  write_line(stdout(), t2)
+  free(fg_seq); free(t0); free(t1); free(t2)
+  _spinner_idx = _spinner_idx + 1
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// say_color — colored say shorthand
+// ─────────────────────────────────────────────────────────────
+
+fn say_color(text:str, fg_color:int) -> int:
+  if color_cap() == COLOR_NONE:
+    say text
+    ret 0
+  s:str = fg(text, fg_color)
+  say s
+  free(s)
+  ret 0
+
+fn say_bold(text:str) -> int:
+  s:str = bold(text)
+  say s
+  free(s)
+  ret 0
+
+fn say_success(text:str) -> int: ret say_color(text, color_green())
+fn say_error(text:str) -> int:   ret say_color(text, color_red())
+fn say_warn(text:str) -> int:    ret say_color(text, color_yellow())
+fn say_info(text:str) -> int:    ret say_color(text, color_cyan())
+fn say_dim(text:str) -> int:     ret say_color(text, color_gray())
+fn say_gold(text:str) -> int:    ret say_color(text, color_gold())
+
+// Labeled output: "[OK] text", "[ERR] text", etc.
+fn say_ok(text:str) -> int:
+  label:str = fg_bold("[OK] ", color_green())
+  msg:str = _ci_join2(label, text)
+  say msg
+  free(label); free(msg)
+  ret 0
+
+fn say_fail(text:str) -> int:
+  label:str = fg_bold("[FAIL] ", color_red())
+  msg:str = _ci_join2(label, text)
+  say msg
+  free(label); free(msg)
+  ret 0
+
+fn say_note(text:str) -> int:
+  label:str = fg("[NOTE] ", color_blue())
+  msg:str = _ci_join2(label, text)
+  say msg
+  free(label); free(msg)
+  ret 0
+
+fn say_warn_label(text:str) -> int:
+  label:str = fg_bold("[WARN] ", color_yellow())
+  msg:str = _ci_join2(label, text)
+  say msg
+  free(label); free(msg)
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// Terminal control
+// ─────────────────────────────────────────────────────────────
+
+fn cursor_up(n:int) -> int:
+  ns:str = _ci_itoa(n)
+  seq:str = _ci_join3("\x1b[", ns, "A")
+  write_line(stdout(), seq)
+  free(ns); free(seq)
+  ret 0
+
+fn cursor_down(n:int) -> int:
+  ns:str = _ci_itoa(n)
+  seq:str = _ci_join3("\x1b[", ns, "B")
+  write_line(stdout(), seq)
+  free(ns); free(seq)
+  ret 0
+
+fn cursor_col(n:int) -> int:
+  ns:str = _ci_itoa(n)
+  seq:str = _ci_join3("\x1b[", ns, "G")
+  write_line(stdout(), seq)
+  free(ns); free(seq)
+  ret 0
+
+fn cursor_hide() -> int:
+  write_line(stdout(), "\x1b[?25l")
+  ret 0
+
+fn cursor_show() -> int:
+  write_line(stdout(), "\x1b[?25h")
+  ret 0
+
+fn clear_line() -> int:
+  write_line(stdout(), "\x1b[2K\r")
+  ret 0
+
+fn clear_screen() -> int:
+  write_line(stdout(), "\x1b[2J\x1b[H")
+  ret 0
+
+fn color_reset() -> int:
+  write_line(stdout(), _RESET)
+  ret 0

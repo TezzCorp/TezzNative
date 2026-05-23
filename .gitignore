@@ -1,0 +1,21 @@
+# ==========================================
+# TezzNative Public Repository .gitignore
+# Whitelist Strategy (Only tracks allowed files)
+# ==========================================
+
+# Ignore everything by default
+*
+
+# Allow directories
+!lib/
+!lib/**
+!tezznative-vscode/
+!tezznative-vscode/**
+
+# Allow specific files
+!README.md
+!LICENSE.txt
+!version.json
+!tezz.mod
+!tezz.lock
+!.gitignore

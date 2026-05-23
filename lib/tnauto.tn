@@ -1,0 +1,292 @@
+import "io"
+import "net"
+
+let TAUTO_OK:int = 0
+let TAUTO_ERR:int = 0 - 1
+
+fn _join2(a:str, b:str) -> str:
+  if a == 0:
+    a = ""
+  if b == 0:
+    b = ""
+  na:int = len(a)
+  nb:int = len(b)
+  out:*char = malloc(na + nb + 1)
+  if out == 0:
+    ret 0 as str
+  if na > 0:
+    unsafe:
+      memcpy(out, a as *char, na)
+  if nb > 0:
+    unsafe:
+      memcpy(out + na, b as *char, nb)
+  out[na + nb] = 0 as char
+  ret out as str
+
+fn _join3(a:str, b:str, c:str) -> str:
+  ab:str = _join2(a, b)
+  if ab == 0:
+    ret 0 as str
+  out:str = _join2(ab, c)
+  free(ab)
+  ret out
+
+fn _is_abs_path(p:str) -> int:
+  if p == 0 || p[0] == 0 as char:
+    ret 0
+  c0:int = (p[0] as int) & 255
+  if c0 == 47 || c0 == 92:
+    ret 1
+  c1:int = (p[1] as int) & 255
+  if c1 == 58:
+    if (c0 >= 65 && c0 <= 90) || (c0 >= 97 && c0 <= 122):
+      ret 1
+  ret 0
+
+fn _trim_trailing_ws(s:str) -> str:
+  if s == 0:
+    ret 0 as str
+  n:int = len(s)
+  while n > 0:
+    c:int = (s[n - 1] as int) & 255
+    if c == 10 || c == 13 || c == 9 || c == 32:
+      n = n - 1
+    else:
+      break
+  out:*char = malloc(n + 1)
+  if out == 0:
+    ret 0 as str
+  if n > 0:
+    unsafe:
+      memcpy(out, s as *char, n)
+  out[n] = 0 as char
+  ret out as str
+
+fn _cwd_shell() -> str:
+  raw:str = proc_out("pwd")
+  if raw == 0:
+    raw = proc_out("cd")
+    if raw == 0:
+      ret 0 as str
+  if raw[0] == 0 as char:
+    free(raw)
+    raw = proc_out("cd")
+    if raw == 0:
+      ret 0 as str
+  out:str = _trim_trailing_ws(raw)
+  free(raw)
+  ret out
+
+fn _quote_arg(s:str) -> str:
+  if s == 0:
+    s = ""
+  n:int = len(s)
+  out:*char = malloc(n + 3)
+  if out == 0:
+    ret 0 as str
+  out[0] = 34 as char
+  i:int = 0
+  o:int = 1
+  while i < n:
+    c:int = (s[i] as int) & 255
+    if c == 34:
+      out[o] = 39 as char
+    else if c == 10 || c == 13:
+      out[o] = 32 as char
+    else:
+      out[o] = s[i]
+    i = i + 1
+    o = o + 1
+  out[o] = 34 as char
+  out[o + 1] = 0 as char
+  ret out as str
+
+fn _is_windows() -> int:
+  ret io.path_sep_ch() == 92
+
+fn abs_path(path:str) -> str:
+  if path == 0 || path[0] == 0 as char:
+    ret 0 as str
+  if _is_abs_path(path) != 0:
+    ret io.path_norm_p(path)
+  cwd:str = _cwd_shell()
+  if cwd == 0:
+    ret io.path_norm_p(path)
+  joined:str = io.path_join2(cwd, path)
+  free(cwd)
+  if joined == 0:
+    ret io.path_norm_p(path)
+  norm:str = io.path_norm_p(joined)
+  free(joined)
+  ret norm
+
+fn ensure_parent_dir(path:str) -> int:
+  if path == 0 || path[0] == 0 as char:
+    ret TAUTO_ERR
+  parent:str = io.path_dir(path)
+  if parent == 0:
+    ret TAUTO_ERR
+  if len(parent) == 0:
+    free(parent)
+    ret TAUTO_OK
+  if path_exists(parent) == 0:
+    rc:int = mkdir(parent)
+    free(parent)
+    if rc != 0:
+      ret TAUTO_ERR
+    ret TAUTO_OK
+  if path_is_dir(parent) == 0:
+    free(parent)
+    ret TAUTO_ERR
+  free(parent)
+  ret TAUTO_OK
+
+fn ensure_dir(path:str) -> int:
+  if path == 0 || path[0] == 0 as char:
+    ret TAUTO_ERR
+  if path_exists(path) != 0:
+    if path_is_dir(path) != 0:
+      ret TAUTO_OK
+    ret TAUTO_ERR
+  ret mkdir(path)
+
+fn run(cmd:str) -> int:
+  if cmd == 0 || cmd[0] == 0 as char:
+    ret TAUTO_ERR
+  ret proc_run(cmd)
+
+fn out(cmd:str) -> str:
+  if cmd == 0 || cmd[0] == 0 as char:
+    ret 0 as str
+  ret proc_out(cmd)
+
+fn sh(cmd:str) -> int:
+  ret run(cmd)
+
+fn exists(path:str) -> int:
+  if path == 0 || path[0] == 0 as char:
+    ret 0
+  ret path_exists(path)
+
+fn is_dir(path:str) -> int:
+  if path == 0 || path[0] == 0 as char:
+    ret 0
+  ret path_is_dir(path)
+
+fn is_file(path:str) -> int:
+  if path == 0 || path[0] == 0 as char:
+    ret 0
+  if path_exists(path) == 0:
+    ret 0
+  ret path_is_dir(path) == 0
+
+fn read_text(path:str) -> str:
+  if path == 0 || path[0] == 0 as char:
+    ret 0 as str
+  ret io.read_all(path)
+
+fn write_text(path:str, data:str) -> int:
+  if path == 0 || path[0] == 0 as char:
+    ret TAUTO_ERR
+  if ensure_parent_dir(path) != 0:
+    ret TAUTO_ERR
+  ret io.write_all(path, data)
+
+fn copy_file(src:str, dst:str) -> int:
+  if src == 0 || dst == 0:
+    ret TAUTO_ERR
+  if ensure_parent_dir(dst) != 0:
+    ret TAUTO_ERR
+  ret io.copy_file(src, dst)
+
+fn move_file(src:str, dst:str) -> int:
+  if src == 0 || dst == 0:
+    ret TAUTO_ERR
+  if ensure_parent_dir(dst) != 0:
+    ret TAUTO_ERR
+  ret io.move_file(src, dst)
+
+fn remove_path(path:str) -> int:
+  if path == 0 || path[0] == 0 as char:
+    ret TAUTO_ERR
+  ret remove(path)
+
+fn download(url:str, out_path:str) -> int:
+  if url == 0 || out_path == 0:
+    ret TAUTO_ERR
+  if ensure_parent_dir(out_path) != 0:
+    ret TAUTO_ERR
+  if net.init() != 0:
+    ret TAUTO_ERR
+  rc:int = net.download(url, out_path)
+  net.cleanup()
+  ret rc
+
+fn open_url(url:str) -> int:
+  if url == 0 || url[0] == 0 as char:
+    ret TAUTO_ERR
+  q:str = _quote_arg(url)
+  if q == 0:
+    ret TAUTO_ERR
+  cmd:str = 0 as str
+  if _is_windows() != 0:
+    cmd = _join3("start \"\" ", q, " >nul 2>nul")
+  else:
+    cmd = _join3("xdg-open ", q, " >/dev/null 2>/dev/null")
+  free(q)
+  if cmd == 0:
+    ret TAUTO_ERR
+  rc:int = proc_run(cmd)
+  free(cmd)
+  if rc != 0 && _is_windows() == 0:
+    q2:str = _quote_arg(url)
+    if q2 == 0:
+      ret TAUTO_ERR
+    cmd2:str = _join3("open ", q2, " >/dev/null 2>/dev/null")
+    free(q2)
+    if cmd2 == 0:
+      ret TAUTO_ERR
+    rc = proc_run(cmd2)
+    free(cmd2)
+  ret rc
+
+fn open_path(path:str) -> int:
+  ap:str = abs_path(path)
+  if ap == 0:
+    ret TAUTO_ERR
+  q:str = _quote_arg(ap)
+  free(ap)
+  if q == 0:
+    ret TAUTO_ERR
+  cmd:str = 0 as str
+  if _is_windows() != 0:
+    cmd = _join3("start \"\" ", q, " >nul 2>nul")
+  else:
+    cmd = _join3("xdg-open ", q, " >/dev/null 2>/dev/null")
+  free(q)
+  if cmd == 0:
+    ret TAUTO_ERR
+  rc:int = proc_run(cmd)
+  free(cmd)
+  if rc != 0 && _is_windows() == 0:
+    q2:str = _quote_arg(path)
+    if q2 == 0:
+      ret TAUTO_ERR
+    cmd2:str = _join3("open ", q2, " >/dev/null 2>/dev/null")
+    free(q2)
+    if cmd2 == 0:
+      ret TAUTO_ERR
+    rc = proc_run(cmd2)
+    free(cmd2)
+  ret rc
+
+fn shutdown_now() -> int:
+  if _is_windows() != 0:
+    ret proc_run("shutdown /s /t 0")
+  ret proc_run("shutdown -h now")
+
+fn reboot_now() -> int:
+  if _is_windows() != 0:
+    ret proc_run("shutdown /r /t 0")
+  ret proc_run("shutdown -r now")
+

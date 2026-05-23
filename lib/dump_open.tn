@@ -1,0 +1,54 @@
+import "std"
+
+struct TezzDb:
+  path:str
+  wal_path:str
+  h:*char
+  wal_h:*char
+  page_count:int
+  tables:*char
+  table_count:int
+  table_cap:int
+  in_tx:int
+  tx_start_page:int
+  cache:*char
+  cache_cap:int
+  cache_count:int
+
+fn open(path:str) -> *TezzDb:
+  if path == 0: ret 0 as *TezzDb
+  dir:str = io.path_dir(path)
+  if dir != 0 && io.dir_exists(dir) == 0:
+    io.dir_make(dir)
+    free(dir)
+  else:
+    if dir != 0: free(dir)
+  is_new:int = 42
+  h:*char = fopen(path, "r+b")
+  if h == 0 as *char:
+    h = fopen(path, "w+b")
+  else:
+    fseek(h, 0, 2)
+    sz:int = ftell(h)
+    fseek(h, 0, 0)
+    if sz > 0:
+      is_new = 0
+  say "DEBUG: open is_new=", is_new
+  if h == 0 as *char: ret 0 as *TezzDb
+  db:*TezzDb = (*TezzDb)malloc(sizeof(TezzDb))
+  if db == 0:
+    fclose(h)
+    ret 0 as *TezzDb
+  (*db).path = path
+  (*db).h = h
+  say "DEBUG: db as int = ", db as int
+  say "DEBUG: db[0] = ", (db as *int)[0]
+  say "DEBUG: db[1] = ", (db as *int)[1]
+  say "DEBUG: db[2] = ", (db as *int)[2]
+  say "DEBUG: h as int = ", h as int
+  say "DEBUG: (*db).h as int = ", (*db).h as int
+  ret db
+
+fn main() -> int:
+  db:*TezzDb = open("build/test_basic.db")
+  ret 0

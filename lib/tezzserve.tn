@@ -1,0 +1,874 @@
+// tezzserve module: production API server framework on top of TezzApi.
+//
+// Goals in v1.0:
+// - Fast route registration helpers for API servers
+// - Hardened HTTP session lifecycle wrappers
+// - TNXB bridge endpoint helpers (HTTP body -> TNXB decode -> route dispatch)
+
+import "net"
+import "tezzapi"
+import "time"
+
+let TEZZSERVE_OK:int = 0
+let TEZZSERVE_ERR:int = 0 - 1
+let TEZZSERVE_POLICY_ALLOW:int = 0
+let TEZZSERVE_POLICY_HANDLED:int = 1
+let TEZZSERVE_POLICY_UNAUTHORIZED:int = 2
+let TEZZSERVE_POLICY_RATE_LIMITED:int = 3
+let TEZZSERVE_POLICY_ERROR:int = 0 - 1
+
+struct TezzServeTenantTlsPolicy:
+  tenant:str
+  policy:*TnxbTlsPolicy
+
+struct TezzServe:
+  api:*TezzApi
+  session:*HttpServerSession
+  owns_api:int
+  middleware_hook:*char
+  auth_hook:*char
+  rate_hook:*char
+  tls_policy_hook:*char
+  required_bearer:str
+  rate_limit_max:int
+  rate_limit_window_ms:int
+  rate_window_start_ms:int
+  rate_hits:int
+  tls_request_policy:*TnxbTlsPolicy
+  tls_tenant_header:str
+  tls_tenants:*TezzServeTenantTlsPolicy
+  tls_tenants_count:int
+  tls_tenants_cap:int
+
+let _tezzserve_bound_api:*TezzApi = 0 as *TezzApi
+
+fn _ts_join2(a:str, b:str) -> str:
+  if a == 0:
+    ret b
+  if b == 0:
+    ret a
+  na:int = len(a)
+  nb:int = len(b)
+  out:*char = malloc(na + nb + 1)
+  if out == 0:
+    ret 0 as str
+  unsafe:
+    memcpy(out, a as *char, na)
+    memcpy(out + na, b as *char, nb)
+  out[na + nb] = 0 as char
+  ret out as str
+
+fn _ts_substr_dup(s:str, start:int, end:int) -> str:
+  if s == 0:
+    ret 0 as str
+  n:int = len(s)
+  s0:int = start
+  e0:int = end
+  if s0 < 0:
+    s0 = 0
+  if e0 < s0:
+    e0 = s0
+  if s0 > n:
+    s0 = n
+  if e0 > n:
+    e0 = n
+  span:int = e0 - s0
+  out:*char = malloc(span + 1)
+  if out == 0:
+    ret 0 as str
+  if span > 0:
+    unsafe:
+      memcpy(out, (s + s0) as *char, span)
+  out[span] = 0 as char
+  ret out as str
+
+fn _ts_itoa(v:int) -> str:
+  n:int = v
+  neg:int = 0
+  if n < 0:
+    neg = 1
+    n = 0 - n
+  tmp:*char = malloc(32)
+  if tmp == 0:
+    ret 0 as str
+  i:int = 0
+  if n == 0:
+    tmp[i] = 48 as char
+    i = i + 1
+  while n > 0:
+    d:int = n % 10
+    tmp[i] = (48 + d) as char
+    i = i + 1
+    n = n / 10
+  if neg != 0:
+    tmp[i] = 45 as char
+    i = i + 1
+  out:*char = malloc(i + 1)
+  if out == 0:
+    free(tmp)
+    ret 0 as str
+  j:int = 0
+  while j < i:
+    out[j] = tmp[i - j - 1]
+    j = j + 1
+  out[i] = 0 as char
+  free(tmp)
+  ret out as str
+
+fn _ts_tenant_tls_release_entry(e:*TezzServeTenantTlsPolicy) -> int:
+  if e == 0:
+    ret TEZZSERVE_ERR
+  if (*e).tenant != 0:
+    free((*e).tenant)
+    (*e).tenant = 0 as str
+  if (*e).policy != 0:
+    tezzapi.tnxb_tls_policy_obj_free((*e).policy)
+    (*e).policy = 0 as *TnxbTlsPolicy
+  ret TEZZSERVE_OK
+
+fn _ts_tenant_tls_find_index(srv:*TezzServe, tenant:str) -> int:
+  if srv == 0 || tenant == 0 || tenant[0] == 0 as char || (*srv).tls_tenants == 0:
+    ret 0 - 1
+  i:int = 0
+  while i < (*srv).tls_tenants_count:
+    t:str = (*srv).tls_tenants[i].tenant
+    if t != 0 && strcmp(t, tenant) == 0:
+      ret i
+    i = i + 1
+  ret 0 - 1
+
+fn _ts_tenant_tls_grow(srv:*TezzServe, min_cap:int) -> int:
+  if srv == 0:
+    ret TEZZSERVE_ERR
+  cap:int = (*srv).tls_tenants_cap
+  need:int = min_cap
+  if need < 1:
+    need = 1
+  if cap >= need:
+    ret TEZZSERVE_OK
+  if cap < 4:
+    cap = 4
+  while cap < need:
+    cap = cap * 2
+  nb:*TezzServeTenantTlsPolicy = (*TezzServeTenantTlsPolicy)malloc(sizeof(TezzServeTenantTlsPolicy) * cap)
+  if nb == 0:
+    ret TEZZSERVE_ERR
+  i:int = 0
+  while i < (*srv).tls_tenants_count:
+    nb[i] = (*srv).tls_tenants[i]
+    i = i + 1
+  while i < cap:
+    nb[i].tenant = 0 as str
+    nb[i].policy = 0 as *TnxbTlsPolicy
+    i = i + 1
+  if (*srv).tls_tenants != 0:
+    free((*srv).tls_tenants as *char)
+  (*srv).tls_tenants = nb
+  (*srv).tls_tenants_cap = cap
+  ret TEZZSERVE_OK
+
+fn _ts_builtin_tls_policy_for_request(srv:*TezzServe, req:str) -> *TnxbTlsPolicy:
+  if srv == 0 || req == 0 || (*srv).tls_tenants_count <= 0 || (*srv).tls_tenants == 0:
+    ret 0 as *TnxbTlsPolicy
+  hdr_name:str = (*srv).tls_tenant_header
+  if hdr_name == 0 || hdr_name[0] == 0 as char:
+    hdr_name = "X-Tezz-Tenant"
+  tenant:str = net.http_get_header(req, hdr_name)
+  if tenant == 0 || tenant[0] == 0 as char:
+    if tenant != 0:
+      free(tenant)
+    ret 0 as *TnxbTlsPolicy
+  idx:int = _ts_tenant_tls_find_index(srv, tenant)
+  free(tenant)
+  if idx < 0:
+    ret 0 as *TnxbTlsPolicy
+  ret (*srv).tls_tenants[idx].policy
+
+fn _ts_tls_policy_hook_for_request(srv:*TezzServe, sock:int, req:str) -> *TnxbTlsPolicy:
+  if srv == 0 || (*srv).tls_policy_hook == 0:
+    ret 0 as *TnxbTlsPolicy
+  hook_fn:fn(*TezzServe,int,str)->*TnxbTlsPolicy = (*srv).tls_policy_hook as fn(*TezzServe,int,str)->*TnxbTlsPolicy
+  ret hook_fn(srv, sock, req)
+
+fn _ts_tls_policy_for_request(srv:*TezzServe, sock:int, req:str) -> *TnxbTlsPolicy:
+  if srv == 0 || req == 0:
+    ret 0 as *TnxbTlsPolicy
+  p:*TnxbTlsPolicy = _ts_tls_policy_hook_for_request(srv, sock, req)
+  if p != 0:
+    ret p
+  ret _ts_builtin_tls_policy_for_request(srv, req)
+
+fn _ts_find_header_end(req:str) -> int:
+  if req == 0:
+    ret 0 - 1
+  n:int = len(req)
+  i:int = 0
+  while i + 3 < n:
+    if req[i] == 13 as char && req[i + 1] == 10 as char && req[i + 2] == 13 as char && req[i + 3] == 10 as char:
+      ret i + 4
+    i = i + 1
+  i = 0
+  while i + 1 < n:
+    if req[i] == 10 as char && req[i + 1] == 10 as char:
+      ret i + 2
+    i = i + 1
+  ret 0 - 1
+
+fn _ts_request_body(req:str) -> str:
+  if req == 0:
+    ret 0 as str
+  n:int = len(req)
+  start:int = _ts_find_header_end(req)
+  if start < 0:
+    ret _ts_substr_dup("", 0, 0)
+  if start > n:
+    start = n
+  cl:int = net.http_content_length(req)
+  if cl <= 0:
+    ret _ts_substr_dup(req, start, n)
+  stop:int = start + cl
+  if stop > n:
+    stop = n
+  ret _ts_substr_dup(req, start, stop)
+
+fn _ts_method_for_op(op:int) -> str:
+  if op == tezzapi.tnxb_op_create():
+    ret "POST"
+  if op == tezzapi.tnxb_op_read():
+    ret "GET"
+  if op == tezzapi.tnxb_op_update():
+    ret "PUT"
+  if op == tezzapi.tnxb_op_delete():
+    ret "DELETE"
+  ret 0 as str
+
+fn _ts_build_request(method:str, path:str, body:str) -> str:
+  if method == 0 || path == 0:
+    ret 0 as str
+  payload:str = body
+  if payload == 0:
+    payload = ""
+  clen_s:str = _ts_itoa(len(payload))
+  if clen_s == 0:
+    ret 0 as str
+  l1:str = _ts_join2(method, " ")
+  l2:str = _ts_join2(l1, path)
+  l3:str = _ts_join2(l2, " HTTP/1.1\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: ")
+  l4:str = _ts_join2(l3, clen_s)
+  l5:str = _ts_join2(l4, "\r\nX-Tezz-TNXB: 1\r\n\r\n")
+  req:str = _ts_join2(l5, payload)
+  free(clen_s)
+  free(l1)
+  free(l2)
+  free(l3)
+  free(l4)
+  free(l5)
+  ret req
+
+fn _ts_tnxb_bad_request(sock:int) -> int:
+  if sock >= 0:
+    net.http_respond_bad_request(sock)
+    ret 0
+  ret TEZZSERVE_ERR
+
+fn _ts_tnxb_method_not_allowed(sock:int) -> int:
+  if sock >= 0:
+    net.http_respond_text(sock, 405, "Method Not Allowed")
+    ret 0
+  ret TEZZSERVE_ERR
+
+fn _ts_hook_call(hook:*char, sock:int, req:str) -> int:
+  if hook == 0:
+    ret TEZZSERVE_POLICY_ALLOW
+  hook_fn:fn(int,str)->int = hook as fn(int,str)->int
+  rc:int = hook_fn(sock, req)
+  if rc < 0:
+    ret TEZZSERVE_POLICY_ERROR
+  if rc > 0:
+    ret TEZZSERVE_POLICY_HANDLED
+  ret TEZZSERVE_POLICY_ALLOW
+
+fn _ts_builtin_rate_check(srv:*TezzServe) -> int:
+  if srv == 0:
+    ret TEZZSERVE_POLICY_ERROR
+  if (*srv).rate_limit_max <= 0 || (*srv).rate_limit_window_ms <= 0:
+    ret TEZZSERVE_POLICY_ALLOW
+  now_ms:int = time.now_ms()
+  if now_ms < 0:
+    now_ms = 0
+  if (*srv).rate_window_start_ms <= 0 || now_ms < (*srv).rate_window_start_ms || (now_ms - (*srv).rate_window_start_ms) >= (*srv).rate_limit_window_ms:
+    (*srv).rate_window_start_ms = now_ms
+    (*srv).rate_hits = 0
+  if (*srv).rate_hits >= (*srv).rate_limit_max:
+    ret TEZZSERVE_POLICY_RATE_LIMITED
+  (*srv).rate_hits = (*srv).rate_hits + 1
+  ret TEZZSERVE_POLICY_ALLOW
+
+fn _ts_builtin_auth_check(srv:*TezzServe, req:str) -> int:
+  if srv == 0 || req == 0:
+    ret TEZZSERVE_POLICY_ERROR
+  if (*srv).required_bearer == 0 || (*srv).required_bearer[0] == 0 as char:
+    ret TEZZSERVE_POLICY_ALLOW
+  tok:str = net.http_bearer_token(req)
+  if tok == 0:
+    ret TEZZSERVE_POLICY_UNAUTHORIZED
+  ok:int = 0
+  if strcmp(tok, (*srv).required_bearer) == 0:
+    ok = 1
+  free(tok)
+  if ok == 0:
+    ret TEZZSERVE_POLICY_UNAUTHORIZED
+  ret TEZZSERVE_POLICY_ALLOW
+
+fn _ts_policy_check(srv:*TezzServe, sock:int, req:str) -> int:
+  if srv == 0 || req == 0:
+    ret TEZZSERVE_POLICY_ERROR
+
+  mw:int = _ts_hook_call((*srv).middleware_hook, sock, req)
+  if mw != TEZZSERVE_POLICY_ALLOW:
+    ret mw
+
+  rh:int = _ts_hook_call((*srv).rate_hook, sock, req)
+  if rh != TEZZSERVE_POLICY_ALLOW:
+    ret rh
+  rb:int = _ts_builtin_rate_check(srv)
+  if rb != TEZZSERVE_POLICY_ALLOW:
+    ret rb
+
+  ah:int = _ts_hook_call((*srv).auth_hook, sock, req)
+  if ah != TEZZSERVE_POLICY_ALLOW:
+    ret ah
+  ab:int = _ts_builtin_auth_check(srv, req)
+  if ab != TEZZSERVE_POLICY_ALLOW:
+    ret ab
+
+  ret TEZZSERVE_POLICY_ALLOW
+
+fn _ts_policy_respond(sock:int, code:int, msg:str) -> int:
+  if sock < 0:
+    ret TEZZSERVE_OK
+  if code == 401:
+    ret net.http_respond_text(sock, 401, "Unauthorized")
+  if code == 429:
+    ret net.http_respond_text(sock, 429, "Too Many Requests")
+  if code == 500:
+    ret net.http_respond_text(sock, 500, "Internal Server Error")
+  ret net.http_respond_text(sock, code, msg)
+
+fn serve_tnxb_dispatch(api:*TezzApi, sock:int, req:str) -> int:
+  if api == 0 || req == 0:
+    ret TEZZSERVE_ERR
+  m:str = net.http_method(req)
+  if m == 0:
+    ret _ts_tnxb_bad_request(sock)
+  if strcmp(m, "POST") != 0:
+    free(m)
+    ret _ts_tnxb_method_not_allowed(sock)
+  free(m)
+
+  raw_body:str = _ts_request_body(req)
+  if raw_body == 0:
+    ret _ts_tnxb_bad_request(sock)
+  packet:TnxbPacket = tezzapi.tnxb_decode(raw_body as *char, len(raw_body))
+  free(raw_body)
+  if packet.ok == 0:
+    ret _ts_tnxb_bad_request(sock)
+
+  method:str = _ts_method_for_op(packet.op)
+  if method == 0:
+    unsafe:
+      tezzapi.tnxb_packet_release(&packet)
+    ret _ts_tnxb_bad_request(sock)
+
+  route_norm:str = net.http_route_path(packet.route)
+  if route_norm == 0 || route_norm[0] == 0 as char:
+    if route_norm != 0:
+      free(route_norm)
+    unsafe:
+      tezzapi.tnxb_packet_release(&packet)
+    ret _ts_tnxb_bad_request(sock)
+
+  synth_req:str = _ts_build_request(method, route_norm, packet.body)
+  free(route_norm)
+  if synth_req == 0:
+    unsafe:
+      tezzapi.tnxb_packet_release(&packet)
+    ret TEZZSERVE_ERR
+
+  rc:int = tezzapi.api_serve_or_404(api, sock, synth_req)
+  free(synth_req)
+  unsafe:
+    tezzapi.tnxb_packet_release(&packet)
+  ret rc
+
+fn serve_bind_tnxb_bridge_api(api:*TezzApi) -> int:
+  _tezzserve_bound_api = api
+  if _tezzserve_bound_api == 0:
+    ret TEZZSERVE_ERR
+  ret TEZZSERVE_OK
+
+fn serve_tnxb_bridge_handler(sock:int, req:str) -> int:
+  if _tezzserve_bound_api == 0:
+    ret _ts_tnxb_bad_request(sock)
+  ret serve_tnxb_dispatch(_tezzserve_bound_api, sock, req)
+
+fn serve_new(api:*TezzApi, listener:int, timeout_ms:int, max_req_bytes:int) -> *TezzServe:
+  if api == 0:
+    ret 0 as *TezzServe
+  ses:*HttpServerSession = tezzapi.api_session_new(listener, timeout_ms, max_req_bytes, api)
+  if ses == 0:
+    ret 0 as *TezzServe
+  srv:*TezzServe = (*TezzServe)malloc(sizeof(TezzServe))
+  if srv == 0:
+    tezzapi.api_session_free(ses)
+    ret 0 as *TezzServe
+  (*srv).api = api
+  (*srv).session = ses
+  (*srv).owns_api = 0
+  (*srv).middleware_hook = 0 as *char
+  (*srv).auth_hook = 0 as *char
+  (*srv).rate_hook = 0 as *char
+  (*srv).tls_policy_hook = 0 as *char
+  (*srv).required_bearer = 0 as str
+  (*srv).rate_limit_max = 0
+  (*srv).rate_limit_window_ms = 0
+  (*srv).rate_window_start_ms = 0
+  (*srv).rate_hits = 0
+  (*srv).tls_request_policy = 0 as *TnxbTlsPolicy
+  (*srv).tls_tenant_header = _ts_substr_dup("X-Tezz-Tenant", 0, len("X-Tezz-Tenant"))
+  (*srv).tls_tenants = 0 as *TezzServeTenantTlsPolicy
+  (*srv).tls_tenants_count = 0
+  (*srv).tls_tenants_cap = 0
+  ret srv
+
+fn serve_new_with_routes(max_routes:int, listener:int, timeout_ms:int, max_req_bytes:int) -> *TezzServe:
+  api:*TezzApi = tezzapi.api_new(max_routes)
+  if api == 0:
+    ret 0 as *TezzServe
+  srv:*TezzServe = serve_new(api, listener, timeout_ms, max_req_bytes)
+  if srv == 0:
+    tezzapi.api_free(api)
+    ret 0 as *TezzServe
+  (*srv).owns_api = 1
+  ret srv
+
+fn serve_free(srv:*TezzServe) -> int:
+  if srv == 0:
+    ret TEZZSERVE_ERR
+  if (*srv).session != 0:
+    tezzapi.api_session_free((*srv).session)
+    (*srv).session = 0 as *HttpServerSession
+  if (*srv).owns_api != 0 && (*srv).api != 0:
+    tezzapi.api_free((*srv).api)
+  if _tezzserve_bound_api == (*srv).api:
+    _tezzserve_bound_api = 0 as *TezzApi
+  if (*srv).required_bearer != 0:
+    free((*srv).required_bearer)
+    (*srv).required_bearer = 0 as str
+  if (*srv).tls_tenants != 0:
+    i:int = 0
+    while i < (*srv).tls_tenants_count:
+      _ts_tenant_tls_release_entry(&((*srv).tls_tenants[i]))
+      i = i + 1
+    free((*srv).tls_tenants as *char)
+    (*srv).tls_tenants = 0 as *TezzServeTenantTlsPolicy
+  if (*srv).tls_tenant_header != 0:
+    free((*srv).tls_tenant_header)
+    (*srv).tls_tenant_header = 0 as str
+  (*srv).tls_tenants_count = 0
+  (*srv).tls_tenants_cap = 0
+  (*srv).tls_request_policy = 0 as *TnxbTlsPolicy
+  (*srv).api = 0 as *TezzApi
+  (*srv).owns_api = 0
+  free(srv as *char)
+  ret TEZZSERVE_OK
+
+fn serve_api(srv:*TezzServe) -> *TezzApi:
+  if srv == 0:
+    ret 0 as *TezzApi
+  ret (*srv).api
+
+fn serve_route(srv:*TezzServe, method:str, path:str, handler:*char) -> int:
+  if srv == 0 || (*srv).api == 0:
+    ret TEZZSERVE_ERR
+  ret tezzapi.api_route((*srv).api, method, path, handler)
+
+fn serve_get(srv:*TezzServe, path:str, handler:*char) -> int:
+  ret serve_route(srv, "GET", path, handler)
+
+fn serve_post(srv:*TezzServe, path:str, handler:*char) -> int:
+  ret serve_route(srv, "POST", path, handler)
+
+fn serve_put(srv:*TezzServe, path:str, handler:*char) -> int:
+  ret serve_route(srv, "PUT", path, handler)
+
+fn serve_patch(srv:*TezzServe, path:str, handler:*char) -> int:
+  ret serve_route(srv, "PATCH", path, handler)
+
+fn serve_delete(srv:*TezzServe, path:str, handler:*char) -> int:
+  ret serve_route(srv, "DELETE", path, handler)
+
+fn serve_any(srv:*TezzServe, path:str, handler:*char) -> int:
+  ret serve_route(srv, "*", path, handler)
+
+fn serve_crud(srv:*TezzServe, resource_path:str, create_handler:*char, read_handler:*char, update_handler:*char, delete_handler:*char) -> int:
+  if srv == 0 || (*srv).api == 0:
+    ret TEZZSERVE_ERR
+  ret tezzapi.api_crud((*srv).api, resource_path, create_handler, read_handler, update_handler, delete_handler)
+
+fn serve_enable_tnxb_bridge(srv:*TezzServe, bridge_path:str) -> int:
+  if srv == 0 || (*srv).api == 0:
+    ret TEZZSERVE_ERR
+  if serve_bind_tnxb_bridge_api((*srv).api) != 0:
+    ret TEZZSERVE_ERR
+  path:str = bridge_path
+  if path == 0 || path[0] == 0 as char:
+    path = "/tnxb"
+  unsafe:
+    ret tezzapi.api_route((*srv).api, "POST", path, serve_tnxb_bridge_handler as *char)
+
+fn serve_set_middleware_hook(srv:*TezzServe, hook:*char) -> int:
+  if srv == 0:
+    ret TEZZSERVE_ERR
+  (*srv).middleware_hook = hook
+  ret TEZZSERVE_OK
+
+fn serve_set_auth_hook(srv:*TezzServe, hook:*char) -> int:
+  if srv == 0:
+    ret TEZZSERVE_ERR
+  (*srv).auth_hook = hook
+  ret TEZZSERVE_OK
+
+fn serve_set_rate_hook(srv:*TezzServe, hook:*char) -> int:
+  if srv == 0:
+    ret TEZZSERVE_ERR
+  (*srv).rate_hook = hook
+  ret TEZZSERVE_OK
+
+fn serve_set_tls_policy_hook(srv:*TezzServe, hook:*char) -> int:
+  if srv == 0:
+    ret TEZZSERVE_ERR
+  (*srv).tls_policy_hook = hook
+  ret TEZZSERVE_OK
+
+fn serve_set_tenant_header(srv:*TezzServe, header_name:str) -> int:
+  if srv == 0:
+    ret TEZZSERVE_ERR
+  if (*srv).tls_tenant_header != 0:
+    free((*srv).tls_tenant_header)
+    (*srv).tls_tenant_header = 0 as str
+  if header_name == 0 || header_name[0] == 0 as char:
+    ret TEZZSERVE_OK
+  (*srv).tls_tenant_header = _ts_substr_dup(header_name, 0, len(header_name))
+  if (*srv).tls_tenant_header == 0:
+    ret TEZZSERVE_ERR
+  ret TEZZSERVE_OK
+
+fn serve_tenant_tls_policy_set(srv:*TezzServe, tenant:str, min_version:int, handshake_timeout_ms:int, pin_sha256_hex:str) -> int:
+  if srv == 0 || tenant == 0 || tenant[0] == 0 as char:
+    ret TEZZSERVE_ERR
+  p:*TnxbTlsPolicy = tezzapi.tnxb_tls_policy_obj_new()
+  if p == 0:
+    ret TEZZSERVE_ERR
+  if tezzapi.tnxb_tls_policy_obj_set_min(p, min_version) != 0:
+    tezzapi.tnxb_tls_policy_obj_free(p)
+    ret TEZZSERVE_ERR
+  if tezzapi.tnxb_tls_policy_obj_set_handshake_timeout(p, handshake_timeout_ms) != 0:
+    tezzapi.tnxb_tls_policy_obj_free(p)
+    ret TEZZSERVE_ERR
+  if tezzapi.tnxb_tls_policy_obj_set_pin_sha256(p, pin_sha256_hex) != 0:
+    tezzapi.tnxb_tls_policy_obj_free(p)
+    ret TEZZSERVE_ERR
+  idx:int = _ts_tenant_tls_find_index(srv, tenant)
+  if idx >= 0:
+    if (*srv).tls_tenants[idx].policy != 0:
+      tezzapi.tnxb_tls_policy_obj_free((*srv).tls_tenants[idx].policy)
+    (*srv).tls_tenants[idx].policy = p
+    ret TEZZSERVE_OK
+  if _ts_tenant_tls_grow(srv, (*srv).tls_tenants_count + 1) != 0:
+    tezzapi.tnxb_tls_policy_obj_free(p)
+    ret TEZZSERVE_ERR
+  name_dup:str = _ts_substr_dup(tenant, 0, len(tenant))
+  if name_dup == 0:
+    tezzapi.tnxb_tls_policy_obj_free(p)
+    ret TEZZSERVE_ERR
+  pos:int = (*srv).tls_tenants_count
+  (*srv).tls_tenants[pos].tenant = name_dup
+  (*srv).tls_tenants[pos].policy = p
+  (*srv).tls_tenants_count = (*srv).tls_tenants_count + 1
+  ret TEZZSERVE_OK
+
+fn serve_tenant_tls_policy_remove(srv:*TezzServe, tenant:str) -> int:
+  if srv == 0 || tenant == 0 || tenant[0] == 0 as char:
+    ret TEZZSERVE_ERR
+  idx:int = _ts_tenant_tls_find_index(srv, tenant)
+  if idx < 0:
+    ret TEZZSERVE_ERR
+  _ts_tenant_tls_release_entry(&((*srv).tls_tenants[idx]))
+  i:int = idx + 1
+  while i < (*srv).tls_tenants_count:
+    (*srv).tls_tenants[i - 1] = (*srv).tls_tenants[i]
+    i = i + 1
+  (*srv).tls_tenants_count = (*srv).tls_tenants_count - 1
+  if (*srv).tls_tenants_count >= 0 && (*srv).tls_tenants != 0:
+    (*srv).tls_tenants[(*srv).tls_tenants_count].tenant = 0 as str
+    (*srv).tls_tenants[(*srv).tls_tenants_count].policy = 0 as *TnxbTlsPolicy
+  ret TEZZSERVE_OK
+
+fn serve_tenant_tls_policy_clear(srv:*TezzServe) -> int:
+  if srv == 0:
+    ret TEZZSERVE_ERR
+  if (*srv).tls_tenants == 0:
+    (*srv).tls_tenants_count = 0
+    ret TEZZSERVE_OK
+  i:int = 0
+  while i < (*srv).tls_tenants_count:
+    _ts_tenant_tls_release_entry(&((*srv).tls_tenants[i]))
+    i = i + 1
+  (*srv).tls_tenants_count = 0
+  ret TEZZSERVE_OK
+
+fn serve_tenant_tls_policy_count(srv:*TezzServe) -> int:
+  if srv == 0:
+    ret 0
+  ret (*srv).tls_tenants_count
+
+fn serve_tenant_tls_policy_get(srv:*TezzServe, tenant:str) -> *TnxbTlsPolicy:
+  if srv == 0 || tenant == 0 || tenant[0] == 0 as char:
+    ret 0 as *TnxbTlsPolicy
+  idx:int = _ts_tenant_tls_find_index(srv, tenant)
+  if idx < 0:
+    ret 0 as *TnxbTlsPolicy
+  ret (*srv).tls_tenants[idx].policy
+
+fn serve_resolve_tls_policy_min(srv:*TezzServe, req:str) -> int:
+  p:*TnxbTlsPolicy = _ts_tls_policy_for_request(srv, 0 - 1, req)
+  if p == 0:
+    ret 0
+  ret tezzapi.tnxb_tls_policy_obj_get_min(p)
+
+fn serve_resolve_tls_policy_handshake_timeout(srv:*TezzServe, req:str) -> int:
+  p:*TnxbTlsPolicy = _ts_tls_policy_for_request(srv, 0 - 1, req)
+  if p == 0:
+    ret 0
+  ret tezzapi.tnxb_tls_policy_obj_get_handshake_timeout(p)
+
+fn serve_resolve_tls_policy_pin_enabled(srv:*TezzServe, req:str) -> int:
+  p:*TnxbTlsPolicy = _ts_tls_policy_for_request(srv, 0 - 1, req)
+  if p == 0:
+    ret 0
+  ret tezzapi.tnxb_tls_policy_obj_pin_enabled(p)
+
+// Request-scoped TNXB HTTPS helpers:
+// - when called inside serve_once/serve_dispatch_request flow, they use the active resolved policy.
+// - when called outside request flow, they fall back to no explicit policy.
+fn serve_tnxb_http_post(srv:*TezzServe, url:str, payload:TnxbBuffer, timeout_ms:int, max_bytes:int) -> str:
+  if srv == 0:
+    ret 0 as str
+  ret tezzapi.tnxb_http_post_with_policy(url, payload, timeout_ms, max_bytes, (*srv).tls_request_policy)
+
+fn serve_tnxb_http_call(srv:*TezzServe, url:str, op:int, route:str, body:str, timeout_ms:int, max_bytes:int) -> TnxbHttpReply:
+  if srv == 0:
+    out0:TnxbHttpReply
+    out0.ok = 0
+    out0.status = 0
+    out0.body = 0 as str
+    ret out0
+  ret tezzapi.tnxb_http_call_with_policy(url, op, route, body, timeout_ms, max_bytes, (*srv).tls_request_policy)
+
+// One-shot helpers when handler has request string and wants resolver-driven policy without storing state.
+fn serve_tnxb_http_post_for_request(srv:*TezzServe, req:str, url:str, payload:TnxbBuffer, timeout_ms:int, max_bytes:int) -> str:
+  p:*TnxbTlsPolicy = _ts_tls_policy_for_request(srv, 0 - 1, req)
+  ret tezzapi.tnxb_http_post_with_policy(url, payload, timeout_ms, max_bytes, p)
+
+fn serve_tnxb_http_call_for_request(srv:*TezzServe, req:str, url:str, op:int, route:str, body:str, timeout_ms:int, max_bytes:int) -> TnxbHttpReply:
+  p:*TnxbTlsPolicy = _ts_tls_policy_for_request(srv, 0 - 1, req)
+  ret tezzapi.tnxb_http_call_with_policy(url, op, route, body, timeout_ms, max_bytes, p)
+
+fn serve_require_bearer_token(srv:*TezzServe, token:str) -> int:
+  if srv == 0:
+    ret TEZZSERVE_ERR
+  if (*srv).required_bearer != 0:
+    free((*srv).required_bearer)
+    (*srv).required_bearer = 0 as str
+  if token == 0 || token[0] == 0 as char:
+    ret TEZZSERVE_OK
+  (*srv).required_bearer = _ts_substr_dup(token, 0, len(token))
+  if (*srv).required_bearer == 0:
+    ret TEZZSERVE_ERR
+  ret TEZZSERVE_OK
+
+fn serve_disable_bearer_token(srv:*TezzServe) -> int:
+  if srv == 0:
+    ret TEZZSERVE_ERR
+  if (*srv).required_bearer != 0:
+    free((*srv).required_bearer)
+    (*srv).required_bearer = 0 as str
+  ret TEZZSERVE_OK
+
+fn serve_set_rate_limit(srv:*TezzServe, max_requests:int, window_ms:int) -> int:
+  if srv == 0:
+    ret TEZZSERVE_ERR
+  (*srv).rate_limit_max = max_requests
+  if (*srv).rate_limit_max < 0:
+    (*srv).rate_limit_max = 0
+  (*srv).rate_limit_window_ms = window_ms
+  if (*srv).rate_limit_window_ms < 0:
+    (*srv).rate_limit_window_ms = 0
+  (*srv).rate_window_start_ms = 0
+  (*srv).rate_hits = 0
+  ret TEZZSERVE_OK
+
+fn serve_disable_rate_limit(srv:*TezzServe) -> int:
+  if srv == 0:
+    ret TEZZSERVE_ERR
+  (*srv).rate_limit_max = 0
+  (*srv).rate_limit_window_ms = 0
+  (*srv).rate_window_start_ms = 0
+  (*srv).rate_hits = 0
+  ret TEZZSERVE_OK
+
+fn serve_set_limits(srv:*TezzServe, max_clients:int, max_errors:int) -> int:
+  if srv == 0 || (*srv).session == 0:
+    ret TEZZSERVE_ERR
+  ret tezzapi.api_session_set_limits((*srv).session, max_clients, max_errors)
+
+fn serve_once(srv:*TezzServe) -> int:
+  if srv == 0 || (*srv).session == 0 || (*srv).api == 0:
+    ret TEZZSERVE_ERR
+  (*srv).tls_request_policy = 0 as *TnxbTlsPolicy
+  ses:*HttpServerSession = (*srv).session
+  if ses == 0 || (*ses).routes == 0:
+    ret TEZZSERVE_ERR
+  if (*ses).listener < 0:
+    (*ses).errors = (*ses).errors + 1
+    ret TEZZSERVE_ERR
+  cli:int = net.http_server_accept((*ses).listener, (*ses).timeout_ms)
+  if cli < 0:
+    (*ses).errors = (*ses).errors + 1
+    ret TEZZSERVE_ERR
+  req:str = net.http_read_request(cli, (*ses).max_req_bytes)
+  if req == 0:
+    net.close(cli)
+    (*ses).errors = (*ses).errors + 1
+    ret TEZZSERVE_ERR
+
+  if net.http_request_start_line_valid(req) == 0:
+    net.http_respond_bad_request(cli)
+    net.close(cli)
+    free(req)
+    (*ses).served = (*ses).served + 1
+    ret 0
+
+  (*srv).tls_request_policy = _ts_tls_policy_for_request(srv, cli, req)
+  policy:int = _ts_policy_check(srv, cli, req)
+  if policy == TEZZSERVE_POLICY_ERROR:
+    _ts_policy_respond(cli, 500, "Internal Server Error")
+    net.close(cli)
+    free(req)
+    (*srv).tls_request_policy = 0 as *TnxbTlsPolicy
+    (*ses).errors = (*ses).errors + 1
+    ret TEZZSERVE_ERR
+  if policy == TEZZSERVE_POLICY_HANDLED:
+    net.close(cli)
+    free(req)
+    (*srv).tls_request_policy = 0 as *TnxbTlsPolicy
+    (*ses).served = (*ses).served + 1
+    ret 0
+  if policy == TEZZSERVE_POLICY_UNAUTHORIZED:
+    _ts_policy_respond(cli, 401, "Unauthorized")
+    net.close(cli)
+    free(req)
+    (*srv).tls_request_policy = 0 as *TnxbTlsPolicy
+    (*ses).served = (*ses).served + 1
+    ret 0
+  if policy == TEZZSERVE_POLICY_RATE_LIMITED:
+    _ts_policy_respond(cli, 429, "Too Many Requests")
+    net.close(cli)
+    free(req)
+    (*srv).tls_request_policy = 0 as *TnxbTlsPolicy
+    (*ses).served = (*ses).served + 1
+    ret 0
+
+  matched:int = tezzapi.api_serve_or_404((*srv).api, cli, req)
+  net.close(cli)
+  free(req)
+  (*srv).tls_request_policy = 0 as *TnxbTlsPolicy
+  if matched < 0:
+    (*ses).errors = (*ses).errors + 1
+    ret TEZZSERVE_ERR
+  (*ses).served = (*ses).served + 1
+  ret matched
+
+fn serve_loop(srv:*TezzServe, max_clients:int) -> int:
+  if srv == 0 || (*srv).session == 0:
+    ret TEZZSERVE_ERR
+  ses:*HttpServerSession = (*srv).session
+  lim:int = max_clients
+  if lim <= 0:
+    lim = (*ses).max_clients
+  if lim <= 0:
+    lim = 2147483647
+  n:int = 0
+  while n < lim:
+    if (*ses).max_errors > 0 && (*ses).errors >= (*ses).max_errors:
+      break
+    rc:int = serve_once(srv)
+    if rc < 0 && (*ses).max_errors <= 0:
+      break
+    n = n + 1
+  ret n
+
+// Dispatch one already-read request through TezzServe policy + TezzApi routing.
+// Return:
+// - 1 when matched and handler executed
+// - 0 when blocked/handled/no-match
+// - TEZZSERVE_ERR on internal error
+fn serve_dispatch_request(srv:*TezzServe, sock:int, req:str) -> int:
+  if srv == 0 || (*srv).api == 0 || req == 0:
+    ret TEZZSERVE_ERR
+  (*srv).tls_request_policy = 0 as *TnxbTlsPolicy
+  if net.http_request_start_line_valid(req) == 0:
+    if sock >= 0:
+      net.http_respond_bad_request(sock)
+    ret 0
+  (*srv).tls_request_policy = _ts_tls_policy_for_request(srv, sock, req)
+  policy:int = _ts_policy_check(srv, sock, req)
+  if policy == TEZZSERVE_POLICY_ERROR:
+    if sock >= 0:
+      _ts_policy_respond(sock, 500, "Internal Server Error")
+    (*srv).tls_request_policy = 0 as *TnxbTlsPolicy
+    ret TEZZSERVE_ERR
+  if policy == TEZZSERVE_POLICY_HANDLED:
+    (*srv).tls_request_policy = 0 as *TnxbTlsPolicy
+    ret 0
+  if policy == TEZZSERVE_POLICY_UNAUTHORIZED:
+    if sock >= 0:
+      _ts_policy_respond(sock, 401, "Unauthorized")
+    (*srv).tls_request_policy = 0 as *TnxbTlsPolicy
+    ret 0
+  if policy == TEZZSERVE_POLICY_RATE_LIMITED:
+    if sock >= 0:
+      _ts_policy_respond(sock, 429, "Too Many Requests")
+    (*srv).tls_request_policy = 0 as *TnxbTlsPolicy
+    ret 0
+  rc:int = tezzapi.api_dispatch((*srv).api, sock, req)
+  (*srv).tls_request_policy = 0 as *TnxbTlsPolicy
+  if rc < 0:
+    ret TEZZSERVE_ERR
+  ret rc
+
+fn serve_served(srv:*TezzServe) -> int:
+  if srv == 0 || (*srv).session == 0:
+    ret 0
+  ret tezzapi.api_session_served((*srv).session)
+
+fn serve_errors(srv:*TezzServe) -> int:
+  if srv == 0 || (*srv).session == 0:
+    ret 0
+  ret tezzapi.api_session_errors((*srv).session)
+
+fn serve_reset_stats(srv:*TezzServe) -> int:
+  if srv == 0 || (*srv).session == 0:
+    ret TEZZSERVE_ERR
+  ret tezzapi.api_session_reset_stats((*srv).session)

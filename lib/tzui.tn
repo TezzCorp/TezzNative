@@ -1,0 +1,734 @@
+// tzui module: TzUI-style retained GUI wrapper over tzgui.
+//
+// Goals:
+// - Keep app code short and readable (window/frame/label/button/entry)
+// - Use dirty-region rendering by default via tzgui tree
+// - Provide basic pointer + keyboard interaction for installer-style apps
+
+import "tzgui"
+import "gui"
+
+let TZUI_MAX_CONTROLS:int = 96
+let TZUI_TEXT_MAX:int = 160
+
+let TZUI_KIND_NONE:int = 0
+let TZUI_KIND_FRAME:int = 1
+let TZUI_KIND_LABEL:int = 2
+let TZUI_KIND_BUTTON:int = 3
+let TZUI_KIND_ENTRY:int = 4
+let TZUI_KIND_CHECKBOX:int = 5
+let TZUI_KIND_SLIDER:int = 6
+
+struct TzUiControl:
+  control_id:int
+  kind:int
+  widget_id:int
+  visible:int
+  x:int
+  y:int
+  w:int
+  h:int
+  state:int
+  range_min:int
+  range_max:int
+  value:[char;160]
+
+struct TzUiApp:
+  engine:TzGuiEngine
+  tree:TzWidgetTree
+  ready:int
+  running:int
+  frame_idx:int
+  focus_control_id:int
+  last_key:int
+  pointer_x:int
+  pointer_y:int
+  pointer_buttons:int
+  prev_pointer_buttons:int
+  click_left:int
+  click_right:int
+  ime_active:int
+  ime_cursor:int
+  ime_length:int
+  controls:[TzUiControl;96]
+  control_count:int
+
+fn _buf_clear(dst:*char, cap:int) -> int:
+  if dst == 0 || cap <= 0:
+    ret 0 - 1
+  i:int = 0
+  while i < cap:
+    dst[i] = 0 as char
+    i = i + 1
+  ret 0
+
+fn _buf_copy(dst:*char, cap:int, src:str) -> int:
+  if dst == 0 || cap <= 0:
+    ret 0 - 1
+  _buf_clear(dst, cap)
+  if src == 0:
+    ret 0
+  n:int = len(src)
+  if n > (cap - 1):
+    n = cap - 1
+  if n > 0:
+    unsafe:
+      memcpy(dst, src as *char, n)
+  dst[n] = 0 as char
+  ret 0
+
+fn _kind_to_widget(kind:int) -> int:
+  if kind == TZUI_KIND_LABEL:
+    ret 2
+  if kind == TZUI_KIND_BUTTON:
+    ret 3
+  if kind == TZUI_KIND_ENTRY:
+    ret 3
+  if kind == TZUI_KIND_CHECKBOX:
+    ret 3
+  if kind == TZUI_KIND_SLIDER:
+    ret 3
+  ret 1
+
+fn _point_in(x:int, y:int, rx:int, ry:int, rw:int, rh:int) -> int:
+  if rw <= 0 || rh <= 0:
+    ret 0
+  if x < rx || y < ry:
+    ret 0
+  if x >= (rx + rw):
+    ret 0
+  if y >= (ry + rh):
+    ret 0
+  ret 1
+
+fn _clamp(v:int, lo:int, hi:int) -> int:
+  if lo > hi:
+    t:int = lo
+    lo = hi
+    hi = t
+  if v < lo:
+    ret lo
+  if v > hi:
+    ret hi
+  ret v
+
+fn _control_slot(app:*TzUiApp, control_id:int, create:int, kind:int) -> int:
+  if app == 0 || control_id <= 0:
+    ret 0 - 1
+  i:int = 0
+  while i < TZUI_MAX_CONTROLS:
+    if app[0].controls[i].control_id == control_id:
+      ret i
+    i = i + 1
+  if create == 0:
+    ret 0 - 1
+  i = 0
+  while i < TZUI_MAX_CONTROLS:
+    if app[0].controls[i].control_id == 0:
+      app[0].controls[i].control_id = control_id
+      app[0].controls[i].kind = kind
+      app[0].controls[i].widget_id = 0
+      app[0].controls[i].visible = 1
+      app[0].controls[i].x = 0
+      app[0].controls[i].y = 0
+      app[0].controls[i].w = 1
+      app[0].controls[i].h = 1
+      app[0].controls[i].state = 0
+      app[0].controls[i].range_min = 0
+      app[0].controls[i].range_max = 100
+      _buf_clear(&app[0].controls[i].value[0], TZUI_TEXT_MAX)
+      app[0].control_count = app[0].control_count + 1
+      ret i
+    i = i + 1
+  ret 0 - 2
+
+fn _control_apply_style(app:*TzUiApp, slot:int) -> int:
+  if app == 0 || slot < 0 || slot >= TZUI_MAX_CONTROLS:
+    ret 0 - 1
+  c:*TzUiControl = &app[0].controls[slot]
+  bg:int = app[0].engine.theme.panel
+  fg:int = app[0].engine.theme.text
+  if c[0].kind == TZUI_KIND_BUTTON:
+    bg = app[0].engine.theme.button
+    fg = app[0].engine.theme.text
+  if c[0].kind == TZUI_KIND_CHECKBOX:
+    bg = app[0].engine.theme.button
+    fg = app[0].engine.theme.text
+    if c[0].state != 0:
+      bg = app[0].engine.theme.accent
+  if c[0].kind == TZUI_KIND_SLIDER:
+    bg = app[0].engine.theme.button_inset
+    fg = app[0].engine.theme.text
+    if app[0].focus_control_id == c[0].control_id:
+      bg = app[0].engine.theme.accent
+  if c[0].kind == TZUI_KIND_ENTRY:
+    bg = app[0].engine.theme.button_inset
+    fg = app[0].engine.theme.text
+    if app[0].focus_control_id == c[0].control_id:
+      bg = app[0].engine.theme.accent
+  ret tzgui.widget_set_colors(&app[0].tree, c[0].widget_id, bg, fg)
+
+fn _control_sync_widget(app:*TzUiApp, slot:int) -> int:
+  if app == 0 || slot < 0 || slot >= TZUI_MAX_CONTROLS:
+    ret 0 - 1
+  c:*TzUiControl = &app[0].controls[slot]
+  if c[0].control_id == 0:
+    ret 0
+  if c[0].widget_id <= 0:
+    spec:TzWidgetSpec
+    spec.parent = 0
+    spec.kind = _kind_to_widget(c[0].kind)
+    spec.x = c[0].x
+    spec.y = c[0].y
+    spec.w = c[0].w
+    spec.h = c[0].h
+    spec.z = c[0].control_id
+    spec.visible = c[0].visible
+    spec.bg = app[0].engine.theme.panel
+    spec.fg = app[0].engine.theme.text
+    spec.text = &c[0].value[0]
+    c[0].widget_id = tzgui.widget_add(&app[0].tree, &spec)
+  else:
+    tzgui.widget_update_bounds(&app[0].tree, c[0].widget_id, c[0].x, c[0].y, c[0].w, c[0].h)
+    tzgui.widget_set_visible(&app[0].tree, c[0].widget_id, c[0].visible)
+    tzgui.widget_set_text(&app[0].tree, c[0].widget_id, &c[0].value[0])
+    tzgui.widget_set_z(&app[0].tree, c[0].widget_id, c[0].control_id)
+  _control_apply_style(app, slot)
+  ret c[0].widget_id
+
+fn _focus_cycle_next(app:*TzUiApp) -> int:
+  if app == 0:
+    ret 0
+  start:int = app[0].focus_control_id
+  seen_start:int = 0
+  if start <= 0:
+    seen_start = 1
+  i:int = 0
+  while i < TZUI_MAX_CONTROLS:
+    c:*TzUiControl = &app[0].controls[i]
+    if c[0].control_id > 0 && c[0].visible != 0:
+      if c[0].kind == TZUI_KIND_ENTRY || c[0].kind == TZUI_KIND_SLIDER:
+        if seen_start != 0:
+          app[0].focus_control_id = c[0].control_id
+          _control_apply_style(app, i)
+          ret c[0].control_id
+        if c[0].control_id == start:
+          seen_start = 1
+    i = i + 1
+  if start > 0:
+    // Wrap and select first eligible control.
+    i = 0
+    while i < TZUI_MAX_CONTROLS:
+      c2:*TzUiControl = &app[0].controls[i]
+      if c2[0].control_id > 0 && c2[0].visible != 0:
+        if c2[0].kind == TZUI_KIND_ENTRY || c2[0].kind == TZUI_KIND_SLIDER:
+          app[0].focus_control_id = c2[0].control_id
+          _control_apply_style(app, i)
+          ret c2[0].control_id
+      i = i + 1
+  app[0].focus_control_id = 0
+  ret 0
+
+fn _slider_apply_pointer(app:*TzUiApp, slot:int) -> int:
+  if app == 0 || slot < 0 || slot >= TZUI_MAX_CONTROLS:
+    ret 0 - 1
+  c:*TzUiControl = &app[0].controls[slot]
+  if c[0].kind != TZUI_KIND_SLIDER:
+    ret 0 - 1
+  if c[0].w <= 1:
+    c[0].state = c[0].range_min
+    _control_apply_style(app, slot)
+    ret c[0].state
+  rel:int = app[0].pointer_x - c[0].x
+  rel = _clamp(rel, 0, c[0].w)
+  span:int = c[0].range_max - c[0].range_min
+  if span <= 0:
+    c[0].state = c[0].range_min
+  else:
+    c[0].state = c[0].range_min + (rel * span) / c[0].w
+    c[0].state = _clamp(c[0].state, c[0].range_min, c[0].range_max)
+  _control_apply_style(app, slot)
+  ret c[0].state
+
+fn _entry_handle_key(app:*TzUiApp, slot:int, key:int) -> int:
+  if app == 0 || slot < 0 || slot >= TZUI_MAX_CONTROLS:
+    ret 0
+  if app[0].controls[slot].kind != TZUI_KIND_ENTRY:
+    ret 0
+  if key == 13:
+    ret 1
+  n:int = len(&app[0].controls[slot].value[0])
+  if key == 8 || key == 127:
+    if n > 0:
+      app[0].controls[slot].value[n - 1] = 0 as char
+      tzgui.widget_set_text(&app[0].tree, app[0].controls[slot].widget_id, &app[0].controls[slot].value[0])
+    ret 1
+  if key >= 32 && key <= 126:
+    if n < (TZUI_TEXT_MAX - 1):
+      app[0].controls[slot].value[n] = key as char
+      app[0].controls[slot].value[n + 1] = 0 as char
+      tzgui.widget_set_text(&app[0].tree, app[0].controls[slot].widget_id, &app[0].controls[slot].value[0])
+    ret 1
+  ret 0
+
+fn init(out:*TzUiApp, title:str, width:int, height:int) -> int:
+  if out == 0:
+    ret 0 - 1
+  rc:int = tzgui.engine_init(&out[0].engine)
+  if rc != 0:
+    out[0].ready = 0
+    out[0].running = 0
+    ret 0 - 2
+  if width <= 0:
+    width = out[0].engine.surf.width
+  if height <= 0:
+    height = out[0].engine.surf.height
+  if width <= 0:
+    width = 1024
+  if height <= 0:
+    height = 768
+  tzgui.tree_init(&out[0].tree, width, height)
+  tzgui.tree_set_clear_color(&out[0].tree, out[0].engine.theme.bg)
+  tzgui.tree_request_full_redraw(&out[0].tree, 4)
+  out[0].ready = 1
+  out[0].running = 1
+  out[0].frame_idx = 0
+  out[0].focus_control_id = 0
+  out[0].last_key = 0
+  out[0].pointer_x = 0
+  out[0].pointer_y = 0
+  out[0].pointer_buttons = 0
+  out[0].prev_pointer_buttons = 0
+  out[0].click_left = 0
+  out[0].click_right = 0
+  out[0].ime_active = 0
+  out[0].ime_cursor = 0
+  out[0].ime_length = 0
+  out[0].control_count = 0
+  i:int = 0
+  while i < TZUI_MAX_CONTROLS:
+    out[0].controls[i].control_id = 0
+    out[0].controls[i].kind = TZUI_KIND_NONE
+    out[0].controls[i].widget_id = 0
+    out[0].controls[i].visible = 0
+    out[0].controls[i].x = 0
+    out[0].controls[i].y = 0
+    out[0].controls[i].w = 0
+    out[0].controls[i].h = 0
+    out[0].controls[i].state = 0
+    out[0].controls[i].range_min = 0
+    out[0].controls[i].range_max = 100
+    _buf_clear(&out[0].controls[i].value[0], TZUI_TEXT_MAX)
+    i = i + 1
+  // Optional title banner.
+  if title != 0 && title[0] != 0 as char:
+    frame(&out[0], 1, 24, 24, width - 48, 38, title)
+  ret 0
+
+fn ready(app:*TzUiApp) -> int:
+  if app == 0:
+    ret 0
+  ret app[0].ready
+
+fn running(app:*TzUiApp) -> int:
+  if app == 0:
+    ret 0
+  ret app[0].running
+
+fn close(app:*TzUiApp) -> int:
+  if app == 0:
+    ret 0 - 1
+  app[0].running = 0
+  ret 0
+
+fn frame_index(app:*TzUiApp) -> int:
+  if app == 0:
+    ret 0
+  ret app[0].frame_idx
+
+fn begin(app:*TzUiApp) -> int:
+  if app == 0 || app[0].ready == 0 || app[0].running == 0:
+    ret 0 - 1
+  tzgui.engine_begin_frame(&app[0].engine)
+
+  app[0].last_key = 0
+  app[0].ime_active = gui.gui_ime_active()
+  app[0].ime_cursor = gui.gui_ime_cursor()
+  app[0].ime_length = gui.gui_ime_length()
+  ev:GuiEvent
+  while gui.gui_event_next(&ev) != 0:
+    if ev.key != 0:
+      app[0].last_key = ev.key
+      if ev.key == 27 || ev.key == 113 || ev.key == 81:
+        app[0].running = 0
+    if ev.kind == 5:
+      app[0].ime_active = 0
+      if ev.key != 0:
+        app[0].ime_active = 1
+      app[0].ime_cursor = ev.mods
+      app[0].ime_length = ev.data
+  app[0].pointer_x = tzgui.pointer_x()
+  app[0].pointer_y = tzgui.pointer_y()
+  app[0].prev_pointer_buttons = app[0].pointer_buttons
+  app[0].pointer_buttons = tzgui.pointer_buttons()
+  app[0].click_left = 0
+  app[0].click_right = 0
+  if (app[0].prev_pointer_buttons & 1) == 0 && (app[0].pointer_buttons & 1) != 0:
+    app[0].click_left = 1
+  if (app[0].prev_pointer_buttons & 2) == 0 && (app[0].pointer_buttons & 2) != 0:
+    app[0].click_right = 1
+
+  if app[0].click_left != 0:
+    i:int = TZUI_MAX_CONTROLS - 1
+    while i >= 0:
+      c:*TzUiControl = &app[0].controls[i]
+      if c[0].control_id != 0 && c[0].visible != 0:
+        if _point_in(app[0].pointer_x, app[0].pointer_y, c[0].x, c[0].y, c[0].w, c[0].h) != 0:
+          if c[0].kind == TZUI_KIND_ENTRY:
+            app[0].focus_control_id = c[0].control_id
+          else if c[0].kind == TZUI_KIND_SLIDER:
+            app[0].focus_control_id = c[0].control_id
+            _slider_apply_pointer(app, i)
+          else if c[0].kind == TZUI_KIND_CHECKBOX:
+            c[0].state = 1 - c[0].state
+            _control_apply_style(app, i)
+            app[0].focus_control_id = 0
+          else:
+            app[0].focus_control_id = 0
+          break
+      i = i - 1
+
+  if app[0].focus_control_id > 0 && (app[0].pointer_buttons & 1) != 0:
+    slot_drag:int = _control_slot(app, app[0].focus_control_id, 0, TZUI_KIND_NONE)
+    if slot_drag >= 0 && app[0].controls[slot_drag].kind == TZUI_KIND_SLIDER:
+      if _point_in(app[0].pointer_x, app[0].pointer_y, app[0].controls[slot_drag].x, app[0].controls[slot_drag].y, app[0].controls[slot_drag].w, app[0].controls[slot_drag].h) != 0:
+        _slider_apply_pointer(app, slot_drag)
+
+  if app[0].last_key == 9:
+    _focus_cycle_next(app)
+
+  if app[0].focus_control_id > 0 && app[0].last_key != 0:
+    slot:int = _control_slot(app, app[0].focus_control_id, 0, TZUI_KIND_ENTRY)
+    if slot >= 0:
+      if app[0].controls[slot].kind == TZUI_KIND_ENTRY:
+        _entry_handle_key(app, slot, app[0].last_key)
+        _control_apply_style(app, slot)
+  ret 0
+
+fn end(app:*TzUiApp) -> int:
+  if app == 0 || app[0].ready == 0:
+    ret 0
+  n:int = tzgui.tree_present_dirty(&app[0].tree, &app[0].engine.surf)
+  app[0].frame_idx = app[0].frame_idx + 1
+  ret n
+
+fn pointer_x(app:*TzUiApp) -> int:
+  if app == 0:
+    ret 0
+  ret app[0].pointer_x
+
+fn pointer_y(app:*TzUiApp) -> int:
+  if app == 0:
+    ret 0
+  ret app[0].pointer_y
+
+fn pointer_buttons(app:*TzUiApp) -> int:
+  if app == 0:
+    ret 0
+  ret app[0].pointer_buttons
+
+fn last_key(app:*TzUiApp) -> int:
+  if app == 0:
+    ret 0
+  ret app[0].last_key
+
+fn frame(app:*TzUiApp, control_id:int, x:int, y:int, w:int, h:int, title:str) -> int:
+  if app == 0 || app[0].ready == 0:
+    ret 0 - 1
+  slot:int = _control_slot(app, control_id, 1, TZUI_KIND_FRAME)
+  if slot < 0:
+    ret slot
+  app[0].controls[slot].kind = TZUI_KIND_FRAME
+  app[0].controls[slot].visible = 1
+  app[0].controls[slot].x = x
+  app[0].controls[slot].y = y
+  app[0].controls[slot].w = w
+  app[0].controls[slot].h = h
+  _buf_copy(&app[0].controls[slot].value[0], TZUI_TEXT_MAX, title)
+  ret _control_sync_widget(app, slot)
+
+fn label(app:*TzUiApp, control_id:int, x:int, y:int, text:str) -> int:
+  if app == 0 || app[0].ready == 0:
+    ret 0 - 1
+  slot:int = _control_slot(app, control_id, 1, TZUI_KIND_LABEL)
+  if slot < 0:
+    ret slot
+  app[0].controls[slot].kind = TZUI_KIND_LABEL
+  app[0].controls[slot].visible = 1
+  app[0].controls[slot].x = x
+  app[0].controls[slot].y = y
+  app[0].controls[slot].w = (len(text) + 2) * 8
+  app[0].controls[slot].h = 16
+  _buf_copy(&app[0].controls[slot].value[0], TZUI_TEXT_MAX, text)
+  ret _control_sync_widget(app, slot)
+
+fn button(app:*TzUiApp, control_id:int, x:int, y:int, w:int, h:int, text:str) -> int:
+  if app == 0 || app[0].ready == 0:
+    ret 0 - 1
+  slot:int = _control_slot(app, control_id, 1, TZUI_KIND_BUTTON)
+  if slot < 0:
+    ret slot
+  app[0].controls[slot].kind = TZUI_KIND_BUTTON
+  app[0].controls[slot].visible = 1
+  app[0].controls[slot].x = x
+  app[0].controls[slot].y = y
+  app[0].controls[slot].w = w
+  app[0].controls[slot].h = h
+  _buf_copy(&app[0].controls[slot].value[0], TZUI_TEXT_MAX, text)
+  ret _control_sync_widget(app, slot)
+
+fn entry(app:*TzUiApp, control_id:int, x:int, y:int, w:int, h:int, value:str) -> int:
+  if app == 0 || app[0].ready == 0:
+    ret 0 - 1
+  slot:int = _control_slot(app, control_id, 1, TZUI_KIND_ENTRY)
+  if slot < 0:
+    ret slot
+  app[0].controls[slot].kind = TZUI_KIND_ENTRY
+  app[0].controls[slot].visible = 1
+  app[0].controls[slot].x = x
+  app[0].controls[slot].y = y
+  app[0].controls[slot].w = w
+  app[0].controls[slot].h = h
+  if value != 0 && value[0] != 0 as char:
+    _buf_copy(&app[0].controls[slot].value[0], TZUI_TEXT_MAX, value)
+  ret _control_sync_widget(app, slot)
+
+fn entry_value(app:*TzUiApp, control_id:int) -> str:
+  if app == 0:
+    ret ""
+  slot:int = _control_slot(app, control_id, 0, TZUI_KIND_ENTRY)
+  if slot < 0:
+    ret ""
+  ret &app[0].controls[slot].value[0]
+
+fn entry_set(app:*TzUiApp, control_id:int, value:str) -> int:
+  if app == 0 || app[0].ready == 0:
+    ret 0 - 1
+  slot:int = _control_slot(app, control_id, 0, TZUI_KIND_ENTRY)
+  if slot < 0:
+    ret 0 - 2
+  _buf_copy(&app[0].controls[slot].value[0], TZUI_TEXT_MAX, value)
+  ret tzgui.widget_set_text(&app[0].tree, app[0].controls[slot].widget_id, &app[0].controls[slot].value[0])
+
+fn button_clicked(app:*TzUiApp, control_id:int) -> int:
+  if app == 0 || app[0].ready == 0 || app[0].click_left == 0:
+    ret 0
+  slot:int = _control_slot(app, control_id, 0, TZUI_KIND_BUTTON)
+  if slot < 0:
+    ret 0
+  if app[0].controls[slot].kind != TZUI_KIND_BUTTON:
+    ret 0
+  ret _point_in(app[0].pointer_x, app[0].pointer_y, app[0].controls[slot].x, app[0].controls[slot].y, app[0].controls[slot].w, app[0].controls[slot].h)
+
+fn entry_focused(app:*TzUiApp, control_id:int) -> int:
+  if app == 0:
+    ret 0
+  ret app[0].focus_control_id == control_id
+
+fn focus_set(app:*TzUiApp, control_id:int) -> int:
+  if app == 0 || app[0].ready == 0:
+    ret 0 - 1
+  if control_id <= 0:
+    app[0].focus_control_id = 0
+    ret 0
+  slot:int = _control_slot(app, control_id, 0, TZUI_KIND_NONE)
+  if slot < 0:
+    ret 0 - 2
+  if app[0].controls[slot].kind != TZUI_KIND_ENTRY && app[0].controls[slot].kind != TZUI_KIND_SLIDER:
+    ret 0 - 3
+  app[0].focus_control_id = control_id
+  _control_apply_style(app, slot)
+  ret 0
+
+fn focus_get(app:*TzUiApp) -> int:
+  if app == 0:
+    ret 0
+  ret app[0].focus_control_id
+
+fn ime_active(app:*TzUiApp) -> int:
+  if app == 0:
+    ret 0
+  ret app[0].ime_active
+
+fn ime_cursor(app:*TzUiApp) -> int:
+  if app == 0:
+    ret 0
+  ret app[0].ime_cursor
+
+fn ime_length(app:*TzUiApp) -> int:
+  if app == 0:
+    ret 0
+  ret app[0].ime_length
+
+fn control_exists(app:*TzUiApp, control_id:int) -> int:
+  if app == 0:
+    ret 0
+  slot:int = _control_slot(app, control_id, 0, TZUI_KIND_NONE)
+  if slot < 0:
+    ret 0
+  if app[0].controls[slot].control_id == 0:
+    ret 0
+  ret 1
+
+fn control_remove(app:*TzUiApp, control_id:int) -> int:
+  if app == 0 || app[0].ready == 0:
+    ret 0 - 1
+  slot:int = _control_slot(app, control_id, 0, TZUI_KIND_NONE)
+  if slot < 0:
+    ret 0 - 2
+  wid:int = app[0].controls[slot].widget_id
+  if wid > 0:
+    tzgui.widget_remove(&app[0].tree, wid)
+  app[0].controls[slot].control_id = 0
+  app[0].controls[slot].kind = TZUI_KIND_NONE
+  app[0].controls[slot].widget_id = 0
+  app[0].controls[slot].visible = 0
+  app[0].controls[slot].x = 0
+  app[0].controls[slot].y = 0
+  app[0].controls[slot].w = 0
+  app[0].controls[slot].h = 0
+  app[0].controls[slot].state = 0
+  app[0].controls[slot].range_min = 0
+  app[0].controls[slot].range_max = 100
+  _buf_clear(&app[0].controls[slot].value[0], TZUI_TEXT_MAX)
+  if app[0].control_count > 0:
+    app[0].control_count = app[0].control_count - 1
+  if app[0].focus_control_id == control_id:
+    app[0].focus_control_id = 0
+  ret 0
+
+fn controls_clear(app:*TzUiApp) -> int:
+  if app == 0 || app[0].ready == 0:
+    ret 0 - 1
+  i:int = 0
+  while i < TZUI_MAX_CONTROLS:
+    if app[0].controls[i].control_id > 0:
+      control_remove(app, app[0].controls[i].control_id)
+    i = i + 1
+  app[0].focus_control_id = 0
+  ret 0
+
+fn control_count(app:*TzUiApp) -> int:
+  if app == 0:
+    ret 0
+  ret app[0].control_count
+
+fn checkbox(app:*TzUiApp, control_id:int, x:int, y:int, w:int, h:int, text:str, checked:int) -> int:
+  if app == 0 || app[0].ready == 0:
+    ret 0 - 1
+  slot:int = _control_slot(app, control_id, 1, TZUI_KIND_CHECKBOX)
+  if slot < 0:
+    ret slot
+  app[0].controls[slot].kind = TZUI_KIND_CHECKBOX
+  app[0].controls[slot].visible = 1
+  app[0].controls[slot].x = x
+  app[0].controls[slot].y = y
+  app[0].controls[slot].w = w
+  app[0].controls[slot].h = h
+  if checked != 0:
+    app[0].controls[slot].state = 1
+  else:
+    app[0].controls[slot].state = 0
+  _buf_copy(&app[0].controls[slot].value[0], TZUI_TEXT_MAX, text)
+  ret _control_sync_widget(app, slot)
+
+fn checkbox_value(app:*TzUiApp, control_id:int) -> int:
+  if app == 0:
+    ret 0
+  slot:int = _control_slot(app, control_id, 0, TZUI_KIND_CHECKBOX)
+  if slot < 0:
+    ret 0
+  if app[0].controls[slot].kind != TZUI_KIND_CHECKBOX:
+    ret 0
+  ret app[0].controls[slot].state
+
+fn checkbox_set(app:*TzUiApp, control_id:int, checked:int) -> int:
+  if app == 0 || app[0].ready == 0:
+    ret 0 - 1
+  slot:int = _control_slot(app, control_id, 0, TZUI_KIND_CHECKBOX)
+  if slot < 0:
+    ret 0 - 2
+  if app[0].controls[slot].kind != TZUI_KIND_CHECKBOX:
+    ret 0 - 3
+  if checked != 0:
+    app[0].controls[slot].state = 1
+  else:
+    app[0].controls[slot].state = 0
+  _control_apply_style(app, slot)
+  ret 0
+
+fn slider(app:*TzUiApp, control_id:int, x:int, y:int, w:int, h:int, minv:int, maxv:int, value:int) -> int:
+  if app == 0 || app[0].ready == 0:
+    ret 0 - 1
+  slot:int = _control_slot(app, control_id, 1, TZUI_KIND_SLIDER)
+  if slot < 0:
+    ret slot
+  if minv > maxv:
+    t:int = minv
+    minv = maxv
+    maxv = t
+  app[0].controls[slot].kind = TZUI_KIND_SLIDER
+  app[0].controls[slot].visible = 1
+  app[0].controls[slot].x = x
+  app[0].controls[slot].y = y
+  app[0].controls[slot].w = w
+  app[0].controls[slot].h = h
+  app[0].controls[slot].range_min = minv
+  app[0].controls[slot].range_max = maxv
+  app[0].controls[slot].state = _clamp(value, minv, maxv)
+  _buf_copy(&app[0].controls[slot].value[0], TZUI_TEXT_MAX, "slider")
+  ret _control_sync_widget(app, slot)
+
+fn slider_value(app:*TzUiApp, control_id:int) -> int:
+  if app == 0:
+    ret 0
+  slot:int = _control_slot(app, control_id, 0, TZUI_KIND_SLIDER)
+  if slot < 0:
+    ret 0
+  if app[0].controls[slot].kind != TZUI_KIND_SLIDER:
+    ret 0
+  ret app[0].controls[slot].state
+
+fn slider_set(app:*TzUiApp, control_id:int, value:int) -> int:
+  if app == 0 || app[0].ready == 0:
+    ret 0 - 1
+  slot:int = _control_slot(app, control_id, 0, TZUI_KIND_SLIDER)
+  if slot < 0:
+    ret 0 - 2
+  if app[0].controls[slot].kind != TZUI_KIND_SLIDER:
+    ret 0 - 3
+  app[0].controls[slot].state = _clamp(value, app[0].controls[slot].range_min, app[0].controls[slot].range_max)
+  _control_apply_style(app, slot)
+  ret 0
+
+fn set_visible(app:*TzUiApp, control_id:int, visible:int) -> int:
+  if app == 0 || app[0].ready == 0:
+    ret 0 - 1
+  slot:int = _control_slot(app, control_id, 0, TZUI_KIND_NONE)
+  if slot < 0:
+    ret 0 - 2
+  if visible != 0:
+    app[0].controls[slot].visible = 1
+  else:
+    app[0].controls[slot].visible = 0
+  ret tzgui.widget_set_visible(&app[0].tree, app[0].controls[slot].widget_id, app[0].controls[slot].visible)
+
+fn request_full_redraw(app:*TzUiApp, reason:int) -> int:
+  if app == 0 || app[0].ready == 0:
+    ret 0 - 1
+  ret tzgui.tree_request_full_redraw(&app[0].tree, reason)
+
+fn dirty_pixels(app:*TzUiApp) -> int:
+  if app == 0 || app[0].ready == 0:
+    ret 0
+  ret tzgui.tree_dirty_pixels(&app[0].tree)

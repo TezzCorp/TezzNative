@@ -1,0 +1,776 @@
+// kernel module — TezzNative 2.0 OS Kernel Infrastructure
+//
+// Low-level kernel primitives for building operating systems,
+// bare-metal programs, and hypervisors in TezzNative.
+//
+// Targets:
+//   x86_64  — full IDT, GDT, APIC, page tables
+//   aarch64 — exception vectors, MMU, GICv3
+//   riscv64 — trap handler, PLIC, SBI interface
+//
+// Compile bare-metal: tezzc buildexe --target=x86_64-bare main.tn kernel.elf
+//
+// Usage:
+//   import "kernel"
+//   fn main() -> int:
+//     kernel.gdt_init()
+//     kernel.idt_init()
+//     kernel.pic_remap(0x20, 0x28)
+//     kernel.sti()
+//     kernel.vfs_mount("/", ramdisk_driver)
+//     while 1: kernel.hlt()
+//     ret 0
+
+// ─────────────────────────────────────────────────────────────
+// CPU state & low-level primitives
+// ─────────────────────────────────────────────────────────────
+
+let KERNEL_OK:int  = 0
+let KERNEL_ERR:int = 0 - 1
+
+// x86_64 EFLAGS bits
+let EFLAGS_IF:int   = 0x200   // Interrupt Flag
+let EFLAGS_DF:int   = 0x400   // Direction Flag
+let EFLAGS_TF:int   = 0x100   // Trap Flag
+
+// Page sizes
+let PAGE_SIZE_4K:int = 4096
+let PAGE_SIZE_2M:int = 2097152
+let PAGE_SIZE_1G:int = 1073741824
+
+// Protection flags
+let PAGE_PRESENT:int    = 1
+let PAGE_WRITABLE:int   = 2
+let PAGE_USER:int       = 4
+let PAGE_WRITE_THRU:int = 8
+let PAGE_NO_CACHE:int   = 16
+let PAGE_ACCESSED:int   = 32
+let PAGE_DIRTY:int      = 64
+let PAGE_HUGE:int       = 128
+let PAGE_NX:int         = 0x8000000000000000  // No-Execute (bit 63)
+
+// GDT segment selectors
+let GDT_NULL:int        = 0x00
+let GDT_KERNEL_CODE:int = 0x08
+let GDT_KERNEL_DATA:int = 0x10
+let GDT_USER_CODE:int   = 0x18
+let GDT_USER_DATA:int   = 0x20
+let GDT_TSS:int         = 0x28
+
+// IDT gate types
+let IDT_INTERRUPT_GATE:int = 0x8E
+let IDT_TRAP_GATE:int      = 0x8F
+let IDT_CALL_GATE:int      = 0x8C
+
+// Interrupt vectors
+let IRQ_TIMER:int    = 0x20
+let IRQ_KEYBOARD:int = 0x21
+let IRQ_COM2:int     = 0x23
+let IRQ_COM1:int     = 0x24
+let IRQ_LPT2:int     = 0x25
+let IRQ_FLOPPY:int   = 0x26
+let IRQ_LPT1:int     = 0x27
+let IRQ_RTC:int      = 0x28
+let IRQ_ATA0:int     = 0x2E
+let IRQ_ATA1:int     = 0x2F
+let IRQ_SYSCALL:int  = 0x80
+
+// Exception vectors
+let EXC_DIV_ZERO:int    = 0
+let EXC_DEBUG:int       = 1
+let EXC_NMI:int         = 2
+let EXC_BREAKPOINT:int  = 3
+let EXC_OVERFLOW:int    = 4
+let EXC_BOUND:int       = 5
+let EXC_INVALID_OP:int  = 6
+let EXC_DEVICE_NA:int   = 7
+let EXC_DOUBLE_FAULT:int= 8
+let EXC_GPF:int         = 13
+let EXC_PAGE_FAULT:int  = 14
+let EXC_FPU:int         = 16
+let EXC_ALIGN:int       = 17
+let EXC_MACHINE_CHECK:int=18
+let EXC_SIMD:int        = 19
+
+// ─────────────────────────────────────────────────────────────
+// GDT — Global Descriptor Table
+// ─────────────────────────────────────────────────────────────
+
+struct GdtEntry:
+  limit_low:int    // 16 bits
+  base_low:int     // 16 bits
+  base_mid:int     // 8 bits
+  access:int       // 8 bits
+  granularity:int  // 8 bits (limit_high + flags)
+  base_high:int    // 8 bits
+
+struct GdtPtr:
+  limit:int        // 16 bits — sizeof(GDT) - 1
+  base:int         // 64-bit base address
+
+static let _gdt:[GdtEntry;8]
+static let _gdt_ptr:GdtPtr
+static let _gdt_inited:int = 0
+
+fn _gdt_encode(entry:*GdtEntry, base:int, limit:int, access:int, gran:int) -> int:
+  (*entry).base_low  = base & 0xFFFF
+  (*entry).base_mid  = (base >> 16) & 0xFF
+  (*entry).base_high = (base >> 24) & 0xFF
+  (*entry).limit_low = limit & 0xFFFF
+  (*entry).granularity = ((limit >> 16) & 0x0F) | (gran & 0xF0)
+  (*entry).access = access
+  ret 0
+
+fn gdt_init() -> int:
+  // Null descriptor
+  _gdt_encode(&_gdt[0], 0, 0, 0, 0)
+  // Kernel code: 64-bit, DPL0
+  _gdt_encode(&_gdt[1], 0, 0xFFFFF, 0x9A, 0xA0)
+  // Kernel data: 64-bit, DPL0
+  _gdt_encode(&_gdt[2], 0, 0xFFFFF, 0x92, 0xC0)
+  // User code: 64-bit, DPL3
+  _gdt_encode(&_gdt[3], 0, 0xFFFFF, 0xFA, 0xA0)
+  // User data: 64-bit, DPL3
+  _gdt_encode(&_gdt[4], 0, 0xFFFFF, 0xF2, 0xC0)
+  _gdt_ptr.limit = sizeof(GdtEntry) * 5 - 1
+  _gdt_ptr.base = &_gdt[0] as int
+  cpu_lgdt(&_gdt_ptr)
+  cpu_reload_segments(GDT_KERNEL_CODE, GDT_KERNEL_DATA)
+  _gdt_inited = 1
+  ret KERNEL_OK
+
+// ─────────────────────────────────────────────────────────────
+// IDT — Interrupt Descriptor Table
+// ─────────────────────────────────────────────────────────────
+
+struct IdtEntry:
+  offset_low:int   // 16 bits: handler offset 0..15
+  selector:int     // 16 bits: code segment selector
+  ist:int          // 8 bits: IST (bits 0-2) + zeros
+  type_attr:int    // 8 bits: gate type + DPL + present
+  offset_mid:int   // 16 bits: handler offset 16..31
+  offset_high:int  // 32 bits: handler offset 32..63
+  zero2:int        // 32 bits: reserved
+
+struct IdtPtr:
+  limit:int
+  base:int
+
+let IDT_SIZE:int = 256
+static let _idt:[IdtEntry;256]
+static let _idt_ptr:IdtPtr
+
+// Interrupt handlers: fn()->int
+static let _irq_handlers:[fn()->int;256]
+static let _idt_inited:int = 0
+
+fn idt_set_gate(vec:int, handler_addr:int, selector:int, type_attr:int, ist:int) -> int:
+  if vec < 0 || vec >= IDT_SIZE: ret KERNEL_ERR
+  e:*IdtEntry = &_idt[vec]
+  (*e).offset_low  = handler_addr & 0xFFFF
+  (*e).offset_mid  = (handler_addr >> 16) & 0xFFFF
+  (*e).offset_high = (handler_addr >> 32) & 0xFFFFFFFF
+  (*e).selector    = selector
+  (*e).ist         = ist & 7
+  (*e).type_attr   = type_attr
+  (*e).zero2       = 0
+  ret KERNEL_OK
+
+fn idt_init() -> int:
+  // Zero all entries
+  i:int = 0
+  while i < IDT_SIZE:
+    _irq_handlers[i] = 0 as fn()->int
+    idt_set_gate(i, cpu_default_isr_addr(i), GDT_KERNEL_CODE, IDT_INTERRUPT_GATE, 0)
+    i = i + 1
+  // Double fault uses IST 1
+  idt_set_gate(EXC_DOUBLE_FAULT, cpu_default_isr_addr(EXC_DOUBLE_FAULT), GDT_KERNEL_CODE, IDT_TRAP_GATE, 1)
+  // System call uses trap gate
+  idt_set_gate(IRQ_SYSCALL, cpu_default_isr_addr(IRQ_SYSCALL), GDT_KERNEL_CODE, IDT_TRAP_GATE, 0)
+  _idt_ptr.limit = sizeof(IdtEntry) * IDT_SIZE - 1
+  _idt_ptr.base = &_idt[0] as int
+  cpu_lidt(&_idt_ptr)
+  _idt_inited = 1
+  ret KERNEL_OK
+
+fn irq_register(vec:int, handler:fn()->int) -> int:
+  if vec < 0 || vec >= IDT_SIZE: ret KERNEL_ERR
+  _irq_handlers[vec] = handler
+  ret KERNEL_OK
+
+fn irq_unregister(vec:int) -> int:
+  if vec < 0 || vec >= IDT_SIZE: ret KERNEL_ERR
+  _irq_handlers[vec] = 0 as fn()->int
+  ret KERNEL_OK
+
+fn irq_dispatch(vec:int) -> int:
+  if vec < 0 || vec >= IDT_SIZE: ret KERNEL_ERR
+  if _irq_handlers[vec] != 0 as fn()->int:
+    ret _irq_handlers[vec]()
+  ret KERNEL_OK
+
+// ─────────────────────────────────────────────────────────────
+// PIC — Programmable Interrupt Controller (8259A)
+// ─────────────────────────────────────────────────────────────
+
+let PIC1_CMD:int  = 0x20
+let PIC1_DATA:int = 0x21
+let PIC2_CMD:int  = 0xA0
+let PIC2_DATA:int = 0xA1
+let PIC_EOI:int   = 0x20
+
+fn pic_remap(offset1:int, offset2:int) -> int:
+  // Remap master PIC to offset1, slave to offset2
+  outb(PIC1_CMD, 0x11)   // ICW1: init + ICW4
+  outb(PIC2_CMD, 0x11)
+  outb(PIC1_DATA, offset1)  // ICW2: vector offsets
+  outb(PIC2_DATA, offset2)
+  outb(PIC1_DATA, 4)     // ICW3: slave at IRQ2
+  outb(PIC2_DATA, 2)     // ICW3: slave ID
+  outb(PIC1_DATA, 1)     // ICW4: 8086 mode
+  outb(PIC2_DATA, 1)
+  // Mask all IRQs initially
+  outb(PIC1_DATA, 0xFF)
+  outb(PIC2_DATA, 0xFF)
+  ret KERNEL_OK
+
+fn pic_eoi(irq:int) -> int:
+  if irq >= 8:
+    outb(PIC2_CMD, PIC_EOI)
+  outb(PIC1_CMD, PIC_EOI)
+  ret KERNEL_OK
+
+fn pic_enable_irq(irq:int) -> int:
+  port:int = PIC1_DATA
+  line:int = irq
+  if irq >= 8:
+    port = PIC2_DATA
+    line = irq - 8
+  val:int = inb(port)
+  outb(port, val & (0xFF & ~(1 << line)))
+  ret KERNEL_OK
+
+fn pic_disable_irq(irq:int) -> int:
+  port:int = PIC1_DATA
+  line:int = irq
+  if irq >= 8:
+    port = PIC2_DATA
+    line = irq - 8
+  val:int = inb(port)
+  outb(port, val | (1 << line))
+  ret KERNEL_OK
+
+fn pic_disable_all() -> int:
+  outb(PIC1_DATA, 0xFF)
+  outb(PIC2_DATA, 0xFF)
+  ret KERNEL_OK
+
+// ─────────────────────────────────────────────────────────────
+// CPU control
+// ─────────────────────────────────────────────────────────────
+
+fn hlt() -> int:
+  cpu_hlt()
+  ret KERNEL_OK
+
+fn sti() -> int:
+  cpu_sti()
+  ret KERNEL_OK
+
+fn cli() -> int:
+  cpu_cli()
+  ret KERNEL_OK
+
+fn pause_cpu() -> int:
+  cpu_pause()
+  ret KERNEL_OK
+
+fn rdtsc() -> int:
+  ret cpu_rdtsc()
+
+fn cpuid_vendor() -> str:
+  ret cpu_vendor_string()
+
+fn msr_read(msr:int) -> int:
+  ret cpu_rdmsr(msr)
+
+fn msr_write(msr:int, val:int) -> int:
+  ret cpu_wrmsr(msr, val)
+
+fn cr3_read() -> int:
+  ret cpu_read_cr3()
+
+fn cr3_write(val:int) -> int:
+  ret cpu_write_cr3(val)
+
+fn tlb_flush_all() -> int:
+  cr3_write(cr3_read())
+  ret KERNEL_OK
+
+fn tlb_flush_addr(addr:int) -> int:
+  cpu_invlpg(addr)
+  ret KERNEL_OK
+
+// ─────────────────────────────────────────────────────────────
+// Memory management
+// ─────────────────────────────────────────────────────────────
+
+struct PhysAllocator:
+  bitmap:*int    // 1 bit per page (1=free, 0=used)
+  total_pages:int
+  free_pages:int
+  first_free:int
+
+static let _phys_alloc:PhysAllocator
+
+fn phys_init(bitmap_addr:int, total_bytes:int) -> int:
+  total_pages:int = total_bytes / PAGE_SIZE_4K
+  _phys_alloc.bitmap = bitmap_addr as *int
+  _phys_alloc.total_pages = total_pages
+  _phys_alloc.free_pages = 0
+  _phys_alloc.first_free = 0
+  // Mark all pages free initially
+  i:int = 0
+  while i < total_pages:
+    bitmap_set_bit(_phys_alloc.bitmap, i)
+    _phys_alloc.free_pages = _phys_alloc.free_pages + 1
+    i = i + 1
+  ret KERNEL_OK
+
+fn phys_alloc() -> int:
+  // Find first free page
+  if _phys_alloc.free_pages <= 0: ret 0 - 1
+  i:int = _phys_alloc.first_free
+  while i < _phys_alloc.total_pages:
+    if bitmap_test_bit(_phys_alloc.bitmap, i) != 0:
+      bitmap_clear_bit(_phys_alloc.bitmap, i)
+      _phys_alloc.free_pages = _phys_alloc.free_pages - 1
+      if i == _phys_alloc.first_free:
+        _phys_alloc.first_free = i + 1
+      ret i * PAGE_SIZE_4K
+    i = i + 1
+  ret 0 - 1
+
+fn phys_alloc_n(n:int) -> int:
+  // Allocate n contiguous physical pages
+  if n <= 0: ret 0 - 1
+  i:int = 0
+  while i + n <= _phys_alloc.total_pages:
+    all_free:int = 1
+    j:int = 0
+    while j < n:
+      if bitmap_test_bit(_phys_alloc.bitmap, i + j) == 0:
+        all_free = 0
+        break
+      j = j + 1
+    if all_free != 0:
+      k:int = 0
+      while k < n:
+        bitmap_clear_bit(_phys_alloc.bitmap, i + k)
+        _phys_alloc.free_pages = _phys_alloc.free_pages - 1
+        k = k + 1
+      ret i * PAGE_SIZE_4K
+    i = i + 1
+  ret 0 - 1
+
+fn phys_free(addr:int) -> int:
+  page:int = addr / PAGE_SIZE_4K
+  if page < 0 || page >= _phys_alloc.total_pages: ret KERNEL_ERR
+  bitmap_set_bit(_phys_alloc.bitmap, page)
+  _phys_alloc.free_pages = _phys_alloc.free_pages + 1
+  if page < _phys_alloc.first_free:
+    _phys_alloc.first_free = page
+  ret KERNEL_OK
+
+fn phys_reserve(addr:int, size:int) -> int:
+  // Mark pages as used (reserve for MMIO, firmware, etc.)
+  page_start:int = addr / PAGE_SIZE_4K
+  page_end:int = (addr + size + PAGE_SIZE_4K - 1) / PAGE_SIZE_4K
+  i:int = page_start
+  while i < page_end:
+    if bitmap_test_bit(_phys_alloc.bitmap, i) != 0:
+      bitmap_clear_bit(_phys_alloc.bitmap, i)
+      _phys_alloc.free_pages = _phys_alloc.free_pages - 1
+    i = i + 1
+  ret KERNEL_OK
+
+fn phys_free_mb() -> int:
+  ret (_phys_alloc.free_pages * PAGE_SIZE_4K) / (1024 * 1024)
+
+fn phys_total_mb() -> int:
+  ret (_phys_alloc.total_pages * PAGE_SIZE_4K) / (1024 * 1024)
+
+// ─────────────────────────────────────────────────────────────
+// Virtual memory / page table management (x86_64 4-level)
+// PML4 → PDPT → PD → PT → Page
+// ─────────────────────────────────────────────────────────────
+
+fn virt_map_page(pml4:int, virt:int, phys:int, flags:int) -> int:
+  // Map a 4KB virtual page
+  ret cpu_map_page(pml4, virt, phys, flags)
+
+fn virt_unmap_page(pml4:int, virt:int) -> int:
+  ret cpu_unmap_page(pml4, virt)
+
+fn virt_phys_of(pml4:int, virt:int) -> int:
+  ret cpu_walk_page_table(pml4, virt)
+
+fn virt_alloc_map(pml4:int, virt:int, flags:int) -> int:
+  phys:int = phys_alloc()
+  if phys < 0: ret KERNEL_ERR
+  ret virt_map_page(pml4, virt, phys, flags)
+
+fn virt_map_range(pml4:int, virt_start:int, phys_start:int, size:int, flags:int) -> int:
+  pages:int = (size + PAGE_SIZE_4K - 1) / PAGE_SIZE_4K
+  i:int = 0
+  while i < pages:
+    r:int = virt_map_page(pml4, virt_start + i * PAGE_SIZE_4K, phys_start + i * PAGE_SIZE_4K, flags)
+    if r != KERNEL_OK: ret r
+    i = i + 1
+  ret KERNEL_OK
+
+// ─────────────────────────────────────────────────────────────
+// System call dispatcher
+// ─────────────────────────────────────────────────────────────
+
+let SYSCALL_READ:int   = 0
+let SYSCALL_WRITE:int  = 1
+let SYSCALL_OPEN:int   = 2
+let SYSCALL_CLOSE:int  = 3
+let SYSCALL_MMAP:int   = 9
+let SYSCALL_EXIT:int   = 60
+let SYSCALL_GETPID:int = 39
+let SYSCALL_FORK:int   = 57
+let SYSCALL_EXECVE:int = 59
+let SYSCALL_WAIT:int   = 61
+let SYSCALL_KILL:int   = 62
+let SYSCALL_YIELD:int  = 24
+let SYSCALL_SLEEP:int  = 162
+
+let MAX_SYSCALLS:int   = 512
+static let _syscall_table:[fn(int,int,int,int,int,int)->int;512]
+
+fn syscall_register(num:int, handler:fn(int,int,int,int,int,int)->int) -> int:
+  if num < 0 || num >= MAX_SYSCALLS: ret KERNEL_ERR
+  _syscall_table[num] = handler
+  ret KERNEL_OK
+
+fn syscall_dispatch(num:int, a1:int, a2:int, a3:int, a4:int, a5:int) -> int:
+  if num < 0 || num >= MAX_SYSCALLS: ret 0 - 38  // ENOSYS
+  if _syscall_table[num] == 0 as fn(int,int,int,int,int,int)->int: ret 0 - 38
+  ret _syscall_table[num](a1, a2, a3, a4, a5, 0)
+
+// ─────────────────────────────────────────────────────────────
+// Virtual Filesystem (VFS)
+// ─────────────────────────────────────────────────────────────
+
+struct VfsNode:
+  name:str
+  kind:int         // 0=file, 1=dir, 2=device, 3=symlink
+  inode:int
+  size:int
+  parent:int       // parent inode
+  fs_data:int      // filesystem-specific data pointer
+  ops:*VfsOps
+
+struct VfsOps:
+  open:fn(int, int)->int         // (inode, flags) → fd
+  close:fn(int)->int             // (fd)
+  read:fn(int, *char, int)->int  // (fd, buf, n) → bytes read
+  write:fn(int, *char, int)->int // (fd, buf, n) → bytes written
+  seek:fn(int, int, int)->int    // (fd, offset, whence)
+  readdir:fn(int)->str           // (inode) → directory listing
+  mkdir:fn(int, str)->int        // (parent_inode, name)
+  unlink:fn(int, str)->int       // (parent_inode, name)
+  stat:fn(int)->*VfsNode         // (inode) → node info
+
+struct VfsMount:
+  mountpoint:str
+  ops:*VfsOps
+  root_inode:int
+  next:*VfsMount
+
+static let _vfs_mounts:*VfsMount = 0 as *VfsMount
+static let _vfs_next_inode:int = 1
+
+fn vfs_mount(mountpoint:str, ops:*VfsOps) -> int:
+  if mountpoint == 0 || ops == 0: ret KERNEL_ERR
+  m:*VfsMount = (*VfsMount)malloc(sizeof(VfsMount))
+  if m == 0: ret KERNEL_ERR
+  (*m).mountpoint = mountpoint
+  (*m).ops = ops
+  (*m).root_inode = _vfs_next_inode
+  _vfs_next_inode = _vfs_next_inode + 1
+  (*m).next = _vfs_mounts
+  _vfs_mounts = m
+  ret KERNEL_OK
+
+fn vfs_unmount(mountpoint:str) -> int:
+  prev:*VfsMount = 0 as *VfsMount
+  cur:*VfsMount = _vfs_mounts
+  while cur != 0 as *VfsMount:
+    if strcmp((*cur).mountpoint, mountpoint) == 0:
+      if prev != 0 as *VfsMount:
+        (*prev).next = (*cur).next
+      else:
+        _vfs_mounts = (*cur).next
+      free(cur)
+      ret KERNEL_OK
+    prev = cur
+    cur = (*cur).next
+  ret KERNEL_ERR
+
+fn vfs_find_mount(path:str) -> *VfsMount:
+  if path == 0: ret 0 as *VfsMount
+  best:*VfsMount = 0 as *VfsMount
+  best_len:int = 0
+  cur:*VfsMount = _vfs_mounts
+  pn:int = len(path)
+  while cur != 0 as *VfsMount:
+    mn:int = len((*cur).mountpoint)
+    if mn <= pn:
+      match_ok:int = 1
+      i:int = 0
+      while i < mn:
+        if (path as *char)[i] != ((*cur).mountpoint as *char)[i]:
+          match_ok = 0
+          break
+        i = i + 1
+      if match_ok != 0 && mn > best_len:
+        best_len = mn
+        best = cur
+    cur = (*cur).next
+  ret best
+
+fn vfs_open(path:str, flags:int) -> int:
+  m:*VfsMount = vfs_find_mount(path)
+  if m == 0 as *VfsMount: ret 0 - 2  // ENOENT
+  if (*m).ops == 0 as *VfsOps: ret 0 - 5  // EIO
+  if (*(*m).ops).open == 0 as fn(int, int)->int: ret 0 - 5
+  ret (*(*m).ops).open((*m).root_inode, flags)
+
+fn vfs_read(fd:int, buf:*char, n:int) -> int:
+  // Dispatch via file descriptor table (simplified)
+  ret syscall_dispatch(SYSCALL_READ, fd, buf as int, n, 0, 0)
+
+fn vfs_write(fd:int, buf:*char, n:int) -> int:
+  ret syscall_dispatch(SYSCALL_WRITE, fd, buf as int, n, 0, 0)
+
+fn vfs_close(fd:int) -> int:
+  ret syscall_dispatch(SYSCALL_CLOSE, fd, 0, 0, 0, 0)
+
+// ─────────────────────────────────────────────────────────────
+// Process management
+// ─────────────────────────────────────────────────────────────
+
+let PROC_RUNNING:int  = 0
+let PROC_READY:int    = 1
+let PROC_BLOCKED:int  = 2
+let PROC_ZOMBIE:int   = 3
+let PROC_SLEEPING:int = 4
+
+let PRIORITY_REALTIME:int = 0
+let PRIORITY_HIGH:int     = 1
+let PRIORITY_NORMAL:int   = 2
+let PRIORITY_LOW:int      = 3
+let PRIORITY_IDLE:int     = 4
+
+struct ProcessEntry:
+  pid:int
+  parent_pid:int
+  name:str
+  state:int
+  priority:int
+  cr3:int          // page table root
+  rsp:int          // saved stack pointer
+  rip:int          // saved instruction pointer
+  exit_code:int
+  cpu_ticks:int
+  sleep_until_ms:int
+
+let MAX_PROCS:int = 256
+static let _procs:[ProcessEntry;256]
+static let _proc_count:int = 0
+static let _current_pid:int = 0
+static let _next_pid:int = 1
+
+fn proc_create(name:str, entry_fn:fn()->int, priority:int) -> int:
+  if _proc_count >= MAX_PROCS: ret 0 - 1
+  idx:int = _proc_count
+  _procs[idx].pid = _next_pid
+  _procs[idx].parent_pid = _current_pid
+  _procs[idx].name = name
+  _procs[idx].state = PROC_READY
+  _procs[idx].priority = priority
+  _procs[idx].cpu_ticks = 0
+  _procs[idx].sleep_until_ms = 0
+  // Allocate kernel stack
+  stack_phys:int = phys_alloc_n(4)  // 16KB stack
+  if stack_phys < 0: ret 0 - 1
+  _procs[idx].rsp = stack_phys + 16384  // stack grows down
+  _procs[idx].rip = entry_fn as int
+  _procs[idx].cr3 = cr3_read()  // share kernel page tables
+  _proc_count = _proc_count + 1
+  _next_pid = _next_pid + 1
+  ret _procs[idx].pid
+
+fn proc_current_pid() -> int:
+  ret _current_pid
+
+fn proc_find(pid:int) -> int:
+  i:int = 0
+  while i < _proc_count:
+    if _procs[i].pid == pid: ret i
+    i = i + 1
+  ret 0 - 1
+
+fn proc_exit(exit_code:int) -> int:
+  idx:int = proc_find(_current_pid)
+  if idx < 0: ret KERNEL_ERR
+  _procs[idx].state = PROC_ZOMBIE
+  _procs[idx].exit_code = exit_code
+  proc_schedule()
+  ret KERNEL_OK  // never reached
+
+fn proc_sleep_ms(ms:int) -> int:
+  idx:int = proc_find(_current_pid)
+  if idx < 0: ret KERNEL_ERR
+  _procs[idx].state = PROC_SLEEPING
+  _procs[idx].sleep_until_ms = timer_ms() + ms
+  proc_schedule()
+  ret KERNEL_OK
+
+fn proc_kill(pid:int, signal:int) -> int:
+  idx:int = proc_find(pid)
+  if idx < 0: ret KERNEL_ERR
+  _procs[idx].state = PROC_ZOMBIE
+  _procs[idx].exit_code = 0 - signal
+  ret KERNEL_OK
+
+fn proc_schedule() -> int:
+  // Simple round-robin scheduler
+  now:int = timer_ms()
+  i:int = 0
+  next_pid:int = 0 - 1
+  best_priority:int = 99
+  // Wake sleeping processes
+  j:int = 0
+  while j < _proc_count:
+    if _procs[j].state == PROC_SLEEPING:
+      if now >= _procs[j].sleep_until_ms:
+        _procs[j].state = PROC_READY
+    j = j + 1
+  // Find highest priority ready process
+  while i < _proc_count:
+    if _procs[i].state == PROC_READY && _procs[i].pid != _current_pid:
+      if _procs[i].priority < best_priority:
+        best_priority = _procs[i].priority
+        next_pid = _procs[i].pid
+    i = i + 1
+  if next_pid < 0: ret KERNEL_OK  // no other ready process
+  // Context switch
+  old_idx:int = proc_find(_current_pid)
+  new_idx:int = proc_find(next_pid)
+  if old_idx >= 0 && _procs[old_idx].state == PROC_RUNNING:
+    _procs[old_idx].state = PROC_READY
+  _procs[new_idx].state = PROC_RUNNING
+  _current_pid = next_pid
+  cpu_context_switch(&_procs[old_idx].rsp, &_procs[old_idx].rip,
+                     _procs[new_idx].rsp, _procs[new_idx].rip,
+                     _procs[new_idx].cr3)
+  ret KERNEL_OK
+
+// ─────────────────────────────────────────────────────────────
+// Spinlock (SMP-safe)
+// ─────────────────────────────────────────────────────────────
+
+struct Spinlock:
+  locked:int
+  owner_cpu:int
+
+fn spinlock_init(lock:*Spinlock) -> int:
+  if lock == 0: ret KERNEL_ERR
+  (*lock).locked = 0
+  (*lock).owner_cpu = 0 - 1
+  ret KERNEL_OK
+
+fn spinlock_acquire(lock:*Spinlock) -> int:
+  if lock == 0: ret KERNEL_ERR
+  while cpu_cmpxchg(&(*lock).locked, 0, 1) != 0:
+    pause_cpu()
+  (*lock).owner_cpu = cpu_id()
+  ret KERNEL_OK
+
+fn spinlock_release(lock:*Spinlock) -> int:
+  if lock == 0: ret KERNEL_ERR
+  (*lock).owner_cpu = 0 - 1
+  cpu_atomic_store(&(*lock).locked, 0)
+  ret KERNEL_OK
+
+fn spinlock_try(lock:*Spinlock) -> int:
+  if lock == 0: ret 0
+  ret cpu_cmpxchg(&(*lock).locked, 0, 1) == 0
+
+// ─────────────────────────────────────────────────────────────
+// Kernel timer
+// ─────────────────────────────────────────────────────────────
+
+static let _timer_ms:int = 0
+static let _timer_freq:int = 1000  // 1000 Hz = 1ms ticks
+
+fn timer_init(freq_hz:int) -> int:
+  _timer_freq = freq_hz
+  _timer_ms = 0
+  // Program PIT (8253) for freq_hz
+  divisor:int = 1193182 / freq_hz
+  outb(0x43, 0x36)
+  outb(0x40, divisor & 0xFF)
+  outb(0x40, (divisor >> 8) & 0xFF)
+  pic_enable_irq(0)  // Enable timer IRQ
+  irq_register(IRQ_TIMER, _timer_tick_handler)
+  ret KERNEL_OK
+
+fn _timer_tick_handler() -> int:
+  _timer_ms = _timer_ms + (1000 / _timer_freq)
+  pic_eoi(0)
+  proc_schedule()  // Preemptive scheduling on timer tick
+  ret KERNEL_OK
+
+fn timer_ms() -> int:
+  ret _timer_ms
+
+fn timer_sleep_ms(ms:int) -> int:
+  end:int = _timer_ms + ms
+  while _timer_ms < end:
+    hlt()
+  ret KERNEL_OK
+
+// ─────────────────────────────────────────────────────────────
+// Panic / diagnostics
+// ─────────────────────────────────────────────────────────────
+
+fn kernel_panic(msg:str) -> int:
+  cli()
+  // Print panic message to VGA text buffer (0xB8000)
+  vga_print_panic(msg)
+  // Dump CPU state
+  cpu_dump_registers()
+  // Halt forever
+  while 1: hlt()
+  ret KERNEL_ERR  // unreachable
+
+fn kernel_log(level:str, msg:str) -> int:
+  // Output to serial (COM1) for debugging
+  com1_print(level)
+  com1_print(": ")
+  com1_print(msg)
+  com1_print("\r\n")
+  ret KERNEL_OK
+
+fn kernel_assert(cond:int, msg:str) -> int:
+  if cond == 0:
+    kernel_panic(msg)
+  ret KERNEL_OK
+
+fn kernel_version() -> str:
+  ret "TezzNative Kernel 2.0.0"

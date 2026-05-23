@@ -1,0 +1,51 @@
+// gui_win.tn — TezzNative host-mode framebuffer + input bridge v1.1
+// Pure extern fn declarations — no OS/sys/freestanding imports.
+// All GUI apps import this as their low-level display layer.
+
+// ── Window creation ────────────────────────────────────────────────
+extern fn fb_init_ex(title:str, W:int, H:int) -> int
+extern fn fb_present()       -> int
+
+// ── Framebuffer info ───────────────────────────────────────────────
+extern fn fb_addr()          -> *char
+extern fn fb_width()         -> int
+extern fn fb_height()        -> int
+extern fn fb_pitch()         -> int
+extern fn fb_bpp()           -> int
+
+// ── Screen info ────────────────────────────────────────────────────
+extern fn screen_width()     -> int
+extern fn screen_height()    -> int
+
+// ── Drawing primitives ─────────────────────────────────────────────
+extern fn fb_fill(color:int) -> int
+extern fn fb_fill_rect(x:int, y:int, w:int, h:int, color:int) -> int
+extern fn fb_fill_rounded(x:int, y:int, w:int, h:int, color:int, radius:int) -> int
+extern fn fb_put_pixel(x:int, y:int, color:int)  -> int
+extern fn fb_get_pixel(x:int, y:int)             -> int
+extern fn fb_blit(sx:int, sy:int, w:int, h:int, dx:int, dy:int) -> int
+
+// ── Text rendering ─────────────────────────────────────────────────
+extern fn fb_text(x:int, y:int, s:str, color:int) -> int
+// fb_text_ex: scale=1 (8px)..6 (48px), bold=0/1
+extern fn fb_text_ex(x:int, y:int, s:str, color:int, scale:int, bold:int) -> int
+
+// ── Software cursor ────────────────────────────────────────────────
+extern fn fb_soft_cursor(x:int, y:int, color:int) -> int
+
+// ── Keyboard ───────────────────────────────────────────────────────
+extern fn kbd_has_event()    -> int
+extern fn kbd_read_char()    -> int
+extern fn kbd_read_scancode() -> int
+
+// ── Mouse ──────────────────────────────────────────────────────────
+extern fn mouse_has_packet() -> int
+extern fn mouse_read_packet() -> int
+extern fn mouse_dx()         -> int
+extern fn mouse_dy()         -> int
+extern fn mouse_buttons()    -> int
+extern fn mouse_pos_x()      -> int
+extern fn mouse_pos_y()      -> int
+
+// ── Timing ─────────────────────────────────────────────────────────
+extern fn sleep_ms(ms:int)   -> int

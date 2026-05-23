@@ -1,0 +1,62 @@
+// tzgui_native module — TezzNative 2.0 Host Native Windowing Backend
+//
+// Wraps GDI/Win32/Cocoa/X11 and provides unified cross-platform TzWindow,
+// mouse, keyboard, and event loop.
+
+import "gui"
+import "gui_win"
+import "event"
+
+struct TzWindow:
+  title:str
+  width:int
+  height:int
+  surf:GuiSurface
+  ready:int
+
+fn window_init(w:*TzWindow, title:str, width:int, height:int) -> int:
+  if w == 0: ret 0 - 1
+  w[0].title = title
+  w[0].width = width
+  w[0].height = height
+  w[0].ready = 0
+  
+  // Lazy window creation
+  rc:int = gui_win.fb_init_ex(title, width, height)
+  if rc == 0:
+    w[0].ready = 1
+    // Fill surface info
+    w[0].surf.addr = gui_win.fb_addr()
+    w[0].surf.width = gui_win.fb_width()
+    w[0].surf.height = gui_win.fb_height()
+    w[0].surf.pitch = gui_win.fb_pitch()
+    w[0].surf.bpp = gui_win.fb_bpp()
+  ret rc
+
+fn window_present(w:*TzWindow) -> int:
+  if w == 0 || w[0].ready == 0: ret 0 - 1
+  rc:int = gui_win.fb_present()
+  // Update bounds in case of resize
+  w[0].surf.addr = gui_win.fb_addr()
+  w[0].surf.width = gui_win.fb_width()
+  w[0].surf.height = gui_win.fb_height()
+  w[0].surf.pitch = gui_win.fb_pitch()
+  w[0].surf.bpp = gui_win.fb_bpp()
+  ret rc
+
+fn window_clear(w:*TzWindow, color:int) -> int:
+  if w == 0 || w[0].ready == 0: ret 0 - 1
+  ret gui.gui_clear(&w[0].surf, color)
+
+fn window_rect(w:*TzWindow, x:int, y:int, width:int, height:int, color:int) -> int:
+  if w == 0 || w[0].ready == 0: ret 0 - 1
+  ret gui.gui_rect(&w[0].surf, x, y, width, height, color)
+
+fn window_text(w:*TzWindow, x:int, y:int, text:str, color:int) -> int:
+  if w == 0 || w[0].ready == 0: ret 0 - 1
+  ret gui.gui_text(&w[0].surf, x, y, text, color)
+
+fn window_close(w:*TzWindow) -> int:
+  if w == 0: ret 0 - 1
+  w[0].ready = 0
+  ret 0

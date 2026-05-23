@@ -1,0 +1,129 @@
+// tnui module: canonical retained GUI API for TezzNative.
+// Thin wrapper over tzui so apps can migrate to `tnui` naming.
+
+import "tzui"
+
+typedef TzUiControl TnUiControl
+typedef TzUiApp TnUiApp
+
+let TNUI_MAX_CONTROLS:int = 96
+let TNUI_TEXT_MAX:int = 160
+
+let TNUI_KIND_NONE:int = 0
+let TNUI_KIND_FRAME:int = 1
+let TNUI_KIND_LABEL:int = 2
+let TNUI_KIND_BUTTON:int = 3
+let TNUI_KIND_ENTRY:int = 4
+let TNUI_KIND_CHECKBOX:int = 5
+let TNUI_KIND_SLIDER:int = 6
+
+fn init(out:*TnUiApp, title:str, width:int, height:int) -> int:
+  ret tzui.init(out, title, width, height)
+
+fn ready(app:*TnUiApp) -> int:
+  ret tzui.ready(app)
+
+fn running(app:*TnUiApp) -> int:
+  ret tzui.running(app)
+
+fn close(app:*TnUiApp) -> int:
+  ret tzui.close(app)
+
+fn frame_index(app:*TnUiApp) -> int:
+  ret tzui.frame_index(app)
+
+fn begin(app:*TnUiApp) -> int:
+  ret tzui.begin(app)
+
+fn end(app:*TnUiApp) -> int:
+  ret tzui.end(app)
+
+fn pointer_x(app:*TnUiApp) -> int:
+  ret tzui.pointer_x(app)
+
+fn pointer_y(app:*TnUiApp) -> int:
+  ret tzui.pointer_y(app)
+
+fn pointer_buttons(app:*TnUiApp) -> int:
+  ret tzui.pointer_buttons(app)
+
+fn last_key(app:*TnUiApp) -> int:
+  ret tzui.last_key(app)
+
+fn frame(app:*TnUiApp, control_id:int, x:int, y:int, w:int, h:int, title:str) -> int:
+  ret tzui.frame(app, control_id, x, y, w, h, title)
+
+fn label(app:*TnUiApp, control_id:int, x:int, y:int, text:str) -> int:
+  ret tzui.label(app, control_id, x, y, text)
+
+fn button(app:*TnUiApp, control_id:int, x:int, y:int, w:int, h:int, text:str) -> int:
+  ret tzui.button(app, control_id, x, y, w, h, text)
+
+fn entry(app:*TnUiApp, control_id:int, x:int, y:int, w:int, h:int, value:str) -> int:
+  ret tzui.entry(app, control_id, x, y, w, h, value)
+
+fn entry_value(app:*TnUiApp, control_id:int) -> str:
+  ret tzui.entry_value(app, control_id)
+
+fn entry_set(app:*TnUiApp, control_id:int, value:str) -> int:
+  ret tzui.entry_set(app, control_id, value)
+
+fn button_clicked(app:*TnUiApp, control_id:int) -> int:
+  ret tzui.button_clicked(app, control_id)
+
+fn entry_focused(app:*TnUiApp, control_id:int) -> int:
+  ret tzui.entry_focused(app, control_id)
+
+fn focus_set(app:*TnUiApp, control_id:int) -> int:
+  ret tzui.focus_set(app, control_id)
+
+fn focus_get(app:*TnUiApp) -> int:
+  ret tzui.focus_get(app)
+
+fn ime_active(app:*TnUiApp) -> int:
+  ret tzui.ime_active(app)
+
+fn ime_cursor(app:*TnUiApp) -> int:
+  ret tzui.ime_cursor(app)
+
+fn ime_length(app:*TnUiApp) -> int:
+  ret tzui.ime_length(app)
+
+fn control_exists(app:*TnUiApp, control_id:int) -> int:
+  ret tzui.control_exists(app, control_id)
+
+fn control_remove(app:*TnUiApp, control_id:int) -> int:
+  ret tzui.control_remove(app, control_id)
+
+fn controls_clear(app:*TnUiApp) -> int:
+  ret tzui.controls_clear(app)
+
+fn control_count(app:*TnUiApp) -> int:
+  ret tzui.control_count(app)
+
+fn checkbox(app:*TnUiApp, control_id:int, x:int, y:int, w:int, h:int, text:str, checked:int) -> int:
+  ret tzui.checkbox(app, control_id, x, y, w, h, text, checked)
+
+fn checkbox_value(app:*TnUiApp, control_id:int) -> int:
+  ret tzui.checkbox_value(app, control_id)
+
+fn checkbox_set(app:*TnUiApp, control_id:int, checked:int) -> int:
+  ret tzui.checkbox_set(app, control_id, checked)
+
+fn slider(app:*TnUiApp, control_id:int, x:int, y:int, w:int, h:int, minv:int, maxv:int, value:int) -> int:
+  ret tzui.slider(app, control_id, x, y, w, h, minv, maxv, value)
+
+fn slider_value(app:*TnUiApp, control_id:int) -> int:
+  ret tzui.slider_value(app, control_id)
+
+fn slider_set(app:*TnUiApp, control_id:int, value:int) -> int:
+  ret tzui.slider_set(app, control_id, value)
+
+fn set_visible(app:*TnUiApp, control_id:int, visible:int) -> int:
+  ret tzui.set_visible(app, control_id, visible)
+
+fn request_full_redraw(app:*TnUiApp, reason:int) -> int:
+  ret tzui.request_full_redraw(app, reason)
+
+fn dirty_pixels(app:*TnUiApp) -> int:
+  ret tzui.dirty_pixels(app)

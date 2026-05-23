@@ -1,0 +1,496 @@
+import "io"
+import "tnx"
+
+let COL_INT:int = 1
+let COL_FLOAT:int = 2
+let COL_STR:int = 3
+let COL_BOOL:int = 4
+
+struct Column:
+  name:str
+  kind:int
+  len:int
+  data_i:*int
+  data_f:*float
+  data_s:*str
+  data_b:*int
+
+struct DataFrame:
+  cols:*Column
+  col_n:int
+  len:int
+
+fn _realloc_bytes(p:*char, old_bytes:int, new_bytes:int) -> *char:
+  if new_bytes <= 0:
+    if p != 0:
+      free(p)
+    ret 0 as *char
+  np:*char = malloc(new_bytes)
+  if np == 0:
+    if p != 0:
+      free(p)
+    ret 0 as *char
+  if p != 0:
+    copy_bytes:int = old_bytes
+    if copy_bytes > new_bytes:
+      copy_bytes = new_bytes
+    if copy_bytes > 0:
+      unsafe:
+        memcpy(np, p, copy_bytes)
+    free(p)
+  ret np
+
+fn _realloc_int(p:*int, old_n:int, new_n:int) -> *int:
+  ob:int = old_n * sizeof(int)
+  nb:int = new_n * sizeof(int)
+  ret _realloc_bytes(p as *char, ob, nb) as *int
+
+fn _realloc_float(p:*float, old_n:int, new_n:int) -> *float:
+  ob:int = old_n * sizeof(float)
+  nb:int = new_n * sizeof(float)
+  ret _realloc_bytes(p as *char, ob, nb) as *float
+
+fn _realloc_str(p:*str, old_n:int, new_n:int) -> *str:
+  ob:int = old_n * sizeof(str)
+  nb:int = new_n * sizeof(str)
+  ret _realloc_bytes(p as *char, ob, nb) as *str
+
+fn _str_dup(s:str) -> str:
+  if s == 0:
+    ret 0 as str
+  n:int = len(s)
+  p:*char = malloc(n + 1)
+  if p == 0:
+    ret 0 as str
+  unsafe:
+    memcpy(p, s, n)
+    p[n] = 0 as char
+  ret p as str
+
+fn _kind_from_str(s:str) -> int:
+  if s == 0:
+    ret 0
+  if strcmp(s, "int") == 0:
+    ret COL_INT
+  if strcmp(s, "float") == 0:
+    ret COL_FLOAT
+  if strcmp(s, "str") == 0 || strcmp(s, "string") == 0:
+    ret COL_STR
+  if strcmp(s, "bool") == 0:
+    ret COL_BOOL
+  ret 0
+
+fn _kind_to_str(kind:int) -> str:
+  if kind == COL_INT:
+    ret "int"
+  if kind == COL_FLOAT:
+    ret "float"
+  if kind == COL_STR:
+    ret "str"
+  if kind == COL_BOOL:
+    ret "bool"
+  ret "str"
+
+fn df_free(df:*DataFrame) -> int:
+  if df == 0:
+    ret 0
+  i:int = 0
+  while i < (*df).col_n:
+    unsafe:
+      col:*Column = &(*df).cols[i]
+      if (*col).data_i != 0:
+        free((*col).data_i)
+      if (*col).data_f != 0:
+        free((*col).data_f)
+      if (*col).data_b != 0:
+        free((*col).data_b)
+      if (*col).data_s != 0:
+        // free each string
+        j:int = 0
+        while j < (*col).len:
+          if (*col).data_s[j] != 0:
+            free((*col).data_s[j])
+          j = j + 1
+        free((*col).data_s)
+    i = i + 1
+  free((*df).cols)
+  free(df)
+  ret 0
+
+fn df_get_col(df:*DataFrame, name:str) -> *Column:
+  if df == 0:
+    ret 0 as *Column
+  i:int = 0
+  while i < (*df).col_n:
+    unsafe:
+      if strcmp((*df).cols[i].name, name) == 0:
+        ret &(*df).cols[i]
+    i = i + 1
+  ret 0 as *Column
+
+fn df_slice(df:*DataFrame, start:int, end:int) -> *DataFrame:
+  if df == 0:
+    ret 0 as *DataFrame
+  if start < 0:
+    start = 0
+  if end > (*df).len:
+    end = (*df).len
+  if end < start:
+    end = start
+  n:int = end - start
+  out:*DataFrame = malloc(sizeof(DataFrame))
+  if out == 0:
+    ret 0 as *DataFrame
+  unsafe:
+    (*out).col_n = (*df).col_n
+    (*out).len = n
+    (*out).cols = malloc(sizeof(Column) * (*df).col_n)
+  i:int = 0
+  while i < (*df).col_n:
+    unsafe:
+      src:*Column = &(*df).cols[i]
+      dst:*Column = &(*out).cols[i]
+      (*dst).name = (*src).name
+      (*dst).kind = (*src).kind
+      (*dst).len = n
+      (*dst).data_i = 0 as *int
+      (*dst).data_f = 0 as *float
+      (*dst).data_s = 0 as *str
+      (*dst).data_b = 0 as *int
+      if (*src).kind == COL_INT:
+        (*dst).data_i = malloc(sizeof(int) * n)
+        j:int = 0
+        while j < n:
+          (*dst).data_i[j] = (*src).data_i[start + j]
+          j = j + 1
+      if (*src).kind == COL_FLOAT:
+        (*dst).data_f = malloc(sizeof(float) * n)
+        j:int = 0
+        while j < n:
+          (*dst).data_f[j] = (*src).data_f[start + j]
+          j = j + 1
+      if (*src).kind == COL_STR:
+        (*dst).data_s = malloc(sizeof(str) * n)
+        j:int = 0
+        while j < n:
+          (*dst).data_s[j] = _str_dup((*src).data_s[start + j])
+          j = j + 1
+    i = i + 1
+  ret out
+
+fn df_group_sum(df:*DataFrame, key:str, val:str) -> *DataFrame:
+  if df == 0:
+    ret 0 as *DataFrame
+  k:*Column = df_get_col(df, key)
+  v:*Column = df_get_col(df, val)
+  if k == 0 || v == 0:
+    ret 0 as *DataFrame
+  if (*k).kind != COL_STR && (*k).kind != COL_INT:
+    ret 0 as *DataFrame
+  if (*v).kind != COL_INT && (*v).kind != COL_FLOAT:
+    ret 0 as *DataFrame
+  // naive grouping: arrays of unique keys
+  keys:*str = malloc(sizeof(str) * (*df).len)
+  sums:*float = malloc(sizeof(float) * (*df).len)
+  count:int = 0
+  i:int = 0
+  while i < (*df).len:
+    cur_key:str = 0 as str
+    if (*k).kind == COL_STR:
+      cur_key = (*k).data_s[i]
+    else:
+      // int to string
+      tmp:[char;32]
+      j:int = 0
+      n:int = (*k).data_i[i]
+      if n == 0:
+        tmp[0] = 48 as char
+        tmp[1] = 0 as char
+      else:
+        neg:int = 0
+        if n < 0:
+          neg = 1
+          n = 0 - n
+        while n > 0:
+          tmp[j] = (48 + (n % 10)) as char
+          n = n / 10
+          j = j + 1
+        if neg != 0:
+          tmp[j] = 45 as char
+          j = j + 1
+        tmp[j] = 0 as char
+        // reverse
+        a:int = 0
+        b:int = j - 1
+        while a < b:
+          c:char = tmp[a]
+          tmp[a] = tmp[b]
+          tmp[b] = c
+          a = a + 1
+          b = b - 1
+      cur_key = _str_dup(tmp)
+    // find existing
+    idx:int = 0 - 1
+    j:int = 0
+    while j < count:
+      if strcmp(keys[j], cur_key) == 0:
+        idx = j
+        break
+      j = j + 1
+    if idx < 0:
+      keys[count] = _str_dup(cur_key)
+      sums[count] = 0.0
+      idx = count
+      count = count + 1
+    if (*v).kind == COL_INT:
+      sums[idx] = sums[idx] + (*v).data_i[i] as float
+    else:
+      sums[idx] = sums[idx] + (*v).data_f[i]
+    i = i + 1
+  out:*DataFrame = malloc(sizeof(DataFrame))
+  (*out).col_n = 2
+  (*out).len = count
+  (*out).cols = malloc(sizeof(Column) * 2)
+  // key column
+  (*out).cols[0].name = key
+  (*out).cols[0].kind = COL_STR
+  (*out).cols[0].len = count
+  (*out).cols[0].data_s = malloc(sizeof(str) * count)
+  (*out).cols[0].data_i = 0 as *int
+  (*out).cols[0].data_f = 0 as *float
+  (*out).cols[0].data_b = 0 as *int
+  // sum column
+  (*out).cols[1].name = val
+  (*out).cols[1].kind = COL_FLOAT
+  (*out).cols[1].len = count
+  (*out).cols[1].data_f = malloc(sizeof(float) * count)
+  (*out).cols[1].data_i = 0 as *int
+  (*out).cols[1].data_s = 0 as *str
+  (*out).cols[1].data_b = 0 as *int
+  i = 0
+  while i < count:
+    (*out).cols[0].data_s[i] = keys[i]
+    (*out).cols[1].data_f[i] = sums[i]
+    i = i + 1
+  free(keys)
+  free(sums)
+  ret out
+
+fn df_join_int(a:*DataFrame, key_a:str, b:*DataFrame, key_b:str) -> *DataFrame:
+  if a == 0 || b == 0:
+    ret 0 as *DataFrame
+  ka:*Column = df_get_col(a, key_a)
+  kb:*Column = df_get_col(b, key_b)
+  if ka == 0 || kb == 0:
+    ret 0 as *DataFrame
+  if (*ka).kind != COL_INT || (*kb).kind != COL_INT:
+    ret 0 as *DataFrame
+  // output columns = a + b
+  out:*DataFrame = malloc(sizeof(DataFrame))
+  (*out).col_n = (*a).col_n + (*b).col_n
+  (*out).len = 0
+  (*out).cols = malloc(sizeof(Column) * (*out).col_n)
+  // initialize columns
+  i:int = 0
+  while i < (*a).col_n:
+    (*out).cols[i] = (*a).cols[i]
+    i = i + 1
+  j:int = 0
+  while j < (*b).col_n:
+    (*out).cols[(*a).col_n + j] = (*b).cols[j]
+    j = j + 1
+  // allocate dynamic arrays
+  i = 0
+  while i < (*out).col_n:
+    (*out).cols[i].len = 0
+    if (*out).cols[i].kind == COL_INT:
+      (*out).cols[i].data_i = 0 as *int
+    if (*out).cols[i].kind == COL_FLOAT:
+      (*out).cols[i].data_f = 0 as *float
+    if (*out).cols[i].kind == COL_STR:
+      (*out).cols[i].data_s = 0 as *str
+    i = i + 1
+  // build rows
+  i = 0
+  while i < (*a).len:
+    j = 0
+    while j < (*b).len:
+      if (*ka).data_i[i] == (*kb).data_i[j]:
+        row:int = (*out).len
+        (*out).len = row + 1
+        // append columns from a
+        c:int = 0
+        while c < (*a).col_n:
+          col:*Column = &(*out).cols[c]
+          if (*col).kind == COL_INT:
+            (*col).data_i = _realloc_int((*col).data_i, row, (*out).len)
+            (*col).data_i[row] = (*a).cols[c].data_i[i]
+          if (*col).kind == COL_FLOAT:
+            (*col).data_f = _realloc_float((*col).data_f, row, (*out).len)
+            (*col).data_f[row] = (*a).cols[c].data_f[i]
+          if (*col).kind == COL_STR:
+            (*col).data_s = _realloc_str((*col).data_s, row, (*out).len)
+            (*col).data_s[row] = _str_dup((*a).cols[c].data_s[i])
+          c = c + 1
+        // append columns from b
+        c = 0
+        while c < (*b).col_n:
+          col:*Column = &(*out).cols[(*a).col_n + c]
+          if (*col).kind == COL_INT:
+            (*col).data_i = _realloc_int((*col).data_i, row, (*out).len)
+            (*col).data_i[row] = (*b).cols[c].data_i[j]
+          if (*col).kind == COL_FLOAT:
+            (*col).data_f = _realloc_float((*col).data_f, row, (*out).len)
+            (*col).data_f[row] = (*b).cols[c].data_f[j]
+          if (*col).kind == COL_STR:
+            (*col).data_s = _realloc_str((*col).data_s, row, (*out).len)
+            (*col).data_s[row] = _str_dup((*b).cols[c].data_s[j])
+          c = c + 1
+      j = j + 1
+    i = i + 1
+  // update col len
+  i = 0
+  while i < (*out).col_n:
+    (*out).cols[i].len = (*out).len
+    i = i + 1
+  ret out
+
+fn df_read_tnx(path:str) -> *DataFrame:
+  if path == 0:
+    ret 0 as *DataFrame
+  root:*TnxValue = tnx.load(path)
+  if root == 0:
+    ret 0 as *DataFrame
+  cols_v:*TnxValue = tnx.obj_get(root, "cols")
+  rows_v:*TnxValue = tnx.obj_get(root, "rows")
+  if cols_v == 0 || rows_v == 0:
+    tnx.release(root)
+    ret 0 as *DataFrame
+
+  col_n:int = 0
+  while tnx.arr_get(cols_v, col_n) != 0:
+    col_n = col_n + 1
+  if col_n <= 0:
+    tnx.release(root)
+    ret 0 as *DataFrame
+
+  rows:int = 0
+  while tnx.arr_get(rows_v, rows) != 0:
+    rows = rows + 1
+
+  df:*DataFrame = malloc(sizeof(DataFrame))
+  if df == 0:
+    tnx.release(root)
+    ret 0 as *DataFrame
+  (*df).col_n = col_n
+  (*df).len = rows
+  (*df).cols = malloc(sizeof(Column) * col_n)
+  if (*df).cols == 0:
+    free(df)
+    tnx.release(root)
+    ret 0 as *DataFrame
+
+  i:int = 0
+  while i < col_n:
+    (*df).cols[i].name = 0 as str
+    (*df).cols[i].kind = COL_STR
+    (*df).cols[i].len = rows
+    (*df).cols[i].data_i = 0 as *int
+    (*df).cols[i].data_f = 0 as *float
+    (*df).cols[i].data_s = 0 as *str
+    (*df).cols[i].data_b = 0 as *int
+    colv:*TnxValue = tnx.arr_get(cols_v, i)
+    if colv != 0:
+      namev:*TnxValue = tnx.obj_get(colv, "name")
+      kindv:*TnxValue = tnx.obj_get(colv, "kind")
+      n:str = tnx.as_str(namev)
+      if n != 0:
+        (*df).cols[i].name = _str_dup(n)
+      kstr:str = tnx.as_str(kindv)
+      k:int = _kind_from_str(kstr)
+      if k == 0:
+        k = COL_STR
+      (*df).cols[i].kind = k
+    if (*df).cols[i].name == 0:
+      (*df).cols[i].name = _str_dup("col")
+    if (*df).cols[i].kind == COL_INT || (*df).cols[i].kind == COL_BOOL:
+      (*df).cols[i].data_i = malloc(sizeof(int) * rows)
+    if (*df).cols[i].kind == COL_FLOAT:
+      (*df).cols[i].data_f = malloc(sizeof(float) * rows)
+    if (*df).cols[i].kind == COL_STR:
+      (*df).cols[i].data_s = malloc(sizeof(str) * rows)
+    i = i + 1
+
+  r:int = 0
+  while r < rows:
+    rowv:*TnxValue = tnx.arr_get(rows_v, r)
+    c:int = 0
+    while c < col_n:
+      col:*Column = &(*df).cols[c]
+      cell:*TnxValue = 0 as *TnxValue
+      if rowv != 0:
+        cell = tnx.arr_get(rowv, c)
+      if (*col).kind == COL_INT:
+        (*col).data_i[r] = tnx.as_int(cell)
+      if (*col).kind == COL_FLOAT:
+        (*col).data_f[r] = tnx.as_float(cell)
+      if (*col).kind == COL_BOOL:
+        (*col).data_i[r] = tnx.as_int(cell) != 0
+      if (*col).kind == COL_STR:
+        s:str = tnx.as_str(cell)
+        if s == 0:
+          (*col).data_s[r] = _str_dup("")
+        else:
+          (*col).data_s[r] = _str_dup(s)
+      c = c + 1
+    r = r + 1
+
+  tnx.release(root)
+  ret df
+
+fn df_write_tnx(df:*DataFrame, path:str) -> int:
+  if df == 0 || path == 0:
+    ret 0 - 1
+  root:*TnxValue = tnx.obj()
+  cols:*TnxValue = tnx.arr()
+  rows:*TnxValue = tnx.arr()
+  tnx.obj_set(root, "cols", cols)
+  tnx.obj_set(root, "rows", rows)
+
+  i:int = 0
+  while i < (*df).col_n:
+    col:*Column = &(*df).cols[i]
+    cobj:*TnxValue = tnx.obj()
+    namev:*TnxValue = tnx.tnx_str((*col).name)
+    kindv:*TnxValue = tnx.tnx_str(_kind_to_str((*col).kind))
+    tnx.obj_set(cobj, "name", namev)
+    tnx.obj_set(cobj, "kind", kindv)
+    tnx.arr_push(cols, cobj)
+    i = i + 1
+
+  r:int = 0
+  while r < (*df).len:
+    row:*TnxValue = tnx.arr()
+    c:int = 0
+    while c < (*df).col_n:
+      col:*Column = &(*df).cols[c]
+      v:*TnxValue = 0 as *TnxValue
+      if (*col).kind == COL_INT:
+        v = tnx.tnx_int((*col).data_i[r])
+      if (*col).kind == COL_FLOAT:
+        v = tnx.tnx_float((*col).data_f[r])
+      if (*col).kind == COL_BOOL:
+        v = tnx.tnx_bool((*col).data_i[r] != 0)
+      if (*col).kind == COL_STR:
+        if (*col).data_s[r] == 0:
+          v = tnx.tnx_null()
+        else:
+          v = tnx.tnx_str((*col).data_s[r])
+      tnx.arr_push(row, v)
+      c = c + 1
+    tnx.arr_push(rows, row)
+    r = r + 1
+
+  tnx.save(path, root)
+  tnx.release(root)
+  ret 0

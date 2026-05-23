@@ -1,0 +1,18 @@
+// sys module: freestanding ABI surface (no stdlib)
+// NOTE: These are stubs/signatures for low-level targets.
+// Backends/targets can map them to platform syscalls or kernel services.
+
+typedef *char Ptr
+
+extern fn sys_exit(code:int) -> void
+extern fn sys_write(fd:int, buf:Ptr, len:int) -> int
+extern fn sys_read(fd:int, buf:Ptr, len:int) -> int
+extern fn sys_open(path:Ptr, flags:int, mode:int) -> int
+extern fn sys_close(fd:int) -> int
+extern fn sys_seek(fd:int, off:int, whence:int) -> int
+extern fn sys_mmap(addr:Ptr, len:int, prot:int, flags:int, fd:int, off:int) -> Ptr
+extern fn sys_munmap(addr:Ptr, len:int) -> int
+extern fn sys_yield() -> void
+extern fn sys_time_ns() -> int
+extern fn sys_outb(port:int, val:int) -> int
+extern fn sys_inb(port:int) -> int

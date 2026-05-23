@@ -1,0 +1,10 @@
+{
+  "language": "TezzNative",
+  "version": "1.1.0",
+  "channel": "release",
+  "api": "v1",
+  "backend": "x64-pe-native",
+  "compiler": "tezzc",
+  "codegen": "ir-v4",
+  "targets": ["x86_64-windows", "x86_64-linux", "aarch64-linux", "x86_64-macos", "aarch64-macos"]
+}

@@ -1,0 +1,1312 @@
+// io module — TezzNative 2.0 Production I/O
+//
+// Capabilities:
+//   • Standard file open/read/write/seek/close (all modes)
+//   • BigFile: streaming GB/TB/PB files via configurable chunk reads
+//   • StreamWriter: buffered high-throughput sequential writes
+//   • MmapFile: memory-mapped file view (software or OS-backed)
+//   • PipePair: inter-process pipe (anonymous pipe)
+//   • Path helpers: join, base, dir, norm, portable + OS-backed
+//   • Directory helpers: walk, glob, list recursive
+//   • File utility: copy, move, size, exists, remove, rename
+//   • Async stubs: aio_read_req, aio_write_req, aio_wait
+
+// ─────────────────────────────────────────────────────────────
+// Seek constants
+// ─────────────────────────────────────────────────────────────
+
+let SEEK_SET:int = 0
+let SEEK_CUR:int = 1
+let SEEK_END:int = 2
+
+// Default BigFile chunk size: 4 MB — good for most pipelines
+let IO_CHUNK_DEFAULT:int = 4194304
+// Maximum single allocation for read-all: 2 GB
+let IO_READ_ALL_MAX:int = 2147483647
+// StreamWriter internal buffer size
+let IO_STREAM_BUF:int = 65536
+
+fn seek_set() -> int:
+  ret SEEK_SET
+fn seek_cur() -> int:
+  ret SEEK_CUR
+fn seek_end() -> int:
+  ret SEEK_END
+
+// ─────────────────────────────────────────────────────────────
+// Standard File handle
+// ─────────────────────────────────────────────────────────────
+
+struct File:
+  h:*char
+  owned:int
+
+fn file_open(path:str, mode:str) -> *File:
+  f:*File = (*File)malloc(sizeof(File))
+  (*f).h = fopen(path, mode)
+  (*f).owned = 1
+  ret f
+
+fn file_from_handle(h:*char) -> *File:
+  f:*File = (*File)malloc(sizeof(File))
+  (*f).h = h
+  (*f).owned = 0
+  ret f
+
+fn file_close(f:*File) -> int:
+  if f == 0:
+    ret 0 - 1
+  r:int = 0
+  if (*f).owned != 0:
+    r = fclose((*f).h)
+  free(f)
+  ret r
+
+fn file_flush(f:*File) -> int:
+  if f == 0:
+    ret 0 - 1
+  ret fflush((*f).h)
+
+fn file_read(f:*File, buf:*char, n:int) -> int:
+  if f == 0:
+    ret 0
+  if n <= 0:
+    ret 0
+  ret fread(buf, 1, n, (*f).h)
+
+fn file_write(f:*File, buf:*char, n:int) -> int:
+  if f == 0:
+    ret 0
+  ret fwrite(buf, 1, n, (*f).h)
+
+fn file_write_line(f:*File, s:str) -> int:
+  if f == 0:
+    ret 0 - 1
+  ret write_line((*f).h, s)
+
+fn file_read_line(f:*File) -> str:
+  if f == 0:
+    ret 0 as str
+  ret read_line((*f).h)
+
+fn file_seek(f:*File, off:int, whence:int) -> int:
+  if f == 0:
+    ret 0 - 1
+  ret fseek((*f).h, off, whence)
+
+fn file_tell(f:*File) -> int:
+  if f == 0:
+    ret 0 - 1
+  ret ftell((*f).h)
+
+fn file_eof(f:*File) -> int:
+  if f == 0:
+    ret 1
+  ret io_eof((*f).h)
+
+fn file_err() -> int:
+  ret io_err()
+
+fn file_valid(f:*File) -> int:
+  if f == 0:
+    ret 0
+  if (*f).h == 0 as *char:
+    ret 0
+  ret 1
+
+fn stdin_file() -> *File:
+  h:*char = stdin()
+  ret file_from_handle(h)
+
+fn stdout_file() -> *File:
+  h:*char = stdout()
+  ret file_from_handle(h)
+
+fn stderr_file() -> *File:
+  h:*char = stderr()
+  ret file_from_handle(h)
+
+// ─────────────────────────────────────────────────────────────
+// Standard open helpers
+// ─────────────────────────────────────────────────────────────
+
+fn open_r(path:str) -> *File:
+  ret file_open(path, "r")
+fn open_w(path:str) -> *File:
+  ret file_open(path, "w")
+fn open_a(path:str) -> *File:
+  ret file_open(path, "a")
+fn open_rb(path:str) -> *File:
+  ret file_open(path, "rb")
+fn open_wb(path:str) -> *File:
+  ret file_open(path, "wb")
+fn open_ab(path:str) -> *File:
+  ret file_open(path, "ab")
+fn open_rw(path:str) -> *File:
+  ret file_open(path, "r+b")
+
+// ─────────────────────────────────────────────────────────────
+// BigFile — streaming GB/TB/PB file reader
+//
+// BigFile reads files in configurable chunks without ever
+// loading the entire file into memory. Suitable for:
+//   • Log processing (hundreds of GB)
+//   • Dataset ingestion (TB-scale training data)
+//   • Binary blob streaming (PB-scale storage pipelines)
+//
+// Usage:
+//   bf:*BigFile = bigfile_open("huge.dat", 0)  // 0 = default chunk
+//   while bigfile_eof(bf) == 0:
+//     chunk:str = bigfile_read_chunk(bf)
+//     if chunk == 0: break
+//     // process chunk (len = bigfile_last_read(bf) bytes)
+//     free(chunk)
+//   bigfile_close(bf)
+// ─────────────────────────────────────────────────────────────
+
+struct BigFile:
+  h:*char      // FILE* handle (raw)
+  size:int     // total file size in bytes (64-bit)
+  pos:int      // current logical byte position
+  chunk:int    // configured chunk size in bytes
+  last_read:int // bytes read in last bigfile_read_chunk call
+  eof:int      // 1 when EOF reached
+  path:str     // owned copy of path
+
+fn bigfile_open(path:str, chunk_size:int) -> *BigFile:
+  if path == 0:
+    ret 0 as *BigFile
+  cs:int = chunk_size
+  if cs <= 0:
+    cs = IO_CHUNK_DEFAULT
+  h:*char = fopen(path, "rb")
+  if h == 0 as *char:
+    ret 0 as *BigFile
+  // Measure file size via seek
+  if fseek(h, 0, SEEK_END) != 0:
+    fclose(h)
+    ret 0 as *BigFile
+  sz:int = ftell(h)
+  if sz < 0:
+    sz = 0
+  if fseek(h, 0, SEEK_SET) != 0:
+    fclose(h)
+    ret 0 as *BigFile
+  bf:*BigFile = (*BigFile)malloc(sizeof(BigFile))
+  if bf == 0:
+    fclose(h)
+    ret 0 as *BigFile
+  pn:int = len(path)
+  pc:*char = malloc(pn + 1)
+  if pc == 0:
+    free(bf)
+    fclose(h)
+    ret 0 as *BigFile
+  unsafe:
+    memcpy(pc, path as *char, pn)
+    pc[pn] = 0 as char
+  (*bf).h = h
+  (*bf).size = sz
+  (*bf).pos = 0
+  (*bf).chunk = cs
+  (*bf).last_read = 0
+  (*bf).eof = 0
+  (*bf).path = pc as str
+  ret bf
+
+fn bigfile_read_chunk(bf:*BigFile) -> str:
+  if bf == 0 || (*bf).eof != 0:
+    ret 0 as str
+  remaining:int = (*bf).size - (*bf).pos
+  if remaining <= 0:
+    (*bf).eof = 1
+    (*bf).last_read = 0
+    ret 0 as str
+  to_read:int = (*bf).chunk
+  if to_read > remaining:
+    to_read = remaining
+  buf:*char = malloc(to_read + 1)
+  if buf == 0:
+    ret 0 as str
+  n:int = fread(buf, 1, to_read, (*bf).h)
+  if n <= 0:
+    free(buf)
+    (*bf).eof = 1
+    (*bf).last_read = 0
+    ret 0 as str
+  buf[n] = 0 as char
+  (*bf).pos = (*bf).pos + n
+  (*bf).last_read = n
+  if (*bf).pos >= (*bf).size:
+    (*bf).eof = 1
+  ret buf as str
+
+// Read exactly n bytes at current position. Returns allocated buffer.
+fn bigfile_read_exact(bf:*BigFile, n:int) -> str:
+  if bf == 0 || n <= 0 || (*bf).eof != 0:
+    ret 0 as str
+  buf:*char = malloc(n + 1)
+  if buf == 0:
+    ret 0 as str
+  got:int = fread(buf, 1, n, (*bf).h)
+  buf[got] = 0 as char
+  (*bf).pos = (*bf).pos + got
+  (*bf).last_read = got
+  if got <= 0:
+    free(buf)
+    (*bf).eof = 1
+    ret 0 as str
+  if (*bf).pos >= (*bf).size:
+    (*bf).eof = 1
+  ret buf as str
+
+fn bigfile_seek(bf:*BigFile, off:int) -> int:
+  if bf == 0:
+    ret 0 - 1
+  r:int = fseek((*bf).h, off, SEEK_SET)
+  if r != 0:
+    ret 0 - 1
+  (*bf).pos = off
+  (*bf).eof = 0
+  ret 0
+
+fn bigfile_seek_rel(bf:*BigFile, delta:int) -> int:
+  if bf == 0:
+    ret 0 - 1
+  r:int = fseek((*bf).h, delta, SEEK_CUR)
+  if r != 0:
+    ret 0 - 1
+  np:int = (*bf).pos + delta
+  if np < 0:
+    np = 0
+  (*bf).pos = np
+  (*bf).eof = 0
+  ret 0
+
+fn bigfile_pos(bf:*BigFile) -> int:
+  if bf == 0:
+    ret 0 - 1
+  ret (*bf).pos
+
+fn bigfile_size(bf:*BigFile) -> int:
+  if bf == 0:
+    ret 0 - 1
+  ret (*bf).size
+
+fn bigfile_eof(bf:*BigFile) -> int:
+  if bf == 0:
+    ret 1
+  ret (*bf).eof
+
+fn bigfile_last_read(bf:*BigFile) -> int:
+  if bf == 0:
+    ret 0
+  ret (*bf).last_read
+
+fn bigfile_progress_pct(bf:*BigFile) -> int:
+  if bf == 0 || (*bf).size <= 0:
+    ret 0
+  ret ((*bf).pos * 100) / (*bf).size
+
+fn bigfile_close(bf:*BigFile) -> int:
+  if bf == 0:
+    ret 0 - 1
+  if (*bf).h != 0 as *char:
+    fclose((*bf).h)
+    (*bf).h = 0 as *char
+  if (*bf).path != 0:
+    free((*bf).path)
+    (*bf).path = 0 as str
+  free(bf)
+  ret 0
+
+// Walk a BigFile line by line (newline-delimited).
+// Calls cb(line_str, line_num) for each line.
+// Returns total lines processed.
+fn bigfile_walk_lines(path:str, chunk_size:int, cb:fn(str, int)->int) -> int:
+  bf:*BigFile = bigfile_open(path, chunk_size)
+  if bf == 0:
+    ret 0 - 1
+  line_num:int = 0
+  // Internal line buffer — grows as needed
+  line_buf:*char = malloc(65536)
+  if line_buf == 0:
+    bigfile_close(bf)
+    ret 0 - 1
+  line_buf_cap:int = 65536
+  line_len:int = 0
+  while bigfile_eof(bf) == 0:
+    chunk:str = bigfile_read_chunk(bf)
+    if chunk == 0:
+      break
+    nr:int = bigfile_last_read(bf)
+    i:int = 0
+    while i < nr:
+      c:int = 0
+      unsafe:
+        c = (chunk as *char)[i] as int
+      if c == 10 || c == 0:
+        // Flush line
+        if line_len > 0:
+          if line_len + 1 > line_buf_cap:
+            nb:*char = malloc(line_len + 1)
+            if nb == 0:
+              free(line_buf)
+              free(chunk)
+              bigfile_close(bf)
+              ret line_num
+            free(line_buf)
+            line_buf = nb
+            line_buf_cap = line_len + 1
+          line_buf[line_len] = 0 as char
+          cb(line_buf as str, line_num)
+          line_num = line_num + 1
+          line_len = 0
+      else:
+        if line_len + 2 > line_buf_cap:
+          new_cap:int = line_buf_cap * 2
+          if new_cap < line_len + 2:
+            new_cap = line_len + 2
+          nb2:*char = malloc(new_cap)
+          if nb2 == 0:
+            free(line_buf)
+            free(chunk)
+            bigfile_close(bf)
+            ret line_num
+          unsafe:
+            memcpy(nb2, line_buf, line_len)
+          free(line_buf)
+          line_buf = nb2
+          line_buf_cap = new_cap
+        line_buf[line_len] = c as char
+        line_len = line_len + 1
+      i = i + 1
+    free(chunk)
+  // Flush remaining line
+  if line_len > 0:
+    line_buf[line_len] = 0 as char
+    cb(line_buf as str, line_num)
+    line_num = line_num + 1
+  free(line_buf)
+  bigfile_close(bf)
+  ret line_num
+
+// ─────────────────────────────────────────────────────────────
+// StreamWriter — high-throughput buffered sequential writes
+//
+// Uses an internal buffer (IO_STREAM_BUF bytes) and flushes
+// automatically. Ideal for writing GB/TB output files fast.
+//
+// Usage:
+//   sw:*StreamWriter = stream_writer_open("out.bin")
+//   stream_write_str(sw, "Hello ")
+//   stream_write_str(sw, "World\n")
+//   stream_writer_close(sw)  // auto-flushes
+// ─────────────────────────────────────────────────────────────
+
+struct StreamWriter:
+  h:*char        // FILE* handle
+  buf:*char      // internal buffer
+  buf_cap:int    // buffer capacity
+  buf_len:int    // bytes currently in buffer
+  total:int      // total bytes flushed so far
+  error:int      // 1 if write error occurred
+
+fn stream_writer_open(path:str) -> *StreamWriter:
+  if path == 0:
+    ret 0 as *StreamWriter
+  h:*char = fopen(path, "wb")
+  if h == 0 as *char:
+    ret 0 as *StreamWriter
+  buf:*char = malloc(IO_STREAM_BUF)
+  if buf == 0:
+    fclose(h)
+    ret 0 as *StreamWriter
+  sw:*StreamWriter = (*StreamWriter)malloc(sizeof(StreamWriter))
+  if sw == 0:
+    free(buf)
+    fclose(h)
+    ret 0 as *StreamWriter
+  (*sw).h = h
+  (*sw).buf = buf
+  (*sw).buf_cap = IO_STREAM_BUF
+  (*sw).buf_len = 0
+  (*sw).total = 0
+  (*sw).error = 0
+  ret sw
+
+fn _sw_flush(sw:*StreamWriter) -> int:
+  if sw == 0 || (*sw).buf_len <= 0:
+    ret 0
+  w:int = fwrite((*sw).buf, 1, (*sw).buf_len, (*sw).h)
+  if w != (*sw).buf_len:
+    (*sw).error = 1
+    ret 0 - 1
+  (*sw).total = (*sw).total + w
+  (*sw).buf_len = 0
+  ret 0
+
+fn stream_write(sw:*StreamWriter, data:*char, n:int) -> int:
+  if sw == 0 || data == 0 || n <= 0:
+    ret 0
+  if (*sw).error != 0:
+    ret 0 - 1
+  written:int = 0
+  while written < n:
+    space:int = (*sw).buf_cap - (*sw).buf_len
+    take:int = n - written
+    if take > space:
+      take = space
+    unsafe:
+      memcpy((*sw).buf + (*sw).buf_len, data + written, take)
+    (*sw).buf_len = (*sw).buf_len + take
+    written = written + take
+    if (*sw).buf_len >= (*sw).buf_cap:
+      if _sw_flush(sw) != 0:
+        ret 0 - 1
+  ret written
+
+fn stream_write_str(sw:*StreamWriter, s:str) -> int:
+  if sw == 0 || s == 0:
+    ret 0 - 1
+  ret stream_write(sw, s as *char, len(s))
+
+fn stream_write_byte(sw:*StreamWriter, b:int) -> int:
+  if sw == 0:
+    ret 0 - 1
+  ch:char = b as char
+  ret stream_write(sw, &ch, 1)
+
+fn stream_write_i64_le(sw:*StreamWriter, v:int) -> int:
+  if sw == 0:
+    ret 0 - 1
+  buf:[char;8]
+  buf[0] = (v & 255) as char
+  buf[1] = ((v >> 8) & 255) as char
+  buf[2] = ((v >> 16) & 255) as char
+  buf[3] = ((v >> 24) & 255) as char
+  buf[4] = ((v >> 32) & 255) as char
+  buf[5] = ((v >> 40) & 255) as char
+  buf[6] = ((v >> 48) & 255) as char
+  buf[7] = ((v >> 56) & 255) as char
+  ret stream_write(sw, &buf[0], 8)
+
+fn stream_flush(sw:*StreamWriter) -> int:
+  if sw == 0:
+    ret 0 - 1
+  r:int = _sw_flush(sw)
+  if r != 0:
+    ret r
+  ret fflush((*sw).h)
+
+fn stream_writer_error(sw:*StreamWriter) -> int:
+  if sw == 0:
+    ret 1
+  ret (*sw).error
+
+fn stream_writer_total(sw:*StreamWriter) -> int:
+  if sw == 0:
+    ret 0
+  ret (*sw).total + (*sw).buf_len
+
+fn stream_writer_close(sw:*StreamWriter) -> int:
+  if sw == 0:
+    ret 0 - 1
+  _sw_flush(sw)
+  fclose((*sw).h)
+  free((*sw).buf)
+  free(sw)
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// MmapFile — memory-mapped file view
+//
+// For files that fit in virtual address space, MmapFile
+// maps the entire file as a contiguous byte array.
+// Uses OS mmap (via runtime) when available; falls back to
+// malloc+fread for portability.
+//
+// Usage:
+//   mf:*MmapFile = mmap_open("data.bin")
+//   if mf != 0:
+//     ptr:*char = mmap_data(mf)
+//     sz:int    = mmap_size(mf)
+//     // direct pointer access to all bytes
+//     mmap_close(mf)
+// ─────────────────────────────────────────────────────────────
+
+struct MmapFile:
+  data:*char   // pointer to mapped bytes
+  size:int     // size in bytes
+  os_handle:int // OS handle (HANDLE on Win, fd on Linux) or -1 if software
+  owned:int    // 1 if data is malloc'd (software fallback)
+
+fn mmap_open(path:str) -> *MmapFile:
+  if path == 0:
+    ret 0 as *MmapFile
+  // Try native OS mmap first
+  out_size:int = 0
+  out_handle:int = 0
+  ptr:*char = io_mmap_open(path, &out_size, &out_handle)
+  mf:*MmapFile = (*MmapFile)malloc(sizeof(MmapFile))
+  if mf == 0:
+    if ptr != 0 as *char:
+      io_mmap_close(ptr, out_size, out_handle)
+    ret 0 as *MmapFile
+  if ptr != 0 as *char:
+    (*mf).data = ptr
+    (*mf).size = out_size
+    (*mf).os_handle = out_handle
+    (*mf).owned = 0
+    ret mf
+  // Software fallback: read entire file into malloc buffer
+  h:*char = fopen(path, "rb")
+  if h == 0 as *char:
+    free(mf)
+    ret 0 as *MmapFile
+  if fseek(h, 0, SEEK_END) != 0:
+    fclose(h)
+    free(mf)
+    ret 0 as *MmapFile
+  sz:int = ftell(h)
+  if sz <= 0:
+    fclose(h)
+    free(mf)
+    ret 0 as *MmapFile
+  if fseek(h, 0, SEEK_SET) != 0:
+    fclose(h)
+    free(mf)
+    ret 0 as *MmapFile
+  buf:*char = malloc(sz + 1)
+  if buf == 0:
+    fclose(h)
+    free(mf)
+    ret 0 as *MmapFile
+  fread(buf, 1, sz, h)
+  fclose(h)
+  buf[sz] = 0 as char
+  (*mf).data = buf
+  (*mf).size = sz
+  (*mf).os_handle = 0 - 1
+  (*mf).owned = 1
+  ret mf
+
+fn mmap_open_rw(path:str) -> *MmapFile:
+  ret mmap_open(path)
+
+fn mmap_data(mf:*MmapFile) -> *char:
+  if mf == 0:
+    ret 0 as *char
+  ret (*mf).data
+
+fn mmap_size(mf:*MmapFile) -> int:
+  if mf == 0:
+    ret 0
+  ret (*mf).size
+
+fn mmap_byte(mf:*MmapFile, off:int) -> int:
+  if mf == 0 || off < 0 || off >= (*mf).size:
+    ret 0 - 1
+  ret ((*mf).data[off] as int) & 255
+
+fn mmap_i64_le(mf:*MmapFile, off:int) -> int:
+  if mf == 0 || off < 0 || off + 8 > (*mf).size:
+    ret 0
+  p:*char = (*mf).data + off
+  b0:int = (p[0] as int) & 255
+  b1:int = (p[1] as int) & 255
+  b2:int = (p[2] as int) & 255
+  b3:int = (p[3] as int) & 255
+  b4:int = (p[4] as int) & 255
+  b5:int = (p[5] as int) & 255
+  b6:int = (p[6] as int) & 255
+  b7:int = (p[7] as int) & 255
+  ret b0 | (b1 << 8) | (b2 << 16) | (b3 << 24) | (b4 << 32) | (b5 << 40) | (b6 << 48) | (b7 << 56)
+
+fn mmap_close(mf:*MmapFile) -> int:
+  if mf == 0:
+    ret 0 - 1
+  if (*mf).owned != 0:
+    if (*mf).data != 0 as *char:
+      free((*mf).data)
+  else:
+    if (*mf).data != 0 as *char:
+      io_mmap_close((*mf).data, (*mf).size, (*mf).os_handle)
+  free(mf)
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// Pipe — anonymous inter-process pipe
+// ─────────────────────────────────────────────────────────────
+
+struct PipePair:
+  read_fd:int
+  write_fd:int
+  ok:int
+
+fn pipe_create() -> PipePair:
+  out:PipePair
+  out.ok = 0
+  out.read_fd = 0 - 1
+  out.write_fd = 0 - 1
+  r:int = io_pipe_create(&out.read_fd, &out.write_fd)
+  if r == 0:
+    out.ok = 1
+  ret out
+
+fn pipe_read(fd:int, buf:*char, n:int) -> int:
+  ret io_fd_read(fd, buf, n)
+
+fn pipe_write(fd:int, buf:*char, n:int) -> int:
+  ret io_fd_write(fd, buf, n)
+
+fn pipe_close_read(p:*PipePair) -> int:
+  if p == 0 || (*p).read_fd < 0:
+    ret 0 - 1
+  r:int = io_fd_close((*p).read_fd)
+  (*p).read_fd = 0 - 1
+  ret r
+
+fn pipe_close_write(p:*PipePair) -> int:
+  if p == 0 || (*p).write_fd < 0:
+    ret 0 - 1
+  r:int = io_fd_close((*p).write_fd)
+  (*p).write_fd = 0 - 1
+  ret r
+
+// ─────────────────────────────────────────────────────────────
+// Async I/O stubs (IOCP on Windows, io_uring on Linux)
+// ─────────────────────────────────────────────────────────────
+
+struct AioReq:
+  fd:int
+  buf:*char
+  n:int
+  off:int
+  kind:int   // 0=read, 1=write
+  done:int
+  result:int
+  handle:int // OS handle for completion
+
+let AIO_READ:int = 0
+let AIO_WRITE:int = 1
+
+fn aio_read_req(path:str, buf:*char, n:int, off:int) -> *AioReq:
+  if path == 0 || buf == 0 || n <= 0:
+    ret 0 as *AioReq
+  req:*AioReq = (*AioReq)malloc(sizeof(AioReq))
+  if req == 0:
+    ret 0 as *AioReq
+  (*req).buf = buf
+  (*req).n = n
+  (*req).off = off
+  (*req).kind = AIO_READ
+  (*req).done = 0
+  (*req).result = 0
+  (*req).handle = 0 - 1
+  // Dispatch via runtime
+  h:*char = fopen(path, "rb")
+  if h == 0 as *char:
+    free(req)
+    ret 0 as *AioReq
+  if off > 0:
+    fseek(h, off, SEEK_SET)
+  r:int = fread(buf, 1, n, h)
+  fclose(h)
+  (*req).result = r
+  (*req).done = 1
+  ret req
+
+fn aio_write_req(path:str, buf:*char, n:int, off:int) -> *AioReq:
+  if path == 0 || buf == 0 || n <= 0:
+    ret 0 as *AioReq
+  req:*AioReq = (*AioReq)malloc(sizeof(AioReq))
+  if req == 0:
+    ret 0 as *AioReq
+  (*req).buf = buf
+  (*req).n = n
+  (*req).off = off
+  (*req).kind = AIO_WRITE
+  (*req).done = 0
+  (*req).result = 0
+  (*req).handle = 0 - 1
+  mode:str = "wb"
+  if off > 0:
+    mode = "r+b"
+  h:*char = fopen(path, mode)
+  if h == 0 as *char:
+    free(req)
+    ret 0 as *AioReq
+  if off > 0:
+    fseek(h, off, SEEK_SET)
+  w:int = fwrite(buf, 1, n, h)
+  fclose(h)
+  (*req).result = w
+  (*req).done = 1
+  ret req
+
+fn aio_wait(req:*AioReq) -> int:
+  if req == 0:
+    ret 0 - 1
+  // Sync fallback: already done
+  ret (*req).result
+
+fn aio_free(req:*AioReq) -> int:
+  if req == 0:
+    ret 0 - 1
+  free(req)
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// File convenience API
+// ─────────────────────────────────────────────────────────────
+
+fn read_all(path:str) -> str:
+  if path == 0:
+    ret 0 as str
+  ret read_file(path)
+
+fn write_all(path:str, data:str) -> int:
+  if path == 0 || data == 0:
+    ret 0 - 1
+  n:int = len(data)
+  if n < 0:
+    ret 0 - 1
+  wrote:int = write_file(path, data, n)
+  if wrote != n:
+    ret 0 - 1
+  ret wrote
+
+fn write_all_bytes(path:str, data:*char, n:int) -> int:
+  if path == 0 || data == 0 || n < 0:
+    ret 0 - 1
+  h:*char = fopen(path, "wb")
+  if h == 0 as *char:
+    ret 0 - 1
+  w:int = fwrite(data, 1, n, h)
+  fclose(h)
+  if w != n:
+    ret 0 - 1
+  ret w
+
+fn append_all(path:str, data:str) -> int:
+  if path == 0 || data == 0:
+    ret 0 - 1
+  n:int = len(data)
+  h:*char = fopen(path, "ab")
+  if h == 0 as *char:
+    ret 0 - 1
+  w:int = fwrite(data, 1, n, h)
+  fclose(h)
+  ret w
+
+fn copy_file(src:str, dst:str) -> int:
+  if src == 0 || dst == 0:
+    ret 0 - 1
+  // Use chunk streaming for large-file safety
+  bf:*BigFile = bigfile_open(src, IO_CHUNK_DEFAULT)
+  if bf == 0:
+    ret 0 - 1
+  sw:*StreamWriter = stream_writer_open(dst)
+  if sw == 0:
+    bigfile_close(bf)
+    ret 0 - 1
+  while bigfile_eof(bf) == 0:
+    chunk:str = bigfile_read_chunk(bf)
+    if chunk == 0:
+      break
+    nr:int = bigfile_last_read(bf)
+    stream_write(sw, chunk as *char, nr)
+    free(chunk)
+  bigfile_close(bf)
+  stream_writer_close(sw)
+  ret 0
+
+fn move_file(src:str, dst:str) -> int:
+  if rename(src, dst) == 0:
+    ret 0
+  n:int = copy_file(src, dst)
+  if n < 0:
+    ret 0 - 1
+  remove(src)
+  ret 0
+
+fn file_size_bytes(path:str) -> int:
+  ret file_size(path)
+
+fn file_exists(path:str) -> int:
+  ret path_exists(path)
+
+fn dir_exists(path:str) -> int:
+  if path_exists(path) == 0:
+    ret 0
+  ret path_is_dir(path)
+
+fn file_delete(path:str) -> int:
+  ret remove(path)
+
+fn file_rename(old:str, new_path:str) -> int:
+  ret rename(old, new_path)
+
+// ─────────────────────────────────────────────────────────────
+// Directory helpers
+// ─────────────────────────────────────────────────────────────
+
+fn cwd() -> str:
+  ret get_cwd()
+
+fn dir_make(path:str) -> int:
+  ret mkdir(path)
+
+fn dir_list(p:str) -> str:
+  ret list_dir(p)
+
+fn dir_list_rec(p:str) -> str:
+  ret list_dir_recursive(p)
+
+fn glob_list(p:str) -> str:
+  ret glob(p)
+
+fn walk_dir(path:str, cb:fn(str)->int) -> int:
+  lst:str = list_dir_recursive(path)
+  if lst == 0:
+    ret 0 - 1
+  i:int = 0
+  start:*char = lst as *char
+  for ;;:
+    c:int = (lst as *char)[i] as int
+    if c == 0:
+      if start != (lst as *char) + i:
+        if cb(start as str) != 0:
+          free(lst)
+          ret 1
+      break
+    if c == 10:
+      (lst as *char)[i] = 0 as char
+      if cb(start as str) != 0:
+        free(lst)
+        ret 1
+      start = (lst as *char) + i + 1
+    i += 1
+  free(lst)
+  ret 0
+
+// Walk with file name + size info
+fn walk_dir_ex(path:str, cb:fn(str, int)->int) -> int:
+  lst:str = list_dir_recursive(path)
+  if lst == 0:
+    ret 0 - 1
+  i:int = 0
+  start:*char = lst as *char
+  for ;;:
+    c:int = (lst as *char)[i] as int
+    if c == 0:
+      if start != (lst as *char) + i:
+        sz:int = file_size(start as str)
+        if cb(start as str, sz) != 0:
+          free(lst)
+          ret 1
+      break
+    if c == 10:
+      (lst as *char)[i] = 0 as char
+      sz2:int = file_size(start as str)
+      if cb(start as str, sz2) != 0:
+        free(lst)
+        ret 1
+      start = (lst as *char) + i + 1
+    i += 1
+  free(lst)
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// Path helpers (OS-backed)
+// ─────────────────────────────────────────────────────────────
+
+fn path_join2(a:str, b:str) -> str:
+  ret path_join(a, b)
+fn path_sep_ch() -> int:
+  ret path_sep()
+fn path_base(p:str) -> str:
+  ret path_basename(p)
+fn path_dir(p:str) -> str:
+  ret path_dirname(p)
+fn path_norm(p:str) -> str:
+  ret path_normalize(p)
+
+fn norm_flag_preserve_sep() -> int:
+  ret 1
+fn norm_flag_lower_case() -> int:
+  ret 2
+fn norm_flag_resolve_symlinks() -> int:
+  ret 4
+
+fn path_norm_opts(p:str, flags:int) -> str:
+  ret path_normalize_opts(p, flags)
+
+fn path_has_ext(p:str, ext:str) -> int:
+  if p == 0 || ext == 0:
+    ret 0
+  pn:int = len(p)
+  en:int = len(ext)
+  if en >= pn:
+    ret 0
+  i:int = 0
+  while i < en:
+    pi:int = (p as *char)[pn - en + i] as int
+    ei:int = (ext as *char)[i] as int
+    if pi != ei:
+      ret 0
+    i = i + 1
+  ret 1
+
+fn path_strip_ext(p:str) -> str:
+  if p == 0:
+    ret 0 as str
+  n:int = len(p)
+  i:int = n - 1
+  while i >= 0:
+    c:int = (p as *char)[i] as int
+    if c == 46:  // '.'
+      out:*char = malloc(i + 1)
+      if out == 0:
+        ret 0 as str
+      unsafe:
+        memcpy(out, p as *char, i)
+      out[i] = 0 as char
+      ret out as str
+    if c == 47 || c == 92:  // '/' or '\'
+      break
+    i = i - 1
+  ret _str_dup(p)
+
+fn path_join_p(a:str, b:str) -> str:
+  ret path_join_portable(a, b)
+fn path_base_p(p:str) -> str:
+  ret path_base_portable(p)
+fn path_dir_p(p:str) -> str:
+  ret path_dir_portable(p)
+fn path_norm_p(p:str) -> str:
+  ret path_norm_portable(p)
+
+// ─────────────────────────────────────────────────────────────
+// Input helpers
+// ─────────────────────────────────────────────────────────────
+
+fn read_line_prompt(prompt:str) -> str:
+  if prompt != 0:
+    write_line(stdout(), prompt)
+  ret read_line(stdin())
+
+fn input_int(prompt:str) -> int:
+  s:str = read_line_prompt(prompt)
+  ret _parse_int(s)
+
+fn input_float(prompt:str) -> float:
+  s:str = read_line_prompt(prompt)
+  ret _parse_float(s)
+
+// ─────────────────────────────────────────────────────────────
+// Internal portable path implementation
+// ─────────────────────────────────────────────────────────────
+
+fn _is_sep(c:int) -> int:
+  if c == 47 || c == 92:
+    ret 1
+  ret 0
+
+fn _is_ws(c:int) -> int:
+  if c == 32 || c == 9 || c == 10 || c == 13:
+    ret 1
+  ret 0
+
+fn _is_digit(c:int) -> int:
+  if c >= 48 && c <= 57:
+    ret 1
+  ret 0
+
+fn _skip_ws(s:str, i:int) -> int:
+  j:int = i
+  while (s as *char)[j] != 0 as char && _is_ws((s as *char)[j] as int) != 0:
+    j = j + 1
+  ret j
+
+fn _parse_int(s:str) -> int:
+  if s == 0:
+    ret 0
+  i:int = _skip_ws(s, 0)
+  sign:int = 1
+  if (s as *char)[i] == 45 as char:
+    sign = 0 - 1
+    i = i + 1
+  n:int = 0
+  while (s as *char)[i] != 0 as char:
+    c:int = (s as *char)[i] as int
+    if c < 48 || c > 57:
+      break
+    n = n * 10 + (c - 48)
+    i = i + 1
+  ret n * sign
+
+fn _parse_float(s:str) -> float:
+  if s == 0:
+    ret 0.0
+  i:int = _skip_ws(s, 0)
+  sign:float = 1.0
+  if (s as *char)[i] == 45 as char:
+    sign = 0.0 - 1.0
+    i = i + 1
+  n:float = 0.0
+  while (s as *char)[i] != 0 as char:
+    c:int = (s as *char)[i] as int
+    if c < 48 || c > 57:
+      break
+    n = n * 10.0 + (c - 48) as float
+    i = i + 1
+  if (s as *char)[i] == 46 as char:
+    i = i + 1
+    div:float = 10.0
+    while (s as *char)[i] != 0 as char:
+      c2:int = (s as *char)[i] as int
+      if c2 < 48 || c2 > 57:
+        break
+      n = n + (c2 - 48) as float / div
+      div = div * 10.0
+      i = i + 1
+  ret n * sign
+
+fn _str_dup(s:str) -> str:
+  if s == 0:
+    ret 0 as str
+  n:int = len(s)
+  p:*char = malloc(n + 1)
+  if p == 0:
+    ret 0 as str
+  unsafe:
+    memcpy(p, s as *char, n)
+    p[n] = 0 as char
+  ret p as str
+
+fn _str_slice(s:str, a:int, b:int) -> str:
+  if s == 0:
+    ret 0 as str
+  n:int = len(s)
+  if a < 0:
+    a = 0
+  if b < 0 || b > n:
+    b = n
+  if b < a:
+    b = a
+  n2:int = b - a
+  p:*char = malloc(n2 + 1)
+  if p == 0:
+    ret 0 as str
+  if n2 > 0:
+    unsafe:
+      memcpy(p, (s as *char) + a, n2)
+  unsafe:
+    p[n2] = 0 as char
+  ret p as str
+
+fn _str_join2(a:str, b:str) -> str:
+  if a == 0:
+    ret _str_dup(b)
+  if b == 0:
+    ret _str_dup(a)
+  na:int = len(a)
+  nb:int = len(b)
+  p:*char = malloc(na + nb + 1)
+  if p == 0:
+    ret 0 as str
+  unsafe:
+    if na > 0:
+      memcpy(p, a as *char, na)
+    if nb > 0:
+      memcpy(p + na, b as *char, nb)
+    p[na + nb] = 0 as char
+  ret p as str
+
+fn _str_join3(a:str, b:str, c:str) -> str:
+  ab:str = _str_join2(a, b)
+  out:str = _str_join2(ab, c)
+  if ab != 0:
+    free(ab)
+  ret out
+
+fn path_join_portable(a:str, b:str) -> str:
+  if a == 0:
+    ret _str_dup(b)
+  if b == 0:
+    ret _str_dup(a)
+  na:int = len(a)
+  nb:int = len(b)
+  i:int = 0
+  while i < nb:
+    c:int = (b as *char)[i] as int
+    if _is_sep(c) == 0:
+      break
+    i = i + 1
+  b2:str = _str_slice(b, i, nb)
+  nb2:int = 0
+  if b2 != 0:
+    nb2 = len(b2)
+  need_sep:int = 1
+  if na > 0:
+    c2:int = (a as *char)[na - 1] as int
+    if _is_sep(c2) != 0:
+      need_sep = 0
+  out:str = 0 as str
+  if need_sep != 0 && nb2 > 0:
+    out = _str_join3(a, "/", b2)
+  else:
+    out = _str_join2(a, b2)
+  if b2 != 0:
+    free(b2)
+  ret out
+
+fn path_base_portable(p:str) -> str:
+  if p == 0:
+    ret 0 as str
+  n:int = len(p)
+  if n <= 0:
+    ret _str_dup(p)
+  i:int = n - 1
+  while i >= 0:
+    c:int = (p as *char)[i] as int
+    if _is_sep(c) == 0:
+      break
+    i = i - 1
+  if i < 0:
+    ret _str_dup(p)
+  j:int = i
+  while j >= 0:
+    c2:int = (p as *char)[j] as int
+    if _is_sep(c2) != 0:
+      break
+    j = j - 1
+  ret _str_slice(p, j + 1, i + 1)
+
+fn path_dir_portable(p:str) -> str:
+  if p == 0:
+    ret 0 as str
+  n:int = len(p)
+  if n <= 0:
+    ret _str_dup(".")
+  i:int = n - 1
+  while i >= 0:
+    c:int = (p as *char)[i] as int
+    if _is_sep(c) == 0:
+      break
+    i = i - 1
+  while i >= 0:
+    c2:int = (p as *char)[i] as int
+    if _is_sep(c2) != 0:
+      break
+    i = i - 1
+  if i < 0:
+    ret _str_dup(".")
+  if i == 0:
+    ret _str_slice(p, 0, 1)
+  while i > 0:
+    c3:int = (p as *char)[i - 1] as int
+    if _is_sep(c3) == 0:
+      break
+    i = i - 1
+  ret _str_slice(p, 0, i)
+
+fn path_norm_portable(p:str) -> str:
+  if p == 0:
+    ret 0 as str
+  n:int = len(p)
+  if n <= 0:
+    ret _str_dup(p)
+  out:*char = malloc(n + 2)
+  if out == 0:
+    ret 0 as str
+  i:int = 0
+  has_root:int = 0
+  drive0:int = 0
+  unsafe:
+    if n >= 2:
+      c0:int = p[0] as int
+      c1:int = p[1] as int
+      if ((c0 >= 65 && c0 <= 90) || (c0 >= 97 && c0 <= 122)) && c1 == 58:
+        drive0 = c0
+        i = 2
+        if i < n:
+          c2:int = p[i] as int
+          if c2 == 47 || c2 == 92:
+            has_root = 1
+            i = i + 1
+    if i == 0 && n > 0:
+      c3:int = p[0] as int
+      if c3 == 47 || c3 == 92:
+        has_root = 1
+        i = 1
+  o:int = 0
+  unsafe:
+    if drive0 != 0:
+      out[o] = drive0 as char
+      out[o + 1] = 58 as char
+      o = o + 2
+      if has_root != 0:
+        out[o] = 47 as char
+        o = o + 1
+    else if has_root != 0:
+      out[o] = 47 as char
+      o = o + 1
+  root_len:int = o
+  while i < n:
+    c0:int = 0
+    unsafe:
+      c0 = p[i] as int
+    if _is_sep(c0) == 0:
+      break
+    i = i + 1
+  while i < n:
+    while i < n:
+      c1:int = 0
+      unsafe:
+        c1 = p[i] as int
+      if _is_sep(c1) == 0:
+        break
+      i = i + 1
+    if i >= n:
+      break
+    start:int = i
+    while i < n:
+      c2:int = 0
+      unsafe:
+        c2 = p[i] as int
+      if _is_sep(c2) != 0:
+        break
+      i = i + 1
+    seglen:int = i - start
+    skip:int = 0
+    if seglen == 1:
+      unsafe:
+        if p[start] == 46 as char:
+          skip = 1
+    if seglen == 2 && skip == 0:
+      unsafe:
+        if p[start] == 46 as char && p[start + 1] == 46 as char:
+          skip = 1
+          if o > root_len:
+            if out[o - 1] == 47 as char:
+              o = o - 1
+            while o > root_len && out[o - 1] != 47 as char:
+              o = o - 1
+            if o > root_len && out[o - 1] == 47 as char:
+              o = o - 1
+    if skip == 0:
+      unsafe:
+        if o > 0 && out[o - 1] != 47 as char:
+          out[o] = 47 as char
+          o = o + 1
+        if seglen > 0:
+          memcpy(out + o, p + start, seglen)
+      o = o + seglen
+  if o == 0:
+    out[0] = 46 as char
+    o = 1
+  out[o] = 0 as char
+  ret out as str

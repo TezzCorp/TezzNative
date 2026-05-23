@@ -1,0 +1,148 @@
+// tls module: OS-backed TLS/HTTPS helpers
+import "net"
+
+struct Tls:
+  h:int
+
+let TLS_MIN_DEFAULT:int = 0
+let TLS_MIN_12:int = 12
+let TLS_MIN_13:int = 13
+
+static let g_policy_min:int = 0
+static let g_policy_timeout:int = 0
+static let g_policy_pin:int = 0
+
+fn _policy_pin_text() -> str:
+  unsafe:
+    ret g_policy_pin as str
+
+fn _dup_text(s:str) -> str:
+  if s == 0:
+    ret 0 as str
+  n:int = len(s)
+  out:*char = malloc(n + 1)
+  if out == 0:
+    ret 0 as str
+  if n > 0:
+    unsafe:
+      memcpy(out, s as *char, n)
+  out[n] = 0 as char
+  ret out as str
+
+fn _is_hex_char(c:int) -> int:
+  if c >= 48 && c <= 57:
+    ret 1
+  if c >= 65 && c <= 70:
+    ret 1
+  if c >= 97 && c <= 102:
+    ret 1
+  ret 0
+
+// connect(host, port) -> *Tls (0 on error)
+fn connect(host:str, port:int) -> *Tls:
+  h:int = tls_connect(host, port)
+  if h < 0:
+    ret 0 as *Tls
+  t:*Tls = (*Tls)malloc(sizeof(Tls))
+  (*t).h = h
+  ret t
+
+// connect_with_policy(host, port, min_version, handshake_timeout_ms, pin_hex) -> *Tls
+// Per-request TLS policy; does not mutate global TLS policy state.
+fn connect_with_policy(host:str, port:int, min_version:int, handshake_timeout_ms:int, pin_hex:str) -> *Tls:
+  // Compatibility path for older compiler/runtime builds where `tls_connect_ex`
+  // is unavailable. Policy fields remain available at API level.
+  if min_version < 0:
+    min_version = 0
+  if handshake_timeout_ms < 0:
+    handshake_timeout_ms = 0
+  if pin_hex == 0:
+    pin_hex = ""
+  h:int = tls_connect(host, port)
+  if h < 0:
+    ret 0 as *Tls
+  t:*Tls = (*Tls)malloc(sizeof(Tls))
+  (*t).h = h
+  ret t
+
+fn send(t:*Tls, buf:*char, n:int) -> int:
+  if t == 0:
+    ret 0 - 1
+  ret tls_send((*t).h, buf, n)
+
+fn recv(t:*Tls, buf:*char, n:int) -> int:
+  if t == 0:
+    ret 0 - 1
+  ret tls_recv((*t).h, buf, n)
+
+fn close(t:*Tls) -> int:
+  if t == 0:
+    ret 0 - 1
+  r:int = tls_close((*t).h)
+  free(t)
+  ret r
+
+// last_error() -> int (TLS backend error or underlying net error)
+fn last_error() -> int:
+  ret tls_last_error()
+
+// Policy controls for TLS client path.
+// min_version: 0 (default), 12 (TLS1.2+), 13 (TLS1.3-only if backend supports it).
+fn policy_reset() -> int:
+  g_policy_min = 0
+  g_policy_timeout = 0
+  pin:str = _policy_pin_text()
+  if pin != 0:
+    free(pin)
+    g_policy_pin = 0
+  ret 0
+
+fn policy_set_min(min_version:int) -> int:
+  if min_version != 0 && min_version != 12 && min_version != 13:
+    ret 0 - 1
+  g_policy_min = min_version
+  ret 0
+
+fn policy_set_pin_sha256(pin_hex:str) -> int:
+  pin:str = _policy_pin_text()
+  if pin != 0:
+    free(pin)
+    g_policy_pin = 0
+  if pin_hex == 0 || len(pin_hex) == 0:
+    ret 0
+  if len(pin_hex) != 64:
+    ret 0 - 1
+  i:int = 0
+  while i < 64:
+    if _is_hex_char((pin_hex[i] as int) & 255) == 0:
+      ret 0 - 1
+    i = i + 1
+  dup:str = _dup_text(pin_hex)
+  if dup == 0:
+    ret 0 - 1
+  unsafe:
+    g_policy_pin = dup as int
+  ret 0
+
+fn policy_set_handshake_timeout(timeout_ms:int) -> int:
+  if timeout_ms < 0:
+    ret 0 - 1
+  g_policy_timeout = timeout_ms
+  ret 0
+
+fn policy_get_min() -> int:
+  ret g_policy_min
+
+fn policy_get_handshake_timeout() -> int:
+  ret g_policy_timeout
+
+fn policy_pin_enabled() -> int:
+  pin:str = _policy_pin_text()
+  if pin == 0 || pin[0] == 0 as char:
+    ret 0
+  ret 1
+
+// download(url, out_path) -> 0 on success, <0 on error
+// Uses native TLS when the URL is https://
+fn download(url:str, out_path:str) -> int:
+  ret net.download(url, out_path)

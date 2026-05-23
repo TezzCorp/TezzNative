@@ -1,0 +1,699 @@
+// raspi module — TezzNative 2.0 Raspberry Pi Hardware Abstraction Layer
+//
+// Native Raspberry Pi support for all GPIO and peripheral access.
+// Works on RPi 1/2/3/4/5 via /sys/class/gpio and /dev/* interfaces.
+// Also supports RPi Pico (RP2040) via USB serial bridge.
+//
+// Compile for RPi: tezzc buildexe --target=aarch64-linux main.tn main
+// Compile for RPi Pico: tezzc buildexe --target=arm-cortex-m0 main.tn main.uf2
+//
+// GPIO: /sys/class/gpio (kernel sysfs) — no root required
+// PWM:  /sys/class/pwm (kernel pwm driver)
+// I2C:  /dev/i2c-* (i2c-dev kernel module)
+// SPI:  /dev/spidev* (spidev kernel module)
+// UART: /dev/ttyS0 or /dev/ttyAMA0
+// Camera: libcamera or V4L2 via /dev/video0
+
+import "io"
+import "time"
+
+// ─────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────
+
+let PI_INPUT:int  = 0
+let PI_OUTPUT:int = 1
+let PI_ALT0:int   = 4
+let PI_ALT1:int   = 5
+let PI_ALT2:int   = 6
+let PI_ALT3:int   = 7
+let PI_ALT4:int   = 3
+let PI_ALT5:int   = 2
+
+let PI_HIGH:int = 1
+let PI_LOW:int  = 0
+
+let PI_PULL_OFF:int  = 0
+let PI_PULL_DOWN:int = 1
+let PI_PULL_UP:int   = 2
+
+let PI_EDGE_RISING:int  = 1
+let PI_EDGE_FALLING:int = 2
+let PI_EDGE_BOTH:int    = 3
+
+// BCM GPIO pin numbers for common connectors
+let PI_SDA1:int  = 2   // I2C1 SDA
+let PI_SCL1:int  = 3   // I2C1 SCL
+let PI_SDA0:int  = 0   // I2C0 SDA (rev 2+)
+let PI_SCL0:int  = 1   // I2C0 SCL
+let PI_MOSI:int  = 10  // SPI0 MOSI
+let PI_MISO:int  = 9   // SPI0 MISO
+let PI_SCLK:int  = 11  // SPI0 SCLK
+let PI_CE0:int   = 8   // SPI0 CE0
+let PI_CE1:int   = 7   // SPI0 CE1
+let PI_TX:int    = 14  // UART TX
+let PI_RX:int    = 15  // UART RX
+let PI_LED:int   = 0   // No built-in LED (use GPIO 17 on breadboard)
+
+// ─────────────────────────────────────────────────────────────
+// GPIO via /sys/class/gpio
+// ─────────────────────────────────────────────────────────────
+
+fn _pi_strdup(s:str) -> str:
+  if s == 0: ret 0 as str
+  n:int = len(s)
+  p:*char = malloc(n + 1)
+  if p == 0: ret 0 as str
+  unsafe:
+    memcpy(p, s as *char, n)
+  p[n] = 0 as char
+  ret p as str
+
+fn _pi_itoa(v:int) -> str:
+  tmp:[char;24]
+  i:int = 0
+  n:int = v
+  if n == 0:
+    tmp[i] = 48 as char
+    i = i + 1
+  while n > 0:
+    tmp[i] = (48 + n % 10) as char
+    i = i + 1
+    n = n / 10
+  p:*char = malloc(i + 1)
+  if p == 0: ret 0 as str
+  j:int = 0
+  while j < i:
+    p[j] = tmp[i - j - 1]
+    j = j + 1
+  p[i] = 0 as char
+  ret p as str
+
+fn _pi_join2(a:str, b:str) -> str:
+  if a == 0: ret _pi_strdup(b)
+  if b == 0: ret _pi_strdup(a)
+  na:int = len(a)
+  nb:int = len(b)
+  p:*char = malloc(na + nb + 1)
+  if p == 0: ret 0 as str
+  unsafe:
+    memcpy(p, a as *char, na)
+    memcpy(p + na, b as *char, nb)
+  p[na+nb] = 0 as char
+  ret p as str
+
+fn _pi_write_sysfs(path:str, val:str) -> int:
+  h:*char = fopen(path, "w")
+  if h == 0 as *char: ret 0 - 1
+  fwrite(val as *char, 1, len(val), h)
+  fclose(h)
+  ret 0
+
+fn _pi_read_sysfs(path:str) -> int:
+  h:*char = fopen(path, "r")
+  if h == 0 as *char: ret 0 - 1
+  ch:char = 0 as char
+  fread(&ch, 1, 1, h)
+  fclose(h)
+  ret (ch as int) - 48
+
+fn gpio_export(pin:int) -> int:
+  ps:str = _pi_itoa(pin)
+  r:int = _pi_write_sysfs("/sys/class/gpio/export", ps)
+  free(ps)
+  // Small delay to let kernel create the sysfs entry
+  time.sleep_ms(50)
+  ret r
+
+fn gpio_unexport(pin:int) -> int:
+  ps:str = _pi_itoa(pin)
+  r:int = _pi_write_sysfs("/sys/class/gpio/unexport", ps)
+  free(ps)
+  ret r
+
+fn gpio_set_direction(pin:int, mode:int) -> int:
+  ps:str = _pi_itoa(pin)
+  dir_path:str = _pi_join2("/sys/class/gpio/gpio", ps)
+  full_path:str = _pi_join2(dir_path, "/direction")
+  free(ps); free(dir_path)
+  dir_val:str = "in"
+  if mode == PI_OUTPUT: dir_val = "out"
+  r:int = _pi_write_sysfs(full_path, dir_val)
+  free(full_path)
+  ret r
+
+fn gpio_set_pull(pin:int, pull:int) -> int:
+  // Raspberry Pi 4+ supports sysfs pull-up/down
+  ps:str = _pi_itoa(pin)
+  pull_path:str = _pi_join2("/sys/class/gpio/gpio", ps)
+  bias_path:str = _pi_join2(pull_path, "/pull")
+  free(ps); free(pull_path)
+  val:str = "none"
+  if pull == PI_PULL_UP: val = "up"
+  if pull == PI_PULL_DOWN: val = "down"
+  r:int = _pi_write_sysfs(bias_path, val)
+  free(bias_path)
+  ret r
+
+fn gpio_setup(pin:int, mode:int) -> int:
+  gpio_export(pin)
+  ret gpio_set_direction(pin, mode)
+
+fn gpio_cleanup(pin:int) -> int:
+  ret gpio_unexport(pin)
+
+fn gpio_write(pin:int, val:int) -> int:
+  ps:str = _pi_itoa(pin)
+  val_path:str = _pi_join2("/sys/class/gpio/gpio", ps)
+  full_path:str = _pi_join2(val_path, "/value")
+  free(ps); free(val_path)
+  w:str = "0"
+  if val != 0: w = "1"
+  r:int = _pi_write_sysfs(full_path, w)
+  free(full_path)
+  ret r
+
+fn gpio_read(pin:int) -> int:
+  ps:str = _pi_itoa(pin)
+  val_path:str = _pi_join2("/sys/class/gpio/gpio", ps)
+  full_path:str = _pi_join2(val_path, "/value")
+  free(ps); free(val_path)
+  v:int = _pi_read_sysfs(full_path)
+  free(full_path)
+  ret v
+
+fn gpio_toggle(pin:int) -> int:
+  v:int = gpio_read(pin)
+  ret gpio_write(pin, 1 - v)
+
+// ─────────────────────────────────────────────────────────────
+// PWM via /sys/class/pwm
+// ─────────────────────────────────────────────────────────────
+
+struct PwmChannel:
+  chip:int    // PWM chip number (0 for most RPis)
+  channel:int // PWM channel (0 or 1)
+
+fn pwm_export(chip:int, channel:int) -> *PwmChannel:
+  cs:str = _pi_itoa(chip)
+  chip_path:str = _pi_join2("/sys/class/pwm/pwmchip", cs)
+  exp_path:str = _pi_join2(chip_path, "/export")
+  free(cs); free(chip_path)
+  chs:str = _pi_itoa(channel)
+  _pi_write_sysfs(exp_path, chs)
+  free(exp_path); free(chs)
+  time.sleep_ms(100)
+  p:*PwmChannel = (*PwmChannel)malloc(sizeof(PwmChannel))
+  if p == 0: ret 0 as *PwmChannel
+  (*p).chip = chip
+  (*p).channel = channel
+  ret p
+
+fn _pwm_path(p:*PwmChannel) -> str:
+  if p == 0: ret 0 as str
+  cs:str = _pi_itoa((*p).chip)
+  base:str = _pi_join2("/sys/class/pwm/pwmchip", cs)
+  free(cs)
+  chs:str = _pi_itoa((*p).channel)
+  chan_dir:str = _pi_join2("/pwm", chs)
+  free(chs)
+  full:str = _pi_join2(base, chan_dir)
+  free(base); free(chan_dir)
+  ret full
+
+fn pwm_set_period_ns(p:*PwmChannel, period_ns:int) -> int:
+  base:str = _pwm_path(p)
+  path:str = _pi_join2(base, "/period")
+  free(base)
+  ps:str = _pi_itoa(period_ns)
+  r:int = _pi_write_sysfs(path, ps)
+  free(path); free(ps)
+  ret r
+
+fn pwm_set_duty_ns(p:*PwmChannel, duty_ns:int) -> int:
+  base:str = _pwm_path(p)
+  path:str = _pi_join2(base, "/duty_cycle")
+  free(base)
+  ds:str = _pi_itoa(duty_ns)
+  r:int = _pi_write_sysfs(path, ds)
+  free(path); free(ds)
+  ret r
+
+fn pwm_enable(p:*PwmChannel) -> int:
+  base:str = _pwm_path(p)
+  path:str = _pi_join2(base, "/enable")
+  free(base)
+  r:int = _pi_write_sysfs(path, "1")
+  free(path)
+  ret r
+
+fn pwm_disable(p:*PwmChannel) -> int:
+  base:str = _pwm_path(p)
+  path:str = _pi_join2(base, "/enable")
+  free(base)
+  r:int = _pi_write_sysfs(path, "0")
+  free(path)
+  ret r
+
+// Set PWM frequency and duty cycle (convenience wrapper)
+fn pwm_set(p:*PwmChannel, freq_hz:int, duty_pct:int) -> int:
+  if p == 0 || freq_hz <= 0: ret 0 - 1
+  period_ns:int = 1000000000 / freq_hz
+  duty_ns:int = (period_ns * duty_pct) / 100
+  pwm_set_period_ns(p, period_ns)
+  pwm_set_duty_ns(p, duty_ns)
+  ret pwm_enable(p)
+
+fn pwm_servo(p:*PwmChannel, angle:int) -> int:
+  // Servo: 50Hz, 1ms=0° 2ms=180°
+  if angle < 0: angle = 0
+  if angle > 180: angle = 180
+  period_ns:int = 20000000   // 20ms = 50Hz
+  duty_ns:int = 1000000 + (angle * 1000000) / 180  // 1ms + fraction
+  pwm_set_period_ns(p, period_ns)
+  pwm_set_duty_ns(p, duty_ns)
+  ret pwm_enable(p)
+
+fn pwm_free(p:*PwmChannel) -> int:
+  if p == 0: ret 0 - 1
+  pwm_disable(p)
+  free(p)
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// I2C via /dev/i2c-*
+// ─────────────────────────────────────────────────────────────
+
+struct PiI2c:
+  fd:int      // file descriptor
+  bus:int
+  addr:int    // current target address
+
+fn i2c_open(bus:int) -> *PiI2c:
+  bs:str = _pi_itoa(bus)
+  path:str = _pi_join2("/dev/i2c-", bs)
+  free(bs)
+  fd:int = pi_open_fd(path, 2)  // O_RDWR = 2
+  free(path)
+  if fd < 0: ret 0 as *PiI2c
+  p:*PiI2c = (*PiI2c)malloc(sizeof(PiI2c))
+  if p == 0:
+    pi_close_fd(fd)
+    ret 0 as *PiI2c
+  (*p).fd = fd
+  (*p).bus = bus
+  (*p).addr = 0 - 1
+  ret p
+
+fn i2c_set_addr(i:*PiI2c, addr:int) -> int:
+  if i == 0: ret 0 - 1
+  (*i).addr = addr
+  ret pi_ioctl((*i).fd, 1795, addr)  // I2C_SLAVE = 0x0703
+
+fn i2c_write_bytes(i:*PiI2c, buf:*char, n:int) -> int:
+  if i == 0 || buf == 0 || n <= 0: ret 0 - 1
+  ret pi_write_fd((*i).fd, buf, n)
+
+fn i2c_read_bytes(i:*PiI2c, buf:*char, n:int) -> int:
+  if i == 0 || buf == 0 || n <= 0: ret 0 - 1
+  ret pi_read_fd((*i).fd, buf, n)
+
+fn i2c_write_reg8(i:*PiI2c, reg:int, val:int) -> int:
+  buf:[char;2]
+  buf[0] = reg as char
+  buf[1] = val as char
+  ret i2c_write_bytes(i, &buf[0], 2)
+
+fn i2c_read_reg8(i:*PiI2c, reg:int) -> int:
+  buf:[char;1]
+  buf[0] = reg as char
+  i2c_write_bytes(i, &buf[0], 1)
+  r_buf:[char;1]
+  n:int = i2c_read_bytes(i, &r_buf[0], 1)
+  if n <= 0: ret 0 - 1
+  ret r_buf[0] as int & 255
+
+fn i2c_read_reg16_be(i:*PiI2c, reg:int) -> int:
+  buf:[char;1]
+  buf[0] = reg as char
+  i2c_write_bytes(i, &buf[0], 1)
+  r_buf:[char;2]
+  n:int = i2c_read_bytes(i, &r_buf[0], 2)
+  if n < 2: ret 0 - 1
+  ret ((r_buf[0] as int & 255) << 8) | (r_buf[1] as int & 255)
+
+fn i2c_close(i:*PiI2c) -> int:
+  if i == 0: ret 0 - 1
+  pi_close_fd((*i).fd)
+  free(i)
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// SPI via /dev/spidev*
+// ─────────────────────────────────────────────────────────────
+
+struct PiSpi:
+  fd:int
+  bus:int
+  device:int
+  mode:int
+  bits:int
+  speed_hz:int
+
+fn spi_open(bus:int, device:int) -> *PiSpi:
+  bs:str = _pi_itoa(bus)
+  ds:str = _pi_itoa(device)
+  path:str = _pi_join2("/dev/spidev", bs)
+  path2:str = _pi_join2(path, ".")
+  full:str = _pi_join2(path2, ds)
+  free(bs); free(ds); free(path); free(path2)
+  fd:int = pi_open_fd(full, 2)  // O_RDWR
+  free(full)
+  if fd < 0: ret 0 as *PiSpi
+  p:*PiSpi = (*PiSpi)malloc(sizeof(PiSpi))
+  if p == 0:
+    pi_close_fd(fd)
+    ret 0 as *PiSpi
+  (*p).fd = fd
+  (*p).bus = bus
+  (*p).device = device
+  (*p).mode = 0  // SPI_MODE_0
+  (*p).bits = 8
+  (*p).speed_hz = 1000000  // 1 MHz default
+  ret p
+
+fn spi_set_speed(s:*PiSpi, speed_hz:int) -> int:
+  if s == 0: ret 0 - 1
+  (*s).speed_hz = speed_hz
+  ret pi_ioctl((*s).fd, 0x40046b04, speed_hz)  // SPI_IOC_WR_MAX_SPEED_HZ
+
+fn spi_transfer_buf(s:*PiSpi, tx:*char, rx:*char, n:int) -> int:
+  if s == 0 || n <= 0: ret 0 - 1
+  ret pi_spi_transfer((*s).fd, tx, rx, n, (*s).speed_hz, (*s).bits)
+
+fn spi_write_byte(s:*PiSpi, val:int) -> int:
+  tx:[char;1]
+  rx:[char;1]
+  tx[0] = val as char
+  spi_transfer_buf(s, &tx[0], &rx[0], 1)
+  ret rx[0] as int & 255
+
+fn spi_close(s:*PiSpi) -> int:
+  if s == 0: ret 0 - 1
+  pi_close_fd((*s).fd)
+  free(s)
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// UART via /dev/ttyS0 or /dev/ttyAMA0
+// ─────────────────────────────────────────────────────────────
+
+struct PiUart:
+  fd:int
+  device:str
+
+fn uart_open(device:str, baud:int) -> *PiUart:
+  if device == 0: ret 0 as *PiUart
+  fd:int = pi_uart_open(device, baud)
+  if fd < 0: ret 0 as *PiUart
+  p:*PiUart = (*PiUart)malloc(sizeof(PiUart))
+  if p == 0:
+    pi_close_fd(fd)
+    ret 0 as *PiUart
+  (*p).fd = fd
+  (*p).device = _pi_strdup(device)
+  ret p
+
+fn uart_write(u:*PiUart, buf:*char, n:int) -> int:
+  if u == 0 || buf == 0 || n <= 0: ret 0 - 1
+  ret pi_write_fd((*u).fd, buf, n)
+
+fn uart_write_str(u:*PiUart, s:str) -> int:
+  if u == 0 || s == 0: ret 0 - 1
+  ret uart_write(u, s as *char, len(s))
+
+fn uart_read(u:*PiUart, buf:*char, n:int) -> int:
+  if u == 0 || buf == 0 || n <= 0: ret 0 - 1
+  ret pi_read_fd((*u).fd, buf, n)
+
+fn uart_read_line(u:*PiUart, timeout_ms:int) -> str:
+  if u == 0: ret 0 as str
+  buf:[char;1024]
+  i:int = 0
+  start:int = time.now_ms()
+  while i < 1023:
+    if time.now_ms() - start > timeout_ms: break
+    ch:[char;1]
+    n:int = pi_read_fd((*u).fd, &ch[0], 1)
+    if n <= 0: continue
+    if ch[0] == 10 as char || ch[0] == 13 as char: break
+    buf[i] = ch[0]
+    i = i + 1
+  buf[i] = 0 as char
+  p:*char = malloc(i + 1)
+  if p == 0: ret 0 as str
+  unsafe:
+    memcpy(p, &buf[0], i)
+  p[i] = 0 as char
+  ret p as str
+
+fn uart_available(u:*PiUart) -> int:
+  if u == 0: ret 0
+  ret pi_uart_available((*u).fd)
+
+fn uart_close(u:*PiUart) -> int:
+  if u == 0: ret 0 - 1
+  pi_close_fd((*u).fd)
+  if (*u).device != 0: free((*u).device)
+  free(u)
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// Camera (RPi Camera Module via V4L2 / libcamera)
+// ─────────────────────────────────────────────────────────────
+
+struct PiCamera:
+  fd:int
+  width:int
+  height:int
+  buf:*char
+  buf_size:int
+
+fn camera_open(device:str, width:int, height:int) -> *PiCamera:
+  if device == 0: ret 0 as *PiCamera
+  fd:int = pi_camera_open(device, width, height)
+  if fd < 0: ret 0 as *PiCamera
+  cam:*PiCamera = (*PiCamera)malloc(sizeof(PiCamera))
+  if cam == 0:
+    pi_camera_close(fd)
+    ret 0 as *PiCamera
+  (*cam).fd = fd
+  (*cam).width = width
+  (*cam).height = height
+  (*cam).buf_size = width * height * 3  // RGB
+  (*cam).buf = malloc((*cam).buf_size)
+  if (*cam).buf == 0:
+    pi_camera_close(fd)
+    free(cam)
+    ret 0 as *PiCamera
+  ret cam
+
+fn camera_capture(cam:*PiCamera) -> int:
+  if cam == 0: ret 0 - 1
+  ret pi_camera_capture((*cam).fd, (*cam).buf, (*cam).buf_size)
+
+fn camera_buf(cam:*PiCamera) -> *char:
+  if cam == 0: ret 0 as *char
+  ret (*cam).buf
+
+fn camera_width(cam:*PiCamera) -> int:
+  if cam == 0: ret 0
+  ret (*cam).width
+
+fn camera_height(cam:*PiCamera) -> int:
+  if cam == 0: ret 0
+  ret (*cam).height
+
+fn camera_save_ppm(cam:*PiCamera, path:str) -> int:
+  if cam == 0 || path == 0: ret 0 - 1
+  h:*char = fopen(path, "wb")
+  if h == 0 as *char: ret 0 - 1
+  // PPM header
+  p1:str = "P6\n"
+  p2:str = _pi_itoa((*cam).width)
+  p3:str = " "
+  p4:str = _pi_itoa((*cam).height)
+  p5:str = "\n255\n"
+  fwrite(p1 as *char, 1, len(p1), h)
+  fwrite(p2 as *char, 1, len(p2), h)
+  fwrite(p3 as *char, 1, len(p3), h)
+  fwrite(p4 as *char, 1, len(p4), h)
+  fwrite(p5 as *char, 1, len(p5), h)
+  free(p2); free(p4)
+  // RGB data
+  fwrite((*cam).buf, 1, (*cam).buf_size, h)
+  fclose(h)
+  ret 0
+
+fn camera_close(cam:*PiCamera) -> int:
+  if cam == 0: ret 0 - 1
+  pi_camera_close((*cam).fd)
+  if (*cam).buf != 0: free((*cam).buf)
+  free(cam)
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// System info
+// ─────────────────────────────────────────────────────────────
+
+fn pi_model() -> str:
+  // Read /proc/device-tree/model
+  h:*char = fopen("/proc/device-tree/model", "rb")
+  if h == 0 as *char: ret "Unknown RPi"
+  buf:[char;128]
+  n:int = fread(&buf[0], 1, 127, h)
+  fclose(h)
+  buf[n] = 0 as char
+  p:*char = malloc(n + 1)
+  if p == 0: ret "Unknown RPi"
+  unsafe:
+    memcpy(p, &buf[0], n)
+  p[n] = 0 as char
+  ret p as str
+
+fn pi_cpu_temp_mc() -> int:
+  // Returns CPU temperature in millidegrees Celsius
+  h:*char = fopen("/sys/class/thermal/thermal_zone0/temp", "r")
+  if h == 0 as *char: ret 0 - 1
+  buf:[char;16]
+  n:int = fread(&buf[0], 1, 15, h)
+  fclose(h)
+  buf[n] = 0 as char
+  v:int = 0
+  i:int = 0
+  while i < n:
+    c:int = buf[i] as int
+    if c < 48 || c > 57: break
+    v = v * 10 + (c - 48)
+    i = i + 1
+  ret v
+
+fn pi_cpu_temp_c() -> int:
+  ret pi_cpu_temp_mc() / 1000
+
+fn pi_mem_mb() -> int:
+  // Read /proc/meminfo MemTotal
+  h:*char = fopen("/proc/meminfo", "r")
+  if h == 0 as *char: ret 0 - 1
+  buf:[char;64]
+  n:int = fread(&buf[0], 1, 63, h)
+  fclose(h)
+  // Parse "MemTotal:     xxxxxx kB"
+  i:int = 0
+  while i < n:
+    if buf[i] == 58 as char:  // ':'
+      i = i + 1
+      while i < n && (buf[i] == 32 as char || buf[i] == 9 as char): i = i + 1
+      v:int = 0
+      while i < n:
+        c:int = buf[i] as int
+        if c < 48 || c > 57: break
+        v = v * 10 + (c - 48)
+        i = i + 1
+      ret v / 1024  // kB → MB
+    i = i + 1
+  ret 0 - 1
+
+fn pi_delay(ms:int) -> int:
+  ret time.sleep_ms(ms)
+
+fn pi_delay_us(us:int) -> int:
+  ret time.sleep_us(us)
+
+// ─────────────────────────────────────────────────────────────
+// LED control (common pattern: GPIO 17 on breadboard)
+// ─────────────────────────────────────────────────────────────
+
+struct PiLed:
+  pin:int
+
+fn led_init(pin:int) -> *PiLed:
+  gpio_setup(pin, PI_OUTPUT)
+  p:*PiLed = (*PiLed)malloc(sizeof(PiLed))
+  if p == 0: ret 0 as *PiLed
+  (*p).pin = pin
+  ret p
+
+fn led_on(led:*PiLed) -> int:
+  if led == 0: ret 0 - 1
+  ret gpio_write((*led).pin, PI_HIGH)
+
+fn led_off(led:*PiLed) -> int:
+  if led == 0: ret 0 - 1
+  ret gpio_write((*led).pin, PI_LOW)
+
+fn led_toggle(led:*PiLed) -> int:
+  if led == 0: ret 0 - 1
+  ret gpio_toggle((*led).pin)
+
+fn led_blink(led:*PiLed, on_ms:int, off_ms:int, count:int) -> int:
+  if led == 0: ret 0 - 1
+  i:int = 0
+  while i < count:
+    led_on(led)
+    pi_delay(on_ms)
+    led_off(led)
+    pi_delay(off_ms)
+    i = i + 1
+  ret 0
+
+fn led_free(led:*PiLed) -> int:
+  if led == 0: ret 0 - 1
+  gpio_cleanup((*led).pin)
+  free(led)
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// Button input
+// ─────────────────────────────────────────────────────────────
+
+struct PiButton:
+  pin:int
+  last_state:int
+  debounce_ms:int
+  last_time:int
+
+fn button_init(pin:int) -> *PiButton:
+  gpio_setup(pin, PI_INPUT)
+  gpio_set_pull(pin, PI_PULL_UP)  // Active-low button
+  p:*PiButton = (*PiButton)malloc(sizeof(PiButton))
+  if p == 0: ret 0 as *PiButton
+  (*p).pin = pin
+  (*p).last_state = PI_HIGH
+  (*p).debounce_ms = 20
+  (*p).last_time = time.now_ms()
+  ret p
+
+fn button_read(btn:*PiButton) -> int:
+  if btn == 0: ret 0
+  ret gpio_read((*btn).pin)
+
+fn button_pressed(btn:*PiButton) -> int:
+  // Returns 1 on button press (with debounce)
+  if btn == 0: ret 0
+  now:int = time.now_ms()
+  if now - (*btn).last_time < (*btn).debounce_ms: ret 0
+  state:int = gpio_read((*btn).pin)
+  if state == PI_LOW && (*btn).last_state == PI_HIGH:
+    (*btn).last_state = PI_LOW
+    (*btn).last_time = now
+    ret 1
+  if state == PI_HIGH:
+    (*btn).last_state = PI_HIGH
+  ret 0
+
+fn button_free(btn:*PiButton) -> int:
+  if btn == 0: ret 0 - 1
+  gpio_cleanup((*btn).pin)
+  free(btn)
+  ret 0

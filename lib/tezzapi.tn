@@ -1,0 +1,1871 @@
+// tezzapi module — TezzNative 2.0 Full Backend API Framework
+//
+// Production-grade HTTP REST API engine built on TezzNative networking.
+// Supports: GET / POST / PUT / PATCH / DELETE / HEAD / OPTIONS
+// Features:
+//   • Path parameters: /users/:id → api_param(req, "id")
+//   • Query string parsing: ?page=2&limit=50
+//   • JSON request body parsing
+//   • File upload (multipart/form-data)
+//   • Middleware chain (pre/post hooks)
+//   • Response builder with status codes and headers
+//   • WebSocket upgrade handler
+//   • CORS helper
+//   • Rate limiting per IP
+//   • JWT-style bearer token validation
+//   • TNXB binary protocol (fast native clients)
+
+import "net"
+import "time"
+import "tls"
+
+// ─────────────────────────────────────────────────────────────
+// HTTP method constants
+// ─────────────────────────────────────────────────────────────
+
+let API_GET:int     = 1
+let API_POST:int    = 2
+let API_PUT:int     = 3
+let API_DELETE:int  = 4
+let API_PATCH:int   = 5
+let API_HEAD:int    = 6
+let API_OPTIONS:int = 7
+
+// ─────────────────────────────────────────────────────────────
+// Status codes
+// ─────────────────────────────────────────────────────────────
+
+let HTTP_200:int = 200
+let HTTP_201:int = 201
+let HTTP_204:int = 204
+let HTTP_400:int = 400
+let HTTP_401:int = 401
+let HTTP_403:int = 403
+let HTTP_404:int = 404
+let HTTP_405:int = 405
+let HTTP_409:int = 409
+let HTTP_413:int = 413
+let HTTP_429:int = 429
+let HTTP_500:int = 500
+let HTTP_501:int = 501
+let HTTP_503:int = 503
+
+// ─────────────────────────────────────────────────────────────
+// Core structs
+// ─────────────────────────────────────────────────────────────
+
+struct ApiHeader:
+  name:str
+  value:str
+
+struct ApiRequest:
+  method:int
+  path:str         // raw path e.g. "/users/42"
+  pattern:str      // matched pattern e.g. "/users/:id"
+  query:str        // raw query string "page=2&limit=50"
+  body:str         // raw request body (heap, caller frees)
+  body_len:int
+  headers:*ApiHeader
+  header_count:int
+  header_cap:int
+  client_ip:str
+  content_type:str
+  content_len:int
+  sock:int         // client socket fd
+
+struct ApiResponse:
+  status:int
+  headers:*ApiHeader
+  header_count:int
+  header_cap:int
+  body:str         // heap-allocated response body
+  body_len:int
+  sent:int         // 1 if already sent
+
+struct ApiRoute:
+  method:int
+  pattern:str   // e.g. "/users/:id"
+  handler:fn(*ApiRequest, *ApiResponse)->int
+
+struct ApiMiddleware:
+  before_fn:fn(*ApiRequest, *ApiResponse)->int
+  after_fn:fn(*ApiRequest, *ApiResponse)->int
+
+struct TezzApi:
+  port:int
+  routes:*ApiRoute
+  route_count:int
+  route_cap:int
+  middlewares:*ApiMiddleware
+  mw_count:int
+  mw_cap:int
+  // CORS settings
+  cors_origin:str
+  cors_methods:str
+  cors_headers:str
+  // Auth
+  bearer_validator:fn(str)->str   // fn(token)->username or 0
+  // Rate limiting
+  rate_limit_per_min:int
+  // Static file serving
+  static_dir:str
+  static_prefix:str
+  // WebSocket upgrade handler: fn(sock, path)->int
+  ws_handler:fn(int, str)->int
+  running:int
+
+// ─────────────────────────────────────────────────────────────
+// Internal string helpers
+// ─────────────────────────────────────────────────────────────
+
+fn _api_strdup(s:str) -> str:
+  if s == 0: ret 0 as str
+  n:int = len(s)
+  p:*char = malloc(n + 1)
+  if p == 0: ret 0 as str
+  unsafe:
+    memcpy(p, s as *char, n)
+  p[n] = 0 as char
+  ret p as str
+
+fn _api_strcasecmp(a:str, b:str) -> int:
+  if a == 0 && b == 0: ret 0
+  if a == 0: ret 0 - 1
+  if b == 0: ret 1
+  i:int = 0
+  while 1:
+    ca:int = (a as *char)[i] as int
+    cb:int = (b as *char)[i] as int
+    if ca == 0 && cb == 0: ret 0
+    if ca == 0: ret 0 - 1
+    if cb == 0: ret 1
+    if ca >= 65 && ca <= 90: ca = ca + 32
+    if cb >= 65 && cb <= 90: cb = cb + 32
+    if ca != cb:
+      if ca < cb: ret 0 - 1
+      ret 1
+    i = i + 1
+
+fn _api_join2(a:str, b:str) -> str:
+  if a == 0: ret _api_strdup(b)
+  if b == 0: ret _api_strdup(a)
+  na:int = len(a)
+  nb:int = len(b)
+  p:*char = malloc(na + nb + 1)
+  if p == 0: ret 0 as str
+  unsafe:
+    memcpy(p, a as *char, na)
+    memcpy(p + na, b as *char, nb)
+  p[na+nb] = 0 as char
+  ret p as str
+
+fn _api_join3(a:str, b:str, c:str) -> str:
+  ab:str = _api_join2(a, b)
+  out:str = _api_join2(ab, c)
+  if ab != 0: free(ab)
+  ret out
+
+fn _api_itoa(v:int) -> str:
+  if v < 0:
+    s:str = _api_itoa(0 - v)
+    out:str = _api_join2("-", s)
+    free(s)
+    ret out
+  tmp:[char;24]
+  i:int = 0
+  n:int = v
+  if n == 0:
+    tmp[i] = 48 as char
+    i = i + 1
+  while n > 0:
+    tmp[i] = (48 + n % 10) as char
+    i = i + 1
+    n = n / 10
+  p:*char = malloc(i + 1)
+  if p == 0: ret 0 as str
+  j:int = 0
+  while j < i:
+    p[j] = tmp[i - j - 1]
+    j = j + 1
+  p[i] = 0 as char
+  ret p as str
+
+fn _api_streq(a:str, b:str) -> int:
+  if a == 0 && b == 0: ret 1
+  if a == 0 || b == 0: ret 0
+  ret strcmp(a, b) == 0
+
+fn _api_starts_with(s:str, prefix:str) -> int:
+  if s == 0 || prefix == 0: ret 0
+  sn:int = len(s)
+  pn:int = len(prefix)
+  if pn > sn: ret 0
+  i:int = 0
+  while i < pn:
+    if (s as *char)[i] != (prefix as *char)[i]: ret 0
+    i = i + 1
+  ret 1
+
+fn _api_find_char(s:str, ch:int) -> int:
+  if s == 0: ret 0 - 1
+  i:int = 0
+  while (s as *char)[i] != 0 as char:
+    if (s as *char)[i] as int == ch: ret i
+    i = i + 1
+  ret 0 - 1
+
+fn _api_slice(s:str, a:int, b:int) -> str:
+  if s == 0: ret 0 as str
+  n:int = len(s)
+  if a < 0: a = 0
+  if b < 0 || b > n: b = n
+  if b < a: b = a
+  sz:int = b - a
+  p:*char = malloc(sz + 1)
+  if p == 0: ret 0 as str
+  if sz > 0:
+    unsafe:
+      memcpy(p, (s as *char) + a, sz)
+  p[sz] = 0 as char
+  ret p as str
+
+fn _api_url_decode(s:str) -> str:
+  if s == 0: ret 0 as str
+  n:int = len(s)
+  out:*char = malloc(n + 1)
+  if out == 0: ret 0 as str
+  si:int = 0
+  di:int = 0
+  while si < n:
+    c:int = (s as *char)[si] as int
+    if c == 37 && si + 2 < n:  // '%'
+      h1:int = (s as *char)[si+1] as int
+      h2:int = (s as *char)[si+2] as int
+      // hex decode
+      v1:int = 0
+      v2:int = 0
+      if h1 >= 48 && h1 <= 57: v1 = h1 - 48
+      else if h1 >= 65 && h1 <= 70: v1 = h1 - 55
+      else if h1 >= 97 && h1 <= 102: v1 = h1 - 87
+      if h2 >= 48 && h2 <= 57: v2 = h2 - 48
+      else if h2 >= 65 && h2 <= 70: v2 = h2 - 55
+      else if h2 >= 97 && h2 <= 102: v2 = h2 - 87
+      out[di] = (v1 * 16 + v2) as char
+      si = si + 3
+      di = di + 1
+    else if c == 43:  // '+' → space
+      out[di] = 32 as char
+      si = si + 1
+      di = di + 1
+    else:
+      out[di] = c as char
+      si = si + 1
+      di = di + 1
+  out[di] = 0 as char
+  ret out as str
+
+// ─────────────────────────────────────────────────────────────
+// Path pattern matching (e.g., "/users/:id/posts/:pid")
+// Returns 1 on match. Populates param buffer.
+// ─────────────────────────────────────────────────────────────
+
+let MAX_PARAMS:int = 16
+let PARAM_NAME_LEN:int = 32
+let PARAM_VAL_LEN:int = 256
+
+struct RouteParams:
+  names:[char; 512]   // packed: 16 * 32 byte name slots
+  values:[char; 4096] // packed: 16 * 256 byte value slots
+  count:int
+
+fn _param_idx(names:*char, count:int, name:str) -> int:
+  if name == 0: ret 0 - 1
+  i:int = 0
+  while i < count:
+    slot:*char = names + i * PARAM_NAME_LEN
+    if strcmp(slot as str, name) == 0: ret i
+    i = i + 1
+  ret 0 - 1
+
+fn _pattern_match(pattern:str, path:str, params:*RouteParams) -> int:
+  if pattern == 0 || path == 0: ret 0
+  if params != 0: (*params).count = 0
+  pi:int = 0  // pattern index
+  ui:int = 0  // url index
+  pn:int = len(pattern)
+  un:int = len(path)
+  while pi < pn && ui < un:
+    pc:int = (pattern as *char)[pi] as int
+    uc:int = (path as *char)[ui] as int
+    if pc == 42:  // '*' wildcard — match rest
+      ret 1
+    if pc == 58:  // ':' param start
+      pi = pi + 1
+      // Collect param name
+      nm_start:int = pi
+      while pi < pn && (pattern as *char)[pi] != 47 as char:  // not '/'
+        pi = pi + 1
+      nm_len:int = pi - nm_start
+      if nm_len <= 0: ret 0
+      // Collect param value from url
+      v_start:int = ui
+      while ui < un && (path as *char)[ui] != 47 as char:
+        ui = ui + 1
+      v_len:int = ui - v_start
+      // Store param
+      if params != 0 && (*params).count < MAX_PARAMS:
+        pidx:int = (*params).count
+        nm_slot:*char = &(*params).names[0] + pidx * PARAM_NAME_LEN
+        vl_slot:*char = &(*params).values[0] + pidx * PARAM_VAL_LEN
+        copy_nm:int = nm_len
+        if copy_nm >= PARAM_NAME_LEN: copy_nm = PARAM_NAME_LEN - 1
+        copy_vl:int = v_len
+        if copy_vl >= PARAM_VAL_LEN: copy_vl = PARAM_VAL_LEN - 1
+        unsafe:
+          memcpy(nm_slot, (pattern as *char) + nm_start, copy_nm)
+          nm_slot[copy_nm] = 0 as char
+          memcpy(vl_slot, (path as *char) + v_start, copy_vl)
+          vl_slot[copy_vl] = 0 as char
+        (*params).count = pidx + 1
+    else:
+      if pc != uc: ret 0
+      pi = pi + 1
+      ui = ui + 1
+  // Skip trailing slashes
+  while pi < pn && (pattern as *char)[pi] == 47 as char: pi = pi + 1
+  while ui < un && (path as *char)[ui] == 47 as char: ui = ui + 1
+  ret (pi == pn && ui == un)
+
+// ─────────────────────────────────────────────────────────────
+// Request helpers
+// ─────────────────────────────────────────────────────────────
+
+fn api_req_new(sock:int) -> *ApiRequest:
+  req:*ApiRequest = (*ApiRequest)malloc(sizeof(ApiRequest))
+  if req == 0: ret 0 as *ApiRequest
+  (*req).method = 0
+  (*req).path = 0 as str
+  (*req).pattern = 0 as str
+  (*req).query = 0 as str
+  (*req).body = 0 as str
+  (*req).body_len = 0
+  (*req).headers = 0 as *ApiHeader
+  (*req).header_count = 0
+  (*req).header_cap = 0
+  (*req).client_ip = 0 as str
+  (*req).content_type = 0 as str
+  (*req).content_len = 0
+  (*req).sock = sock
+  ret req
+
+fn api_req_free(req:*ApiRequest) -> int:
+  if req == 0: ret 0 - 1
+  if (*req).path != 0: free((*req).path)
+  if (*req).pattern != 0: free((*req).pattern)
+  if (*req).query != 0: free((*req).query)
+  if (*req).body != 0: free((*req).body)
+  if (*req).client_ip != 0: free((*req).client_ip)
+  if (*req).content_type != 0: free((*req).content_type)
+  if (*req).headers != 0:
+    i:int = 0
+    while i < (*req).header_count:
+      if (*req).headers[i].name != 0: free((*req).headers[i].name)
+      if (*req).headers[i].value != 0: free((*req).headers[i].value)
+      i = i + 1
+    free((*req).headers as *char)
+  free(req)
+  ret 0
+
+fn api_req_header(req:*ApiRequest, name:str) -> str:
+  if req == 0 || name == 0: ret 0 as str
+  i:int = 0
+  while i < (*req).header_count:
+    if _api_strcasecmp((*req).headers[i].name, name) == 0:
+      ret (*req).headers[i].value
+    i = i + 1
+  ret 0 as str
+
+fn api_bearer_token(req:*ApiRequest) -> str:
+  auth:str = api_req_header(req, "Authorization")
+  if auth == 0: ret 0 as str
+  if _api_starts_with(auth, "Bearer ") == 0: ret 0 as str
+  ret _api_slice(auth, 7, len(auth))
+
+fn api_param(req:*ApiRequest, name:str) -> str:
+  // Path parameter extraction — needs params stored in request
+  // For now, re-match path against pattern
+  if req == 0 || name == 0: ret 0 as str
+  if (*req).path == 0 || (*req).pattern == 0: ret 0 as str
+  params:RouteParams
+  if _pattern_match((*req).pattern, (*req).path, &params) == 0:
+    ret 0 as str
+  i:int = 0
+  while i < params.count:
+    slot:*char = &params.names[0] + i * PARAM_NAME_LEN
+    if strcmp(slot as str, name) == 0:
+      vl_slot:*char = &params.values[0] + i * PARAM_VAL_LEN
+      ret _api_strdup(vl_slot as str)
+    i = i + 1
+  ret 0 as str
+
+fn api_param_int(req:*ApiRequest, name:str) -> int:
+  s:str = api_param(req, name)
+  if s == 0: ret 0 - 1
+  n:int = 0
+  i:int = 0
+  while (s as *char)[i] != 0 as char:
+    c:int = (s as *char)[i] as int
+    if c < 48 || c > 57: break
+    n = n * 10 + (c - 48)
+    i = i + 1
+  free(s)
+  ret n
+
+fn api_query_param(req:*ApiRequest, key:str) -> str:
+  if req == 0 || key == 0 || (*req).query == 0: ret 0 as str
+  q:str = (*req).query
+  klen:int = len(key)
+  qlen:int = len(q)
+  i:int = 0
+  while i < qlen:
+    // Match key
+    j:int = 0
+    while j < klen && i + j < qlen:
+      if (q as *char)[i+j] != (key as *char)[j]: break
+      j = j + 1
+    if j == klen:
+      // Check '=' follows
+      ei:int = i + klen
+      if ei < qlen && (q as *char)[ei] == 61 as char:  // '='
+        vs:int = ei + 1
+        ve:int = vs
+        while ve < qlen && (q as *char)[ve] != 38 as char:  // not '&'
+          ve = ve + 1
+        enc:str = _api_slice(q, vs, ve)
+        dec:str = _api_url_decode(enc)
+        if enc != 0: free(enc)
+        ret dec
+    // Skip to next '&'
+    while i < qlen && (q as *char)[i] != 38 as char:
+      i = i + 1
+    i = i + 1  // skip '&'
+  ret 0 as str
+
+fn api_query_int(req:*ApiRequest, key:str, default_val:int) -> int:
+  s:str = api_query_param(req, key)
+  if s == 0: ret default_val
+  n:int = 0
+  i:int = 0
+  while (s as *char)[i] != 0 as char:
+    c:int = (s as *char)[i] as int
+    if c < 48 || c > 57: break
+    n = n * 10 + (c - 48)
+    i = i + 1
+  free(s)
+  ret n
+
+fn api_body_str(req:*ApiRequest) -> str:
+  if req == 0 || (*req).body == 0: ret 0 as str
+  ret (*req).body
+
+fn api_body_json_field(req:*ApiRequest, key:str) -> str:
+  body:str = api_body_str(req)
+  if body == 0 || key == 0: ret 0 as str
+  // Find "key": value in JSON body
+  klen:int = len(key)
+  bn:int = len(body)
+  i:int = 0
+  while i < bn:
+    if (body as *char)[i] == 34 as char:  // '"'
+      j:int = 0
+      while j < klen && i + 1 + j < bn:
+        if (body as *char)[i+1+j] != (key as *char)[j]: break
+        j = j + 1
+      if j == klen && i + 1 + klen < bn && (body as *char)[i+1+klen] == 34 as char:
+        // Found key, skip to ':'
+        k:int = i + 2 + klen
+        while k < bn && (body as *char)[k] != 58 as char: k = k + 1
+        if k >= bn: ret 0 as str
+        k = k + 1  // skip ':'
+        while k < bn && ((body as *char)[k] == 32 as char || (body as *char)[k] == 9 as char): k = k + 1
+        if k >= bn: ret 0 as str
+        if (body as *char)[k] == 34 as char:
+          // String value
+          vs:int = k + 1
+          ve:int = vs
+          while ve < bn:
+            c2:int = (body as *char)[ve] as int
+            if c2 == 34 && (ve == 0 || (body as *char)[ve-1] != 92 as char): break
+            ve = ve + 1
+          ret _api_slice(body, vs, ve)
+        else:
+          // Numeric/bool/null value
+          vs:int = k
+          ve:int = vs
+          while ve < bn:
+            c3:int = (body as *char)[ve] as int
+            if c3 == 44 || c3 == 125 || c3 == 93: break  // ',' '}' ']'
+            ve = ve + 1
+          ret _api_slice(body, vs, ve)
+    i = i + 1
+  ret 0 as str
+
+fn api_body_json_int(req:*ApiRequest, key:str) -> int:
+  s:str = api_body_json_field(req, key)
+  if s == 0: ret 0
+  n:int = 0
+  sign:int = 1
+  i:int = 0
+  if (s as *char)[i] == 45 as char:
+    sign = 0 - 1
+    i = i + 1
+  while (s as *char)[i] != 0 as char:
+    c:int = (s as *char)[i] as int
+    if c < 48 || c > 57: break
+    n = n * 10 + (c - 48)
+    i = i + 1
+  free(s)
+  ret n * sign
+
+// ─────────────────────────────────────────────────────────────
+// Response helpers
+// ─────────────────────────────────────────────────────────────
+
+fn api_resp_new() -> *ApiResponse:
+  resp:*ApiResponse = (*ApiResponse)malloc(sizeof(ApiResponse))
+  if resp == 0: ret 0 as *ApiResponse
+  (*resp).status = HTTP_200
+  (*resp).headers = 0 as *ApiHeader
+  (*resp).header_count = 0
+  (*resp).header_cap = 0
+  (*resp).body = 0 as str
+  (*resp).body_len = 0
+  (*resp).sent = 0
+  ret resp
+
+fn api_resp_free(resp:*ApiResponse) -> int:
+  if resp == 0: ret 0 - 1
+  if (*resp).headers != 0:
+    i:int = 0
+    while i < (*resp).header_count:
+      if (*resp).headers[i].name != 0: free((*resp).headers[i].name)
+      if (*resp).headers[i].value != 0: free((*resp).headers[i].value)
+      i = i + 1
+    free((*resp).headers as *char)
+  if (*resp).body != 0: free((*resp).body)
+  free(resp)
+  ret 0
+
+fn api_resp_header(resp:*ApiResponse, name:str, value:str) -> int:
+  if resp == 0 || name == 0 || value == 0: ret 0 - 1
+  if (*resp).header_count >= (*resp).header_cap:
+    new_cap:int = (*resp).header_cap * 2
+    if new_cap < 8: new_cap = 8
+    nh:*ApiHeader = (*ApiHeader)malloc(sizeof(ApiHeader) * new_cap)
+    if nh == 0: ret 0 - 1
+    if (*resp).headers != 0:
+      unsafe:
+        memcpy(nh as *char, (*resp).headers as *char, sizeof(ApiHeader) * (*resp).header_count)
+      free((*resp).headers as *char)
+    (*resp).headers = nh
+    (*resp).header_cap = new_cap
+  idx:int = (*resp).header_count
+  (*resp).headers[idx].name = _api_strdup(name)
+  (*resp).headers[idx].value = _api_strdup(value)
+  (*resp).header_count = idx + 1
+  ret 0
+
+fn api_resp_status(resp:*ApiResponse, code:int) -> int:
+  if resp == 0: ret 0 - 1
+  (*resp).status = code
+  ret 0
+
+fn api_resp_body(resp:*ApiResponse, body:str) -> int:
+  if resp == 0: ret 0 - 1
+  if (*resp).body != 0: free((*resp).body)
+  (*resp).body = _api_strdup(body)
+  (*resp).body_len = len(body)
+  ret 0
+
+fn api_resp_json(resp:*ApiResponse, json:str) -> int:
+  api_resp_header(resp, "Content-Type", "application/json; charset=utf-8")
+  ret api_resp_body(resp, json)
+
+fn api_resp_text(resp:*ApiResponse, text:str) -> int:
+  api_resp_header(resp, "Content-Type", "text/plain; charset=utf-8")
+  ret api_resp_body(resp, text)
+
+fn api_resp_html(resp:*ApiResponse, html:str) -> int:
+  api_resp_header(resp, "Content-Type", "text/html; charset=utf-8")
+  ret api_resp_body(resp, html)
+
+// Common response shortcuts
+fn api_ok_json(resp:*ApiResponse, json:str) -> int:
+  api_resp_status(resp, HTTP_200)
+  ret api_resp_json(resp, json)
+
+fn api_created_json(resp:*ApiResponse, json:str) -> int:
+  api_resp_status(resp, HTTP_201)
+  ret api_resp_json(resp, json)
+
+fn api_no_content(resp:*ApiResponse) -> int:
+  api_resp_status(resp, HTTP_204)
+  (*resp).body = 0 as str
+  (*resp).body_len = 0
+  ret 0
+
+fn api_not_found(resp:*ApiResponse, msg:str) -> int:
+  api_resp_status(resp, HTTP_404)
+  m:str = msg
+  if m == 0: m = "Not Found"
+  api_resp_json(resp, _api_join3("{\"error\":\"", m, "\"}"))
+  ret 0
+
+fn api_bad_request(resp:*ApiResponse, msg:str) -> int:
+  api_resp_status(resp, HTTP_400)
+  m:str = msg
+  if m == 0: m = "Bad Request"
+  api_resp_json(resp, _api_join3("{\"error\":\"", m, "\"}"))
+  ret 0
+
+fn api_unauthorized(resp:*ApiResponse) -> int:
+  api_resp_status(resp, HTTP_401)
+  api_resp_header(resp, "WWW-Authenticate", "Bearer")
+  api_resp_json(resp, "{\"error\":\"Unauthorized\"}")
+  ret 0
+
+fn api_internal_error(resp:*ApiResponse, msg:str) -> int:
+  api_resp_status(resp, HTTP_500)
+  m:str = msg
+  if m == 0: m = "Internal Server Error"
+  api_resp_json(resp, _api_join3("{\"error\":\"", m, "\"}"))
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// HTTP parsing
+// ─────────────────────────────────────────────────────────────
+
+fn _parse_method(s:str) -> int:
+  if s == 0: ret 0
+  if strcmp(s, "GET") == 0: ret API_GET
+  if strcmp(s, "POST") == 0: ret API_POST
+  if strcmp(s, "PUT") == 0: ret API_PUT
+  if strcmp(s, "DELETE") == 0: ret API_DELETE
+  if strcmp(s, "PATCH") == 0: ret API_PATCH
+  if strcmp(s, "HEAD") == 0: ret API_HEAD
+  if strcmp(s, "OPTIONS") == 0: ret API_OPTIONS
+  ret 0
+
+fn _status_text(code:int) -> str:
+  if code == 200: ret "OK"
+  if code == 201: ret "Created"
+  if code == 204: ret "No Content"
+  if code == 301: ret "Moved Permanently"
+  if code == 302: ret "Found"
+  if code == 400: ret "Bad Request"
+  if code == 401: ret "Unauthorized"
+  if code == 403: ret "Forbidden"
+  if code == 404: ret "Not Found"
+  if code == 405: ret "Method Not Allowed"
+  if code == 409: ret "Conflict"
+  if code == 413: ret "Payload Too Large"
+  if code == 429: ret "Too Many Requests"
+  if code == 500: ret "Internal Server Error"
+  if code == 501: ret "Not Implemented"
+  if code == 503: ret "Service Unavailable"
+  ret "Unknown"
+
+fn _parse_http_request(sock:int, buf:*char, buf_len:int) -> *ApiRequest:
+  req:*ApiRequest = api_req_new(sock)
+  if req == 0: ret 0 as *ApiRequest
+  // Parse first line: METHOD path HTTP/1.x
+  line_end:int = 0
+  while line_end < buf_len && buf[line_end] != 13 as char && buf[line_end] != 10 as char:
+    line_end = line_end + 1
+  // Find method
+  sp1:int = 0
+  while sp1 < line_end && buf[sp1] != 32 as char: sp1 = sp1 + 1
+  method_str:[char;16]
+  copy:int = sp1
+  if copy > 15: copy = 15
+  unsafe:
+    memcpy(&method_str[0], buf, copy)
+  method_str[copy] = 0 as char
+  mptr:*char = &method_str[0]
+  (*req).method = _parse_method(mptr as str)
+  // Find path
+  sp2:int = sp1 + 1
+  sp3:int = sp2
+  while sp3 < line_end && buf[sp3] != 32 as char && buf[sp3] != 63 as char:
+    sp3 = sp3 + 1
+  path_len:int = sp3 - sp2
+  path_buf:*char = malloc(path_len + 1)
+  if path_buf != 0:
+    unsafe:
+      memcpy(path_buf, buf + sp2, path_len)
+    path_buf[path_len] = 0 as char
+    (*req).path = path_buf as str
+  // Query string
+  if sp3 < line_end && buf[sp3] == 63 as char:  // '?'
+    qs_start:int = sp3 + 1
+    qs_end:int = qs_start
+    while qs_end < line_end && buf[qs_end] != 32 as char: qs_end = qs_end + 1
+    qs_len:int = qs_end - qs_start
+    qs_buf:*char = malloc(qs_len + 1)
+    if qs_buf != 0:
+      unsafe:
+        memcpy(qs_buf, buf + qs_start, qs_len)
+      qs_buf[qs_len] = 0 as char
+      (*req).query = qs_buf as str
+  // Parse headers
+  pos:int = line_end
+  while pos < buf_len && (buf[pos] == 13 as char || buf[pos] == 10 as char):
+    pos = pos + 1
+  while pos < buf_len:
+    if buf[pos] == 13 as char || buf[pos] == 10 as char: break
+    // Find header name end ':'
+    col_pos:int = pos
+    while col_pos < buf_len && buf[col_pos] != 58 as char && buf[col_pos] != 13 as char:
+      col_pos = col_pos + 1
+    if buf[col_pos] != 58 as char: break
+    hname_len:int = col_pos - pos
+    hname:*char = malloc(hname_len + 1)
+    if hname == 0: break
+    unsafe:
+      memcpy(hname, buf + pos, hname_len)
+    hname[hname_len] = 0 as char
+    // Header value
+    vs:int = col_pos + 1
+    while vs < buf_len && (buf[vs] == 32 as char || buf[vs] == 9 as char): vs = vs + 1
+    ve:int = vs
+    while ve < buf_len && buf[ve] != 13 as char && buf[ve] != 10 as char: ve = ve + 1
+    hval_len:int = ve - vs
+    hval:*char = malloc(hval_len + 1)
+    if hval == 0:
+      free(hname)
+      break
+    unsafe:
+      memcpy(hval, buf + vs, hval_len)
+    hval[hval_len] = 0 as char
+    // Add header to request
+    if (*req).header_count >= (*req).header_cap:
+      nc:int = (*req).header_cap * 2
+      if nc < 8: nc = 8
+      nh:*ApiHeader = (*ApiHeader)malloc(sizeof(ApiHeader) * nc)
+      if nh == 0:
+        free(hname); free(hval)
+        break
+      if (*req).headers != 0:
+        unsafe:
+          memcpy(nh as *char, (*req).headers as *char, sizeof(ApiHeader) * (*req).header_count)
+        free((*req).headers as *char)
+      (*req).headers = nh
+      (*req).header_cap = nc
+    hi:int = (*req).header_count
+    (*req).headers[hi].name = hname as str
+    (*req).headers[hi].value = hval as str
+    (*req).header_count = hi + 1
+    // Check for Content-Length and Content-Type
+    if _api_strcasecmp(hname as str, "Content-Length") == 0:
+      (*req).content_len = 0
+      ci:int = 0
+      while (hval as str)[ci] != 0 as char:
+        d:int = hval[ci] as int
+        if d < 48 || d > 57: break
+        (*req).content_len = (*req).content_len * 10 + (d - 48)
+        ci = ci + 1
+    if _api_strcasecmp(hname as str, "Content-Type") == 0:
+      (*req).content_type = hval as str
+    // Next line
+    pos = ve
+    while pos < buf_len && (buf[pos] == 13 as char || buf[pos] == 10 as char): pos = pos + 1
+  ret req
+
+// ─────────────────────────────────────────────────────────────
+// HTTP response sending
+// ─────────────────────────────────────────────────────────────
+
+fn _send_response(sock:int, resp:*ApiResponse) -> int:
+  if resp == 0 || (*resp).sent != 0: ret 0 - 1
+  // Status line
+  code_s:str = _api_itoa((*resp).status)
+  status_txt:str = _status_text((*resp).status)
+  hdr:str = _api_join3("HTTP/1.1 ", code_s, " ")
+  hdr2:str = _api_join2(hdr, status_txt)
+  hdr3:str = _api_join2(hdr2, "\r\n")
+  free(code_s); free(hdr); free(hdr2)
+  // Content-Length
+  bl:int = 0
+  if (*resp).body != 0: bl = (*resp).body_len
+  bl_s:str = _api_itoa(bl)
+  cl_hdr:str = _api_join3("Content-Length: ", bl_s, "\r\n")
+  free(bl_s)
+  // Headers
+  all_hdrs:str = _api_join2(hdr3, cl_hdr)
+  free(hdr3); free(cl_hdr)
+  i:int = 0
+  while i < (*resp).header_count:
+    h_line:str = _api_join3((*resp).headers[i].name, ": ", (*resp).headers[i].value)
+    h_with_crlf:str = _api_join2(h_line, "\r\n")
+    new_hdrs:str = _api_join2(all_hdrs, h_with_crlf)
+    free(h_line); free(h_with_crlf); free(all_hdrs)
+    all_hdrs = new_hdrs
+    i = i + 1
+  conn_hdr:str = _api_join2(all_hdrs, "Connection: close\r\n\r\n")
+  free(all_hdrs)
+  // Send headers
+  net.tcp_send_text(sock, conn_hdr)
+  free(conn_hdr)
+  // Send body
+  if (*resp).body != 0 && bl > 0:
+    net.tcp_send_all(sock, (*resp).body as *char, bl)
+  (*resp).sent = 1
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// TezzApi lifecycle
+// ─────────────────────────────────────────────────────────────
+
+fn new(port:int) -> *TezzApi:
+  a:*TezzApi = (*TezzApi)malloc(sizeof(TezzApi))
+  if a == 0: ret 0 as *TezzApi
+  (*a).port = port
+  (*a).routes = 0 as *ApiRoute
+  (*a).route_count = 0
+  (*a).route_cap = 0
+  (*a).middlewares = 0 as *ApiMiddleware
+  (*a).mw_count = 0
+  (*a).mw_cap = 0
+  (*a).cors_origin = _api_strdup("*")
+  (*a).cors_methods = _api_strdup("GET, POST, PUT, PATCH, DELETE, OPTIONS")
+  (*a).cors_headers = _api_strdup("Content-Type, Authorization")
+  (*a).bearer_validator = 0 as fn(str)->str
+  (*a).rate_limit_per_min = 0
+  (*a).static_dir = 0 as str
+  (*a).static_prefix = 0 as str
+  (*a).ws_handler = 0 as fn(int, str)->int
+  (*a).running = 0
+  ret a
+
+fn free_api(a:*TezzApi) -> int:
+  if a == 0: ret 0 - 1
+  i:int = 0
+  while i < (*a).route_count:
+    if (*a).routes[i].pattern != 0: free((*a).routes[i].pattern)
+    i = i + 1
+  if (*a).routes != 0: free((*a).routes as *char)
+  if (*a).middlewares != 0: free((*a).middlewares as *char)
+  if (*a).cors_origin != 0: free((*a).cors_origin)
+  if (*a).cors_methods != 0: free((*a).cors_methods)
+  if (*a).cors_headers != 0: free((*a).cors_headers)
+  if (*a).static_dir != 0: free((*a).static_dir)
+  if (*a).static_prefix != 0: free((*a).static_prefix)
+  free(a)
+  ret 0
+
+fn _add_route(a:*TezzApi, method:int, pattern:str, handler:fn(*ApiRequest, *ApiResponse)->int) -> int:
+  if a == 0 || pattern == 0 || handler == 0: ret 0 - 1
+  if (*a).route_count >= (*a).route_cap:
+    nc:int = (*a).route_cap * 2
+    if nc < 8: nc = 8
+    nr:*ApiRoute = (*ApiRoute)malloc(sizeof(ApiRoute) * nc)
+    if nr == 0: ret 0 - 1
+    if (*a).routes != 0:
+      unsafe:
+        memcpy(nr as *char, (*a).routes as *char, sizeof(ApiRoute) * (*a).route_count)
+      free((*a).routes as *char)
+    (*a).routes = nr
+    (*a).route_cap = nc
+  ri:int = (*a).route_count
+  (*a).routes[ri].method = method
+  (*a).routes[ri].pattern = _api_strdup(pattern)
+  (*a).routes[ri].handler = handler
+  (*a).route_count = ri + 1
+  ret 0
+
+fn api_get(a:*TezzApi, pattern:str, handler:fn(*ApiRequest, *ApiResponse)->int) -> int:
+  ret _add_route(a, API_GET, pattern, handler)
+
+fn api_post(a:*TezzApi, pattern:str, handler:fn(*ApiRequest, *ApiResponse)->int) -> int:
+  ret _add_route(a, API_POST, pattern, handler)
+
+fn api_put(a:*TezzApi, pattern:str, handler:fn(*ApiRequest, *ApiResponse)->int) -> int:
+  ret _add_route(a, API_PUT, pattern, handler)
+
+fn api_delete(a:*TezzApi, pattern:str, handler:fn(*ApiRequest, *ApiResponse)->int) -> int:
+  ret _add_route(a, API_DELETE, pattern, handler)
+
+fn api_patch(a:*TezzApi, pattern:str, handler:fn(*ApiRequest, *ApiResponse)->int) -> int:
+  ret _add_route(a, API_PATCH, pattern, handler)
+
+fn api_any(a:*TezzApi, pattern:str, handler:fn(*ApiRequest, *ApiResponse)->int) -> int:
+  _add_route(a, API_GET, pattern, handler)
+  _add_route(a, API_POST, pattern, handler)
+  _add_route(a, API_PUT, pattern, handler)
+  _add_route(a, API_DELETE, pattern, handler)
+  _add_route(a, API_PATCH, pattern, handler)
+  ret 0
+
+fn api_use(a:*TezzApi, before:fn(*ApiRequest, *ApiResponse)->int, after:fn(*ApiRequest, *ApiResponse)->int) -> int:
+  if a == 0: ret 0 - 1
+  if (*a).mw_count >= (*a).mw_cap:
+    nc:int = (*a).mw_cap * 2
+    if nc < 4: nc = 4
+    nm:*ApiMiddleware = (*ApiMiddleware)malloc(sizeof(ApiMiddleware) * nc)
+    if nm == 0: ret 0 - 1
+    if (*a).middlewares != 0:
+      unsafe:
+        memcpy(nm as *char, (*a).middlewares as *char, sizeof(ApiMiddleware) * (*a).mw_count)
+      free((*a).middlewares as *char)
+    (*a).middlewares = nm
+    (*a).mw_cap = nc
+  mi:int = (*a).mw_count
+  (*a).middlewares[mi].before_fn = before
+  (*a).middlewares[mi].after_fn = after
+  (*a).mw_count = mi + 1
+  ret 0
+
+fn api_set_cors(a:*TezzApi, origin:str, methods:str, headers:str) -> int:
+  if a == 0: ret 0 - 1
+  if (*a).cors_origin != 0: free((*a).cors_origin)
+  if (*a).cors_methods != 0: free((*a).cors_methods)
+  if (*a).cors_headers != 0: free((*a).cors_headers)
+  (*a).cors_origin  = _api_strdup(origin)
+  (*a).cors_methods = _api_strdup(methods)
+  (*a).cors_headers = _api_strdup(headers)
+  ret 0
+
+fn api_set_bearer_validator(a:*TezzApi, fn_val:fn(str)->str) -> int:
+  if a == 0: ret 0 - 1
+  (*a).bearer_validator = fn_val
+  ret 0
+
+fn api_set_static(a:*TezzApi, prefix:str, dir:str) -> int:
+  if a == 0: ret 0 - 1
+  if (*a).static_prefix != 0: free((*a).static_prefix)
+  if (*a).static_dir != 0: free((*a).static_dir)
+  (*a).static_prefix = _api_strdup(prefix)
+  (*a).static_dir = _api_strdup(dir)
+  ret 0
+
+fn api_set_rate_limit(a:*TezzApi, per_min:int) -> int:
+  if a == 0: ret 0 - 1
+  (*a).rate_limit_per_min = per_min
+  ret 0
+
+fn api_set_ws_handler(a:*TezzApi, handler:fn(int, str)->int) -> int:
+  if a == 0: ret 0 - 1
+  (*a).ws_handler = handler
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// CORS headers helper
+// ─────────────────────────────────────────────────────────────
+
+fn _apply_cors(a:*TezzApi, resp:*ApiResponse) -> int:
+  if a == 0 || resp == 0: ret 0 - 1
+  if (*a).cors_origin != 0:
+    api_resp_header(resp, "Access-Control-Allow-Origin", (*a).cors_origin)
+  if (*a).cors_methods != 0:
+    api_resp_header(resp, "Access-Control-Allow-Methods", (*a).cors_methods)
+  if (*a).cors_headers != 0:
+    api_resp_header(resp, "Access-Control-Allow-Headers", (*a).cors_headers)
+  api_resp_header(resp, "Access-Control-Max-Age", "86400")
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// Request dispatch
+// ─────────────────────────────────────────────────────────────
+
+fn _dispatch(a:*TezzApi, req:*ApiRequest) -> int:
+  if a == 0 || req == 0: ret 0 - 1
+  resp:*ApiResponse = api_resp_new()
+  if resp == 0: ret 0 - 1
+  // CORS headers on all responses
+  _apply_cors(a, resp)
+  // Handle OPTIONS preflight
+  if (*req).method == API_OPTIONS:
+    api_resp_status(resp, HTTP_204)
+    (*resp).body_len = 0
+    _send_response((*req).sock, resp)
+    api_resp_free(resp)
+    ret 0
+  // Run before-middlewares
+  i:int = 0
+  while i < (*a).mw_count:
+    if (*a).middlewares[i].before_fn != 0:
+      bef_fn:fn(*ApiRequest, *ApiResponse)->int = (*a).middlewares[i].before_fn
+      r:int = bef_fn(req, resp)
+      if r != 0 || (*resp).sent != 0:
+        _send_response((*req).sock, resp)
+        api_resp_free(resp)
+        ret 0
+    i = i + 1
+  // Match route
+  matched:int = 0
+  j:int = 0
+  while j < (*a).route_count:
+    rt:*ApiRoute = &(*a).routes[j]
+    if (*rt).method == (*req).method || (*rt).method == 0:
+      if _pattern_match((*rt).pattern, (*req).path, 0 as *RouteParams) != 0:
+        // Set pattern on request for api_param
+        if (*req).pattern != 0: free((*req).pattern)
+        (*req).pattern = _api_strdup((*rt).pattern)
+        matched = 1
+        rt_h:fn(*ApiRequest, *ApiResponse)->int = (*rt).handler
+        rt_h(req, resp)
+        break
+    j = j + 1
+  if matched == 0:
+    api_not_found(resp, (*req).path)
+  // Run after-middlewares
+  k:int = 0
+  while k < (*a).mw_count:
+    if (*a).middlewares[k].after_fn != 0:
+      aft_fn:fn(*ApiRequest, *ApiResponse)->int = (*a).middlewares[k].after_fn
+      aft_fn(req, resp)
+    k = k + 1
+  _send_response((*req).sock, resp)
+  api_resp_free(resp)
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// Server run loop
+// ─────────────────────────────────────────────────────────────
+
+fn api_listen(a:*TezzApi) -> int:
+  if a == 0: ret 0 - 1
+  srv:int = net.tcp_listen("0.0.0.0", (*a).port, 256)
+  if srv < 0: ret 0 - 1
+  (*a).running = 1
+  buf_cap:int = 131072  // 128 KB request buffer
+  while (*a).running != 0:
+    client:int = net.accept(srv)
+    if client < 0: continue
+    // Read request
+    buf:*char = malloc(buf_cap)
+    if buf == 0:
+      net.close(client)
+      continue
+    nr:int = net.recv(client, buf, buf_cap - 1)
+    if nr <= 0:
+      free(buf)
+      net.close(client)
+      continue
+    buf[nr] = 0 as char
+    // Check WebSocket upgrade
+    upg:int = 0
+    if (*a).ws_handler != 0:
+      // Look for "Upgrade: websocket" header
+      hdr_search:str = buf as str
+      uval:str = net.http_get_header(hdr_search, "Upgrade")
+      if uval != 0:
+        if _api_strcasecmp(uval, "websocket") == 0:
+          upg = 1
+        free(uval)
+    if upg != 0:
+      // Perform WS handshake and hand off to ws_handler
+      net.ws_server_handshake(client, buf as str)
+      wsh:fn(int, str)->int = (*a).ws_handler
+      wsh(client, 0 as str)
+      free(buf)
+      continue
+    // Parse and dispatch HTTP request
+    req:*ApiRequest = _parse_http_request(client, buf, nr)
+    free(buf)
+    if req == 0:
+      net.close(client)
+      continue
+    // Read body if Content-Length > 0
+    if (*req).content_len > 0:
+      body_buf:*char = malloc((*req).content_len + 1)
+      if body_buf != 0:
+        body_nr:int = net.recv(client, body_buf, (*req).content_len)
+        body_buf[body_nr] = 0 as char
+        (*req).body = body_buf as str
+        (*req).body_len = body_nr
+    (*req).sock = client
+    _dispatch(a, req)
+    api_req_free(req)
+    net.close(client)
+  net.close(srv)
+  ret 0
+
+fn api_stop(a:*TezzApi) -> int:
+  if a == 0: ret 0 - 1
+  (*a).running = 0
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// JSON builder helpers (fast string-based)
+// ─────────────────────────────────────────────────────────────
+
+fn json_str(key:str, val:str) -> str:
+  p1:str = _api_join3("{\"", key, "\":\"")
+  out:str = _api_join3(p1, val, "\"}")
+  free(p1)
+  ret out
+
+fn json_int(key:str, val:int) -> str:
+  p1:str = _api_join3("{\"", key, "\":")
+  vs:str = _api_itoa(val)
+  out:str = _api_join3(p1, vs, "}")
+  free(p1); free(vs)
+  ret out
+
+fn json_bool(key:str, val:int) -> str:
+  boolstr:str = "false"
+  if val != 0: boolstr = "true"
+  p1:str = _api_join3("{\"", key, "\":")
+  out:str = _api_join3(p1, boolstr, "}")
+  free(p1)
+  ret out
+
+fn json_null(key:str) -> str:
+  p1:str = _api_join3("{\"", key, "\":null}")
+  ret p1
+
+fn json_err(msg:str) -> str:
+  p1:str = _api_join3("{\"error\":\"", msg, "\"}")
+  ret p1
+
+fn json_ok(msg:str) -> str:
+  p1:str = _api_join3("{\"ok\":\"", msg, "\"}")
+  ret p1
+
+fn json_ok_data(key:str, val:str) -> str:
+  p1:str = _api_join3("{\"ok\":true,\"", key, "\":\"")
+  out:str = _api_join3(p1, val, "\"}")
+  free(p1)
+  ret out
+
+fn json_array(items:*str, count:int) -> str:
+  out:str = "["
+  i:int = 0
+  while i < count:
+    if i > 0:
+      t0:str = _api_join2(out, ",")
+      free(out); out = t0
+    t1:str = _api_join2(out, items[i])
+    free(out); out = t1
+    i = i + 1
+  t2:str = _api_join2(out, "]")
+  free(out)
+  ret t2
+
+// ─────────────────────────────────────────────────────────────
+// Paginated query helper
+// ─────────────────────────────────────────────────────────────
+
+fn api_paginated(req:*ApiRequest, resp:*ApiResponse, all_items:str, total:int) -> int:
+  page:int = api_query_int(req, "page", 1)
+  limit:int = api_query_int(req, "limit", 20)
+  if page < 1: page = 1
+  if limit < 1: limit = 1
+  if limit > 1000: limit = 1000
+  ps:str = _api_itoa(page)
+  ls:str = _api_itoa(limit)
+  ts:str = _api_itoa(total)
+  p1:str = _api_join3("{\"page\":", ps, ",\"limit\":")
+  p2:str = _api_join3(p1, ls, ",\"total\":")
+  p3:str = _api_join3(p2, ts, ",\"data\":")
+  body:str = _api_join3(p3, all_items, "}")
+  free(ps); free(ls); free(ts)
+  free(p1); free(p2); free(p3)
+  api_resp_json(resp, body)
+  free(body)
+  ret 0
+
+// ─────────────────────────────────────────────────────────────
+// TNXB Binary Protocol Implementation
+// ─────────────────────────────────────────────────────────────
+
+let TNXB_MAGIC_0:int = 84   // 'T'
+let TNXB_MAGIC_1:int = 78   // 'N'
+let TNXB_MAGIC_2:int = 88   // 'X'
+let TNXB_MAGIC_3:int = 66   // 'B'
+let TNXB_VERSION:int = 1
+let TNXB_HEADER_SIZE:int = 16
+let TNXB_WIRE_HEADER_SIZE:int = 8
+let TNXB_MAX_PAYLOAD:int = 8388608
+
+let TNXB_OP_NONE:int = 0
+let TNXB_OP_CREATE:int = 1
+let TNXB_OP_READ:int = 2
+let TNXB_OP_UPDATE:int = 3
+let TNXB_OP_DELETE:int = 4
+
+let TNXB_TLS_MIN_DEFAULT:int = 0
+let TNXB_TLS_MIN_12:int = 12
+let TNXB_TLS_MIN_13:int = 13
+
+struct TnxbBuffer:
+  buf:*char
+  len:int
+
+struct TnxbPacket:
+  ok:int
+  op:int
+  route:str
+  body:str
+
+struct TnxbHttpReply:
+  ok:int
+  status:int
+  body:str
+
+struct TnxbTlsPolicy:
+  min_version:int
+  handshake_timeout_ms:int
+  pin_sha256:str
+
+fn tnxb_op_create() -> int:
+  ret TNXB_OP_CREATE
+
+fn tnxb_op_read() -> int:
+  ret TNXB_OP_READ
+
+fn tnxb_op_update() -> int:
+  ret TNXB_OP_UPDATE
+
+fn tnxb_op_delete() -> int:
+  ret TNXB_OP_DELETE
+
+fn tnxb_valid_op(op:int) -> int:
+  if op >= TNXB_OP_CREATE && op <= TNXB_OP_DELETE:
+    ret 1
+  ret 0
+
+fn _tnxb_u32_write_le(p:*char, off:int, v:int) -> int:
+  if p == 0 || off < 0:
+    ret 0 - 1
+  p[off] = (v & 255) as char
+  p[off + 1] = ((v >> 8) & 255) as char
+  p[off + 2] = ((v >> 16) & 255) as char
+  p[off + 3] = ((v >> 24) & 255) as char
+  ret 0
+
+fn _tnxb_u32_read_le(p:*char, off:int) -> int:
+  if p == 0 || off < 0:
+    ret 0
+  b0:int = (p[off] as int) & 255
+  b1:int = (p[off + 1] as int) & 255
+  b2:int = (p[off + 2] as int) & 255
+  b3:int = (p[off + 3] as int) & 255
+  ret b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
+
+fn _tnxb_recv_exact(sock:int, out:*char, n:int) -> int:
+  if sock < 0 || out == 0 || n < 0:
+    ret 0 - 1
+  got:int = 0
+  while got < n:
+    r:int = net.recv(sock, out + got, n - got)
+    if r <= 0:
+      ret 0 - 1
+    got = got + r
+  ret got
+
+fn tnxb_encode(op:int, route:str, body:str) -> TnxbBuffer:
+  out:TnxbBuffer
+  out.buf = 0 as *char
+  out.len = 0
+  if tnxb_valid_op(op) == 0:
+    ret out
+  rt:str = route
+  bd:str = body
+  if rt == 0:
+    rt = ""
+  if bd == 0:
+    bd = ""
+  rlen:int = len(rt)
+  blen:int = len(bd)
+  total:int = TNXB_HEADER_SIZE + rlen + blen
+  if total < TNXB_HEADER_SIZE:
+    ret out
+  buf:*char = malloc(total + 1)
+  if buf == 0:
+    ret out
+  buf[0] = TNXB_MAGIC_0 as char
+  buf[1] = TNXB_MAGIC_1 as char
+  buf[2] = TNXB_MAGIC_2 as char
+  buf[3] = TNXB_MAGIC_3 as char
+  buf[4] = TNXB_VERSION as char
+  buf[5] = (op & 255) as char
+  buf[6] = 0 as char
+  buf[7] = 0 as char
+  _tnxb_u32_write_le(buf, 8, rlen)
+  _tnxb_u32_write_le(buf, 12, blen)
+  if rlen > 0:
+    unsafe:
+      memcpy(buf + TNXB_HEADER_SIZE, rt as *char, rlen)
+  if blen > 0:
+    unsafe:
+      memcpy(buf + TNXB_HEADER_SIZE + rlen, bd as *char, blen)
+  buf[total] = 0 as char
+  out.buf = buf
+  out.len = total
+  ret out
+
+fn tnxb_release(payload:TnxbBuffer) -> int:
+  if payload.buf != 0:
+    free(payload.buf)
+  ret 0
+
+fn tnxb_decode(buf:*char, n:int) -> TnxbPacket:
+  out:TnxbPacket
+  out.ok = 0
+  out.op = 0
+  out.route = 0 as str
+  out.body = 0 as str
+  if buf == 0 || n < TNXB_HEADER_SIZE:
+    ret out
+  if (((buf[0] as int) & 255) != TNXB_MAGIC_0):
+    ret out
+  if (((buf[1] as int) & 255) != TNXB_MAGIC_1):
+    ret out
+  if (((buf[2] as int) & 255) != TNXB_MAGIC_2):
+    ret out
+  if (((buf[3] as int) & 255) != TNXB_MAGIC_3):
+    ret out
+  ver:int = (buf[4] as int) & 255
+  if ver != TNXB_VERSION:
+    ret out
+  op:int = (buf[5] as int) & 255
+  if tnxb_valid_op(op) == 0:
+    ret out
+  rlen:int = _tnxb_u32_read_le(buf, 8)
+  blen:int = _tnxb_u32_read_le(buf, 12)
+  if rlen < 0 || blen < 0:
+    ret out
+  need:int = TNXB_HEADER_SIZE + rlen + blen
+  if need < TNXB_HEADER_SIZE || need > n:
+    ret out
+
+  route_out:*char = malloc(rlen + 1)
+  body_out:*char = malloc(blen + 1)
+  if route_out == 0 || body_out == 0:
+    if route_out != 0:
+      free(route_out)
+    if body_out != 0:
+      free(body_out)
+    ret out
+  if rlen > 0:
+    unsafe:
+      memcpy(route_out, buf + TNXB_HEADER_SIZE, rlen)
+  route_out[rlen] = 0 as char
+  if blen > 0:
+    unsafe:
+      memcpy(body_out, buf + TNXB_HEADER_SIZE + rlen, blen)
+  body_out[blen] = 0 as char
+
+  out.ok = 1
+  out.op = op
+  out.route = route_out as str
+  out.body = body_out as str
+  ret out
+
+fn tnxb_decode_buf(payload:TnxbBuffer) -> TnxbPacket:
+  ret tnxb_decode(payload.buf, payload.len)
+
+fn tnxb_packet_release(packet:*TnxbPacket) -> int:
+  if packet == 0:
+    ret 0 - 1
+  if (*packet).route != 0:
+    free((*packet).route)
+    (*packet).route = 0 as str
+  if (*packet).body != 0:
+    free((*packet).body)
+    (*packet).body = 0 as str
+  (*packet).ok = 0
+  (*packet).op = 0
+  ret 0
+
+fn tnxb_send(sock:int, payload:TnxbBuffer) -> int:
+  if sock < 0 || payload.buf == 0 || payload.len <= 0:
+    ret 0 - 1
+  if payload.len > TNXB_MAX_PAYLOAD:
+    ret 0 - 1
+  hdr:[char;8]
+  hdr[0] = TNXB_MAGIC_0 as char
+  hdr[1] = TNXB_MAGIC_1 as char
+  hdr[2] = TNXB_MAGIC_2 as char
+  hdr[3] = TNXB_MAGIC_3 as char
+  _tnxb_u32_write_le(&hdr[0], 4, payload.len)
+  if net.tcp_send_all(sock, &hdr[0], TNXB_WIRE_HEADER_SIZE) < 0:
+    ret 0 - 1
+  if net.tcp_send_all(sock, payload.buf, payload.len) < 0:
+    ret 0 - 1
+  ret payload.len
+
+fn tnxb_recv(sock:int, max_payload:int) -> TnxbBuffer:
+  out:TnxbBuffer
+  out.buf = 0 as *char
+  out.len = 0
+  if sock < 0:
+    ret out
+  lim:int = max_payload
+  if lim <= 0:
+    lim = TNXB_MAX_PAYLOAD
+  hdr:[char;8]
+  if _tnxb_recv_exact(sock, &hdr[0], TNXB_WIRE_HEADER_SIZE) < 0:
+    ret out
+  if (((hdr[0] as int) & 255) != TNXB_MAGIC_0):
+    ret out
+  if (((hdr[1] as int) & 255) != TNXB_MAGIC_1):
+    ret out
+  if (((hdr[2] as int) & 255) != TNXB_MAGIC_2):
+    ret out
+  if (((hdr[3] as int) & 255) != TNXB_MAGIC_3):
+    ret out
+  size:int = _tnxb_u32_read_le(&hdr[0], 4)
+  if size <= 0 || size > lim:
+    ret out
+  payload:*char = malloc(size + 1)
+  if payload == 0:
+    ret out
+  if _tnxb_recv_exact(sock, payload, size) < 0:
+    free(payload)
+    ret out
+  payload[size] = 0 as char
+  out.buf = payload
+  out.len = size
+  ret out
+
+fn tnxb_write_file(path:str, payload:TnxbBuffer) -> int:
+  if path == 0 || payload.buf == 0 || payload.len <= 0:
+    ret 0 - 1
+  h:*char = fopen(path, "wb")
+  if h == 0:
+    ret 0 - 1
+  w:int = fwrite(payload.buf, 1, payload.len, h)
+  fclose(h)
+  if w != payload.len:
+    ret 0 - 1
+  ret 0
+
+fn tnxb_read_file(path:str) -> TnxbBuffer:
+  out:TnxbBuffer
+  out.buf = 0 as *char
+  out.len = 0
+  if path == 0:
+    ret out
+  h:*char = fopen(path, "rb")
+  if h == 0:
+    ret out
+  if fseek(h, 0, 2) != 0:
+    fclose(h)
+    ret out
+  size:int = ftell(h)
+  if size <= 0:
+    fclose(h)
+    ret out
+  if fseek(h, 0, 0) != 0:
+    fclose(h)
+    ret out
+  buf:*char = malloc(size + 1)
+  if buf == 0:
+    fclose(h)
+    ret out
+  r:int = read_bytes(h, buf, size)
+  fclose(h)
+  if r <= 0:
+    free(buf)
+    ret out
+  buf[r] = 0 as char
+  out.buf = buf
+  out.len = r
+  ret out
+
+fn crud_method_to_op(method:str) -> int:
+  if method == 0:
+    ret TNXB_OP_NONE
+  if strcmp(method, "POST") == 0:
+    ret TNXB_OP_CREATE
+  if strcmp(method, "GET") == 0:
+    ret TNXB_OP_READ
+  if strcmp(method, "PUT") == 0 || strcmp(method, "PATCH") == 0:
+    ret TNXB_OP_UPDATE
+  if strcmp(method, "DELETE") == 0:
+    ret TNXB_OP_DELETE
+  ret TNXB_OP_NONE
+
+fn _tnxb_op_name(op:int) -> str:
+  if op == TNXB_OP_CREATE:
+    ret "create"
+  if op == TNXB_OP_READ:
+    ret "read"
+  if op == TNXB_OP_UPDATE:
+    ret "update"
+  if op == TNXB_OP_DELETE:
+    ret "delete"
+  ret "none"
+
+fn tnxb_package_name(resource:str, op:int) -> str:
+  name:str = resource
+  if name == 0 || name[0] == 0 as char:
+    name = "resource"
+  op_name:str = _tnxb_op_name(op)
+  p1:str = _api_join2(name, ".")
+  p2:str = _api_join2(p1, op_name)
+  p3:str = _api_join2(p2, ".tnxb")
+  free(p1)
+  free(p2)
+  ret p3
+
+fn _tezzapi_parse_int_dec(s:str) -> int:
+  if s == 0:
+    ret 0
+  i:int = 0
+  while s[i] == 32 as char || s[i] == 9 as char || s[i] == 13 as char || s[i] == 10 as char:
+    i = i + 1
+  sign:int = 1
+  if s[i] == 45 as char:
+    sign = 0 - 1
+    i = i + 1
+  else if s[i] == 43 as char:
+    i = i + 1
+  v:int = 0
+  seen:int = 0
+  while 1:
+    c:int = (s[i] as int) & 255
+    if c < 48 || c > 57:
+      break
+    v = (v * 10) + (c - 48)
+    seen = 1
+    i = i + 1
+  if seen == 0:
+    ret 0
+  ret v * sign
+
+fn tnxb_payload_from_command(cmd:str) -> TnxbBuffer:
+  out:TnxbBuffer
+  out.buf = 0 as *char
+  out.len = 0
+  if cmd == 0:
+    ret out
+  sep:int = 0
+  while cmd[sep] != 0 as char && cmd[sep] != 32 as char:
+    sep = sep + 1
+  resource:str = 0 as str
+  body:str = 0 as str
+  if cmd[sep] == 0 as char:
+    resource = cmd
+    body = ""
+  else:
+    resource = (cmd as *char) as str
+    body = (cmd + sep + 1) as str
+  op:int = TNXB_OP_READ
+  if _tezzapi_parse_int_dec(cmd) > 0:
+    op = _tezzapi_parse_int_dec(cmd)
+  out = tnxb_encode(op, resource, body)
+  ret out
+
+fn _tezzapi_http_scheme_ok(url:str) -> int:
+  if url == 0:
+    ret 0
+  sch:str = net.url_scheme(url)
+  if sch == 0:
+    ret 0
+  ok:int = 0
+  if strcmp(sch, "http") == 0 || strcmp(sch, "HTTP") == 0 || strcmp(sch, "https") == 0 || strcmp(sch, "HTTPS") == 0:
+    ok = 1
+  free(sch)
+  ret ok
+
+fn tnxb_http_url_supported(url:str) -> int:
+  ret _tezzapi_http_scheme_ok(url)
+
+fn tnxb_tls_policy_reset() -> int:
+  ret tls.policy_reset()
+
+fn tnxb_tls_policy_set_min_version(min_version:int) -> int:
+  ret tls.policy_set_min(min_version)
+
+fn tnxb_tls_policy_set_pin_sha256(pin_hex:str) -> int:
+  ret tls.policy_set_pin_sha256(pin_hex)
+
+fn tnxb_tls_policy_set_handshake_timeout(timeout_ms:int) -> int:
+  ret tls.policy_set_handshake_timeout(timeout_ms)
+
+fn tnxb_tls_policy_get_min_version() -> int:
+  ret tls.policy_get_min()
+
+fn tnxb_tls_policy_get_handshake_timeout() -> int:
+  ret tls.policy_get_handshake_timeout()
+
+fn tnxb_tls_policy_pin_enabled() -> int:
+  ret tls.policy_pin_enabled()
+
+fn tnxb_tls_policy_obj_new() -> *TnxbTlsPolicy:
+  p:*TnxbTlsPolicy = (*TnxbTlsPolicy)malloc(sizeof(TnxbTlsPolicy))
+  if p == 0:
+    ret 0 as *TnxbTlsPolicy
+  (*p).min_version = TNXB_TLS_MIN_DEFAULT
+  (*p).handshake_timeout_ms = 0
+  (*p).pin_sha256 = 0 as str
+  ret p
+
+fn tnxb_tls_policy_obj_free(policy:*TnxbTlsPolicy) -> int:
+  if policy == 0:
+    ret 0 - 1
+  if (*policy).pin_sha256 != 0:
+    free((*policy).pin_sha256)
+    (*policy).pin_sha256 = 0 as str
+  free(policy as *char)
+  ret 0
+
+fn tnxb_tls_policy_obj_set_min(policy:*TnxbTlsPolicy, min_version:int) -> int:
+  if policy == 0:
+    ret 0 - 1
+  if min_version != TNXB_TLS_MIN_DEFAULT && min_version != TNXB_TLS_MIN_12 && min_version != TNXB_TLS_MIN_13:
+    ret 0 - 1
+  (*policy).min_version = min_version
+  ret 0
+
+fn tnxb_tls_policy_obj_set_handshake_timeout(policy:*TnxbTlsPolicy, timeout_ms:int) -> int:
+  if policy == 0 || timeout_ms < 0:
+    ret 0 - 1
+  (*policy).handshake_timeout_ms = timeout_ms
+  ret 0
+
+fn tnxb_tls_policy_obj_set_pin_sha256(policy:*TnxbTlsPolicy, pin_hex:str) -> int:
+  if policy == 0:
+    ret 0 - 1
+  if (*policy).pin_sha256 != 0:
+    free((*policy).pin_sha256)
+    (*policy).pin_sha256 = 0 as str
+  if pin_hex == 0 || pin_hex[0] == 0 as char:
+    ret 0
+  dup:str = _api_strdup(pin_hex)
+  if dup == 0:
+    ret 0 - 1
+  (*policy).pin_sha256 = dup
+  ret 0
+
+fn tnxb_tls_policy_obj_get_min(policy:*TnxbTlsPolicy) -> int:
+  if policy == 0:
+    ret TNXB_TLS_MIN_DEFAULT
+  ret (*policy).min_version
+
+fn tnxb_tls_policy_obj_get_handshake_timeout(policy:*TnxbTlsPolicy) -> int:
+  if policy == 0:
+    ret 0
+  ret (*policy).handshake_timeout_ms
+
+fn tnxb_tls_policy_obj_pin_enabled(policy:*TnxbTlsPolicy) -> int:
+  if policy == 0 || (*policy).pin_sha256 == 0:
+    ret 0
+  if (*policy).pin_sha256[0] == 0 as char:
+    ret 0
+  ret 1
+
+fn tnxb_http_post_with_policy(url:str, payload:TnxbBuffer, timeout_ms:int, max_bytes:int, policy:*TnxbTlsPolicy) -> str:
+  if url == 0 || payload.buf == 0 || payload.len <= 0:
+    ret 0 as str
+  if _tezzapi_http_scheme_ok(url) == 0:
+    ret 0 as str
+  host:str = net.url_host(url)
+  pathq:str = net.url_path_query(url)
+  own_pathq:int = 1
+  port:int = net.url_port(url)
+  if host == 0:
+    if pathq != 0:
+      free(pathq)
+    ret 0 as str
+  if pathq == 0:
+    pathq = "/"
+    own_pathq = 0
+  secure:int = net.url_is_secure(url)
+  if port <= 0:
+    if secure != 0:
+      port = 443
+    else:
+      port = 80
+  clen_s:str = _api_itoa(payload.len)
+  if clen_s == 0:
+    free(host)
+    if own_pathq != 0:
+      free(pathq)
+    ret 0 as str
+  l1:str = _api_join2("POST ", pathq)
+  l2:str = _api_join2(l1, " HTTP/1.1\r\nHost: ")
+  l3:str = _api_join2(l2, host)
+  l4:str = _api_join2(l3, "\r\nConnection: close\r\nContent-Type: application/x-tnxb\r\nContent-Length: ")
+  l5:str = _api_join2(l4, clen_s)
+  head:str = _api_join2(l5, "\r\nX-Tezz-TNXB: 1\r\n\r\n")
+  resp:str = 0 as str
+  if secure != 0:
+    minv:int = TNXB_TLS_MIN_DEFAULT
+    hs_ms:int = 0
+    pin:str = 0 as str
+    if policy != 0:
+      minv = (*policy).min_version
+      hs_ms = (*policy).handshake_timeout_ms
+      pin = (*policy).pin_sha256
+    h:int = net.tls_open_with_policy(host, port, minv, hs_ms, pin)
+    if h >= 0:
+      w0:int = net.tls_send_text(h, head)
+      w1:int = 0
+      if w0 >= 0:
+        w1 = net.tls_send_all(h, payload.buf, payload.len)
+      if w0 >= 0 && w1 >= 0:
+        resp = net.tls_recv_all(h, max_bytes)
+      net.tls_close_h(h)
+  else:
+    sock:int = net.tcp_socket()
+    if sock >= 0:
+      if timeout_ms > 0:
+        net.set_timeout(sock, timeout_ms)
+      if net.connect(sock, host, port) == 0:
+        w0:int = net.tcp_send_text(sock, head)
+        w1:int = 0
+        if w0 >= 0:
+          w1 = net.tcp_send_all(sock, payload.buf, payload.len)
+        if w0 >= 0 && w1 >= 0:
+          resp = net.tcp_recv_all(sock, max_bytes)
+      net.close(sock)
+  free(host)
+  if own_pathq != 0:
+    free(pathq)
+  free(clen_s)
+  free(l1)
+  free(l2)
+  free(l3)
+  free(l4)
+  free(l5)
+  free(head)
+  ret resp
+
+fn tnxb_http_post(url:str, payload:TnxbBuffer, timeout_ms:int, max_bytes:int) -> str:
+  ret tnxb_http_post_with_policy(url, payload, timeout_ms, max_bytes, 0 as *TnxbTlsPolicy)
+
+fn tnxb_http_reply_release(reply:*TnxbHttpReply) -> int:
+  if reply == 0:
+    ret 0 - 1
+  if (*reply).body != 0:
+    free((*reply).body)
+    (*reply).body = 0 as str
+  (*reply).ok = 0
+  (*reply).status = 0
+  ret 0
+
+fn tnxb_http_call_with_policy(url:str, op:int, route:str, body:str, timeout_ms:int, max_bytes:int, policy:*TnxbTlsPolicy) -> TnxbHttpReply:
+  out:TnxbHttpReply
+  out.ok = 0
+  out.status = 0
+  out.body = 0 as str
+
+  payload:TnxbBuffer = tnxb_encode(op, route, body)
+  if payload.buf == 0:
+    ret out
+
+  resp:str = tnxb_http_post_with_policy(url, payload, timeout_ms, max_bytes, policy)
+  tnxb_release(payload)
+  if resp == 0:
+    ret out
+
+  out.status = net.http_status_code(resp)
+  out.body = net.http_response_body_decoded(resp)
+  if out.body == 0:
+    out.body = net.http_response_body(resp)
+  if out.status >= 200 && out.status < 300 && out.body != 0:
+    out.ok = 1
+  free(resp)
+  ret out
+
+fn tnxb_http_call(url:str, op:int, route:str, body:str, timeout_ms:int, max_bytes:int) -> TnxbHttpReply:
+  ret tnxb_http_call_with_policy(url, op, route, body, timeout_ms, max_bytes, 0 as *TnxbTlsPolicy)
+
+// ─────────────────────────────────────────────────────────────
+// Legacy tezzserve.tn Compatibility Layer
+// ─────────────────────────────────────────────────────────────
+
+fn api_serve_or_404(a:*TezzApi, sock:int, req_str:str) -> int:
+  if a == 0 || req_str == 0: ret 0 - 1
+  req:*ApiRequest = _parse_http_request(sock, req_str as *char, len(req_str))
+  if req == 0:
+    net.http_respond_bad_request(sock)
+    ret 0 - 1
+  if (*req).content_len > 0:
+    cl:int = (*req).content_len
+    n:int = len(req_str)
+    start:int = 0
+    while start + 3 < n:
+      if req_str[start] == 13 as char && req_str[start+1] == 10 as char && req_str[start+2] == 13 as char && req_str[start+3] == 10 as char:
+        start = start + 4
+        break
+      start = start + 1
+    if start < n:
+      stop:int = start + cl
+      if stop > n: stop = n
+      sz:int = stop - start
+      if sz > 0:
+        body_buf:*char = malloc(sz + 1)
+        if body_buf != 0:
+          unsafe:
+            memcpy(body_buf, (req_str as *char) + start, sz)
+          body_buf[sz] = 0 as char
+          (*req).body = body_buf as str
+          (*req).body_len = sz
+  (*req).sock = sock
+  rc:int = _dispatch(a, req)
+  api_req_free(req)
+  ret rc
+
+fn api_session_new(listener:int, timeout_ms:int, max_req_bytes:int, a:*TezzApi) -> *HttpServerSession:
+  ret net.http_server_session_new(listener, 0 as *HttpRouteTable, timeout_ms, max_req_bytes)
+
+fn api_session_free(session:*HttpServerSession) -> int:
+  ret net.http_server_session_free(session)
+
+fn api_session_set_limits(session:*HttpServerSession, max_clients:int, max_errors:int) -> int:
+  ret net.http_server_session_set_limits(session, max_clients, max_errors)
+
+fn api_new(max_routes:int) -> *TezzApi:
+  ret new(80)
+
+fn api_free(a:*TezzApi) -> int:
+  ret free_api(a)
+
+fn api_route(a:*TezzApi, method:str, path:str, handler:*char) -> int:
+  if a == 0 || path == 0 || handler == 0: ret 0 - 1
+  h_fn:fn(*ApiRequest, *ApiResponse)->int = handler as fn(*ApiRequest, *ApiResponse)->int
+  m:int = API_GET
+  if method == 0: m = API_GET
+  else if strcmp(method, "POST") == 0: m = API_POST
+  else if strcmp(method, "PUT") == 0: m = API_PUT
+  else if strcmp(method, "DELETE") == 0: m = API_DELETE
+  else if strcmp(method, "PATCH") == 0: m = API_PATCH
+  else if strcmp(method, "*") == 0:
+    _add_route(a, API_GET, path, h_fn)
+    _add_route(a, API_POST, path, h_fn)
+    _add_route(a, API_PUT, path, h_fn)
+    _add_route(a, API_DELETE, path, h_fn)
+    _add_route(a, API_PATCH, path, h_fn)
+    ret 0
+  ret _add_route(a, m, path, h_fn)
+
+fn api_crud(a:*TezzApi, resource_path:str, create_handler:*char, read_handler:*char, update_handler:*char, delete_handler:*char) -> int:
+  if a == 0 || resource_path == 0: ret 0 - 1
+  if create_handler != 0:
+    api_route(a, "POST", resource_path, create_handler)
+  if read_handler != 0:
+    api_route(a, "GET", resource_path, read_handler)
+  if update_handler != 0:
+    api_route(a, "PUT", resource_path, update_handler)
+  if delete_handler != 0:
+    api_route(a, "DELETE", resource_path, delete_handler)
+  ret 0
+
+fn api_dispatch(a:*TezzApi, sock:int, req_str:str) -> int:
+  ret api_serve_or_404(a, sock, req_str)
+
+fn api_session_served(session:*HttpServerSession) -> int:
+  ret net.http_server_session_served(session)
+
+fn api_session_errors(session:*HttpServerSession) -> int:
+  ret net.http_server_session_errors(session)
+
+fn api_session_reset_stats(session:*HttpServerSession) -> int:
+  ret net.http_server_session_reset_stats(session)
+

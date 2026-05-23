@@ -1,0 +1,677 @@
+// str module — comprehensive string utilities for TezzNative
+// All functions return heap-allocated strings that must be free()'d,
+// unless documented otherwise. Null/empty inputs are handled gracefully.
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+fn _str_len(s:str) -> int:
+  if s == 0:
+    ret 0
+  ret len(s)
+
+fn _str_alloc(n:int) -> *char:
+  p:*char = malloc(n + 1)
+  if p == 0:
+    ret 0 as *char
+  unsafe:
+    p[n] = 0 as char
+  ret p
+
+fn _str_copy(dst:*char, src:str, n:int) -> int:
+  if dst == 0 || src == 0 || n <= 0:
+    ret 0
+  unsafe:
+    memcpy(dst, src, n)
+  ret n
+
+// ---------------------------------------------------------------------------
+// Basic operations
+// ---------------------------------------------------------------------------
+
+// Duplicate a string (caller frees result)
+fn str_dup(s:str) -> str:
+  if s == 0:
+    ret 0 as str
+  n:int = _str_len(s)
+  p:*char = _str_alloc(n)
+  if p == 0:
+    ret 0 as str
+  _str_copy(p, s, n)
+  ret p as str
+
+// Return string length
+fn str_len(s:str) -> int:
+  ret _str_len(s)
+
+// Return 1 if s is null or empty
+fn str_empty(s:str) -> int:
+  if s == 0:
+    ret 1
+  if s[0] == 0 as char:
+    ret 1
+  ret 0
+
+// Compare two strings: -1, 0, or 1
+fn str_cmp(a:str, b:str) -> int:
+  if a == 0 && b == 0:
+    ret 0
+  if a == 0:
+    ret 0 - 1
+  if b == 0:
+    ret 1
+  ret strcmp(a, b)
+
+// Return 1 if a == b
+fn str_eq(a:str, b:str) -> int:
+  ret str_cmp(a, b) == 0
+
+// Concatenate two strings (caller frees result)
+fn str_cat(a:str, b:str) -> str:
+  na:int = _str_len(a)
+  nb:int = _str_len(b)
+  p:*char = _str_alloc(na + nb)
+  if p == 0:
+    ret 0 as str
+  if na > 0:
+    _str_copy(p, a, na)
+  if nb > 0:
+    unsafe:
+      memcpy(p + na, b, nb)
+  ret p as str
+
+// Concatenate three strings (caller frees result)
+fn str_cat3(a:str, b:str, c:str) -> str:
+  na:int = _str_len(a)
+  nb:int = _str_len(b)
+  nc:int = _str_len(c)
+  p:*char = _str_alloc(na + nb + nc)
+  if p == 0:
+    ret 0 as str
+  off:int = 0
+  if na > 0:
+    unsafe:
+      memcpy(p, a, na)
+    off = na
+  if nb > 0:
+    unsafe:
+      memcpy(p + off, b, nb)
+    off = off + nb
+  if nc > 0:
+    unsafe:
+      memcpy(p + off, c, nc)
+  ret p as str
+
+// ---------------------------------------------------------------------------
+// Search & test
+// ---------------------------------------------------------------------------
+
+// Return index of first occurrence of sub in s, or -1
+fn str_find(s:str, sub:str) -> int:
+  if s == 0 || sub == 0:
+    ret 0 - 1
+  ns:int = _str_len(s)
+  nsub:int = _str_len(sub)
+  if nsub == 0:
+    ret 0
+  if nsub > ns:
+    ret 0 - 1
+  i:int = 0
+  while i <= ns - nsub:
+    j:int = 0
+    match:int = 1
+    while j < nsub:
+      unsafe:
+        if s[i + j] != sub[j]:
+          match = 0
+          break
+      j = j + 1
+    if match != 0:
+      ret i
+    i = i + 1
+  ret 0 - 1
+
+// Return 1 if s contains sub
+fn str_contains(s:str, sub:str) -> int:
+  ret str_find(s, sub) >= 0
+
+// Return 1 if s starts with prefix
+fn str_starts_with(s:str, prefix:str) -> int:
+  ns:int = _str_len(s)
+  np:int = _str_len(prefix)
+  if np == 0:
+    ret 1
+  if np > ns:
+    ret 0
+  i:int = 0
+  while i < np:
+    unsafe:
+      if s[i] != prefix[i]:
+        ret 0
+    i = i + 1
+  ret 1
+
+// Return 1 if s ends with suffix
+fn str_ends_with(s:str, suffix:str) -> int:
+  ns:int = _str_len(s)
+  nsuf:int = _str_len(suffix)
+  if nsuf == 0:
+    ret 1
+  if nsuf > ns:
+    ret 0
+  off:int = ns - nsuf
+  i:int = 0
+  while i < nsuf:
+    unsafe:
+      if s[off + i] != suffix[i]:
+        ret 0
+    i = i + 1
+  ret 1
+
+// ---------------------------------------------------------------------------
+// Slice & extract
+// ---------------------------------------------------------------------------
+
+// Return a slice of s from [start, end) — caller frees
+fn str_slice(s:str, start:int, end2:int) -> str:
+  n:int = _str_len(s)
+  if s == 0:
+    ret 0 as str
+  if start < 0:
+    start = 0
+  if end2 < 0 || end2 > n:
+    end2 = n
+  if end2 < start:
+    end2 = start
+  sz:int = end2 - start
+  p:*char = _str_alloc(sz)
+  if p == 0:
+    ret 0 as str
+  if sz > 0:
+    unsafe:
+      memcpy(p, s + start, sz)
+  ret p as str
+
+// Return left n characters — caller frees
+fn str_left(s:str, n:int) -> str:
+  ret str_slice(s, 0, n)
+
+// Return right n characters — caller frees
+fn str_right(s:str, n:int) -> str:
+  slen:int = _str_len(s)
+  ret str_slice(s, slen - n, slen)
+
+// ---------------------------------------------------------------------------
+// Trim
+// ---------------------------------------------------------------------------
+
+fn _is_ws_char(c:int) -> int:
+  ret c == 32 || c == 9 || c == 10 || c == 13
+
+// Trim leading + trailing whitespace — caller frees
+fn str_trim(s:str) -> str:
+  if s == 0:
+    ret 0 as str
+  n:int = _str_len(s)
+  start:int = 0
+  while start < n:
+    unsafe:
+      if _is_ws_char(s[start] as int) == 0:
+        break
+    start = start + 1
+  end2:int = n
+  while end2 > start:
+    unsafe:
+      if _is_ws_char(s[end2 - 1] as int) == 0:
+        break
+    end2 = end2 - 1
+  ret str_slice(s, start, end2)
+
+// Trim leading whitespace only
+fn str_ltrim(s:str) -> str:
+  if s == 0:
+    ret 0 as str
+  n:int = _str_len(s)
+  i:int = 0
+  while i < n:
+    unsafe:
+      if _is_ws_char(s[i] as int) == 0:
+        break
+    i = i + 1
+  ret str_slice(s, i, n)
+
+// Trim trailing whitespace only
+fn str_rtrim(s:str) -> str:
+  if s == 0:
+    ret 0 as str
+  n:int = _str_len(s)
+  i:int = n
+  while i > 0:
+    unsafe:
+      if _is_ws_char(s[i - 1] as int) == 0:
+        break
+    i = i - 1
+  ret str_slice(s, 0, i)
+
+// ---------------------------------------------------------------------------
+// Case conversion
+// ---------------------------------------------------------------------------
+
+// Convert to uppercase — caller frees
+fn str_upper(s:str) -> str:
+  if s == 0:
+    ret 0 as str
+  n:int = _str_len(s)
+  p:*char = _str_alloc(n)
+  if p == 0:
+    ret 0 as str
+  i:int = 0
+  while i < n:
+    c:int = 0
+    unsafe:
+      c = s[i] as int
+    if c >= 97 && c <= 122:
+      c = c - 32
+    unsafe:
+      p[i] = c as char
+    i = i + 1
+  ret p as str
+
+// Convert to lowercase — caller frees
+fn str_lower(s:str) -> str:
+  if s == 0:
+    ret 0 as str
+  n:int = _str_len(s)
+  p:*char = _str_alloc(n)
+  if p == 0:
+    ret 0 as str
+  i:int = 0
+  while i < n:
+    c:int = 0
+    unsafe:
+      c = s[i] as int
+    if c >= 65 && c <= 90:
+      c = c + 32
+    unsafe:
+      p[i] = c as char
+    i = i + 1
+  ret p as str
+
+// ---------------------------------------------------------------------------
+// Replace & repeat
+// ---------------------------------------------------------------------------
+
+// Replace first occurrence of from with to — caller frees
+fn str_replace_first(s:str, from2:str, to2:str) -> str:
+  idx:int = str_find(s, from2)
+  if idx < 0:
+    ret str_dup(s)
+  nfrom:int = _str_len(from2)
+  left:str = str_slice(s, 0, idx)
+  right:str = str_slice(s, idx + nfrom, _str_len(s))
+  mid:str = str_cat3(left, to2, right)
+  free(left)
+  free(right)
+  ret mid
+
+// Replace all occurrences of from with to — caller frees
+fn str_replace(s:str, from2:str, to2:str) -> str:
+  if s == 0 || from2 == 0:
+    ret str_dup(s)
+  nfrom:int = _str_len(from2)
+  if nfrom == 0:
+    ret str_dup(s)
+  result:str = str_dup(s)
+  while 1 != 0:
+    idx:int = str_find(result, from2)
+    if idx < 0:
+      break
+    next:str = str_replace_first(result, from2, to2)
+    free(result)
+    result = next
+  ret result
+
+// Repeat s n times — caller frees
+fn str_repeat(s:str, n:int) -> str:
+  if s == 0 || n <= 0:
+    ret str_dup("")
+  slen:int = _str_len(s)
+  total:int = slen * n
+  p:*char = _str_alloc(total)
+  if p == 0:
+    ret 0 as str
+  i:int = 0
+  while i < n:
+    unsafe:
+      memcpy(p + i * slen, s, slen)
+    i = i + 1
+  ret p as str
+
+// ---------------------------------------------------------------------------
+// Split & join
+// ---------------------------------------------------------------------------
+
+// Split s by delim character, returning newline-separated list — caller frees
+fn str_split_char(s:str, delim:int) -> str:
+  if s == 0:
+    ret 0 as str
+  n:int = _str_len(s)
+  // Count parts to pre-allocate
+  count:int = 1
+  i:int = 0
+  while i < n:
+    unsafe:
+      if s[i] as int == delim:
+        count = count + 1
+    i = i + 1
+  // Build output: replace delim with newlines
+  p:*char = _str_alloc(n)
+  if p == 0:
+    ret 0 as str
+  i = 0
+  while i < n:
+    c:int = 0
+    unsafe:
+      c = s[i] as int
+    if c == delim:
+      c = 10  // newline separator
+    unsafe:
+      p[i] = c as char
+    i = i + 1
+  ret p as str
+
+// Count occurrences of sub in s
+fn str_count(s:str, sub:str) -> int:
+  if s == 0 || sub == 0:
+    ret 0
+  nsub:int = _str_len(sub)
+  if nsub == 0:
+    ret 0
+  count:int = 0
+  pos:int = 0
+  ns:int = _str_len(s)
+  while pos <= ns - nsub:
+    idx:int = str_find(s + pos, sub)
+    if idx < 0:
+      break
+    count = count + 1
+    pos = pos + idx + nsub
+  ret count
+
+// ---------------------------------------------------------------------------
+// Conversion
+// ---------------------------------------------------------------------------
+
+// Integer to decimal string — caller frees
+fn int_to_str(n:int) -> str:
+  if n == 0:
+    p:*char = _str_alloc(1)
+    if p == 0:
+      ret 0 as str
+    unsafe:
+      p[0] = 48 as char
+    ret p as str
+  // Handle sign
+  neg:int = 0
+  v:int = n
+  if v < 0:
+    neg = 1
+    v = 0 - v
+  // Count digits
+  tmp:[char;24]
+  digits:int = 0
+  while v > 0:
+    unsafe:
+      tmp[digits] = (48 + v % 10) as char
+    v = v / 10
+    digits = digits + 1
+  total:int = digits
+  if neg != 0:
+    total = total + 1
+  p:*char = _str_alloc(total)
+  if p == 0:
+    ret 0 as str
+  idx:int = 0
+  if neg != 0:
+    unsafe:
+      p[0] = 45 as char
+    idx = 1
+  // digits are reversed in tmp
+  i:int = digits - 1
+  while i >= 0:
+    unsafe:
+      p[idx] = tmp[i]
+    idx = idx + 1
+    i = i - 1
+  ret p as str
+
+// Float to string (up to 6 decimal places) — caller frees
+fn float_to_str(x:float) -> str:
+  // Use integer math for whole + fractional parts
+  neg:int = 0
+  v:float = x
+  if v < 0.0:
+    neg = 1
+    v = 0.0 - v
+  whole:int = v as int
+  frac:float = v - (whole as float)
+  // Scale fractional to 6 decimal places
+  frac_scaled:int = (frac * 1000000.0) as int
+  // Build "whole.frac_scaled" string
+  wstr:str = int_to_str(whole)
+  fstr:str = int_to_str(frac_scaled)
+  // Pad frac to 6 digits
+  flen:int = _str_len(fstr)
+  pad:str = "000000"
+  padded_frac:str = str_cat(str_slice(pad, 0, 6 - flen), fstr)
+  dot:str = "."
+  result:str = str_cat3(wstr, dot, padded_frac)
+  if neg != 0:
+    minus:str = "-"
+    final:str = str_cat(minus, result)
+    free(result)
+    free(wstr)
+    free(fstr)
+    free(padded_frac)
+    ret final
+  free(wstr)
+  free(fstr)
+  free(padded_frac)
+  ret result
+
+// String to integer
+fn str_to_int(s:str) -> int:
+  if s == 0:
+    ret 0
+  i:int = 0
+  ns:int = _str_len(s)
+  // Skip whitespace
+  while i < ns:
+    unsafe:
+      if _is_ws_char(s[i] as int) == 0:
+        break
+    i = i + 1
+  sign:int = 1
+  if i < ns:
+    unsafe:
+      if s[i] as int == 45:
+        sign = 0 - 1
+        i = i + 1
+      else if s[i] as int == 43:
+        i = i + 1
+  result:int = 0
+  while i < ns:
+    c:int = 0
+    unsafe:
+      c = s[i] as int
+    if c < 48 || c > 57:
+      break
+    result = result * 10 + (c - 48)
+    i = i + 1
+  ret result * sign
+
+// String to float
+fn str_to_float(s:str) -> float:
+  if s == 0:
+    ret 0.0
+  i:int = 0
+  ns:int = _str_len(s)
+  while i < ns:
+    unsafe:
+      if _is_ws_char(s[i] as int) == 0:
+        break
+    i = i + 1
+  sign:float = 1.0
+  if i < ns:
+    unsafe:
+      if s[i] as int == 45:
+        sign = 0.0 - 1.0
+        i = i + 1
+      else if s[i] as int == 43:
+        i = i + 1
+  result:float = 0.0
+  while i < ns:
+    c:int = 0
+    unsafe:
+      c = s[i] as int
+    if c < 48 || c > 57:
+      break
+    result = result * 10.0 + (c - 48) as float
+    i = i + 1
+  if i < ns:
+    c2:int = 0
+    unsafe:
+      c2 = s[i] as int
+    if c2 == 46:
+      i = i + 1
+      div:float = 10.0
+      while i < ns:
+        c3:int = 0
+        unsafe:
+          c3 = s[i] as int
+        if c3 < 48 || c3 > 57:
+          break
+        result = result + (c3 - 48) as float / div
+        div = div * 10.0
+        i = i + 1
+  ret result * sign
+
+// Hex string to integer (e.g. "FF" or "0xFF")
+fn hex_to_int(s:str) -> int:
+  if s == 0:
+    ret 0
+  i:int = 0
+  if _str_len(s) >= 2:
+    unsafe:
+      if s[0] as int == 48 && (s[1] as int == 120 || s[1] as int == 88):
+        i = 2
+  result:int = 0
+  ns:int = _str_len(s)
+  while i < ns:
+    c:int = 0
+    unsafe:
+      c = s[i] as int
+    d:int = 0
+    if c >= 48 && c <= 57:
+      d = c - 48
+    else if c >= 65 && c <= 70:
+      d = c - 55
+    else if c >= 97 && c <= 102:
+      d = c - 87
+    else:
+      break
+    result = result * 16 + d
+    i = i + 1
+  ret result
+
+// ---------------------------------------------------------------------------
+// Formatting
+// ---------------------------------------------------------------------------
+
+// Zero-pad integer to min_width digits — caller frees
+fn str_pad_int(n:int, min_width:int) -> str:
+  s:str = int_to_str(n)
+  slen:int = _str_len(s)
+  if slen >= min_width:
+    ret s
+  pad:int = min_width - slen
+  p:*char = _str_alloc(min_width)
+  if p == 0:
+    free(s)
+    ret 0 as str
+  i:int = 0
+  while i < pad:
+    unsafe:
+      p[i] = 48 as char
+    i = i + 1
+  unsafe:
+    memcpy(p + pad, s, slen)
+  free(s)
+  ret p as str
+
+// Right-pad string with spaces to width — caller frees
+fn str_pad_right(s:str, width:int) -> str:
+  slen:int = _str_len(s)
+  if slen >= width:
+    ret str_dup(s)
+  p:*char = _str_alloc(width)
+  if p == 0:
+    ret 0 as str
+  if slen > 0:
+    unsafe:
+      memcpy(p, s, slen)
+  i:int = slen
+  while i < width:
+    unsafe:
+      p[i] = 32 as char
+    i = i + 1
+  ret p as str
+
+// Left-pad string with spaces to width — caller frees
+fn str_pad_left(s:str, width:int) -> str:
+  slen:int = _str_len(s)
+  if slen >= width:
+    ret str_dup(s)
+  pad:int = width - slen
+  p:*char = _str_alloc(width)
+  if p == 0:
+    ret 0 as str
+  i:int = 0
+  while i < pad:
+    unsafe:
+      p[i] = 32 as char
+    i = i + 1
+  if slen > 0:
+    unsafe:
+      memcpy(p + pad, s, slen)
+  ret p as str
+
+// ---------------------------------------------------------------------------
+// Char utilities
+// ---------------------------------------------------------------------------
+
+fn char_is_alpha(c:int) -> int:
+  ret (c >= 65 && c <= 90) || (c >= 97 && c <= 122)
+
+fn char_is_digit(c:int) -> int:
+  ret c >= 48 && c <= 57
+
+fn char_is_alnum(c:int) -> int:
+  ret char_is_alpha(c) != 0 || char_is_digit(c) != 0
+
+fn char_is_ws(c:int) -> int:
+  ret _is_ws_char(c)
+
+fn char_to_upper(c:int) -> int:
+  if c >= 97 && c <= 122:
+    ret c - 32
+  ret c
+
+fn char_to_lower(c:int) -> int:
+  if c >= 65 && c <= 90:
+    ret c + 32
+  ret c
+
+fn char_is_hex(c:int) -> int:
+  ret (c >= 48 && c <= 57) || (c >= 65 && c <= 70) || (c >= 97 && c <= 102)

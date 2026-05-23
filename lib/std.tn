@@ -1,0 +1,200 @@
+// std module: common prelude for TezzNative
+// Import core libraries so projects can just `import "std"` as a baseline.
+import "io"
+import "time"
+import "net"
+import "tls"
+import "event"
+import "frame"
+import "tzgui"
+import "tzui"
+import "math"
+import "str"
+import "tzimage"
+import "tnauto"
+import "simd"
+import "intrin"
+import "data"
+import "tezzapi"
+import "tezzserve"
+import "tensor"
+import "cyber"
+import "gpu"
+import "npu"
+
+// Prelude input: single "smart" input() builtin (see core).
+let INPUT_STR:int = 0
+let INPUT_INT:int = 1
+let INPUT_FLOAT:int = 2
+
+fn _is_ws(c:int) -> int:
+  if c == 32 || c == 9 || c == 10 || c == 13:
+    ret 1
+  ret 0
+
+fn _skip_ws(s:str, i:int) -> int:
+  j:int = i
+  while s[j] != 0 as char && _is_ws(s[j] as int) != 0:
+    j = j + 1
+  ret j
+
+fn _is_digit(c:int) -> int:
+  if c >= 48 && c <= 57:
+    ret 1
+  ret 0
+
+fn _is_int(s:str) -> int:
+  if s == 0:
+    ret 0
+  i:int = _skip_ws(s, 0)
+  if s[i] == 0 as char:
+    ret 0
+  if s[i] == 45 as char || s[i] == 43 as char:
+    i = i + 1
+  start:int = i
+  while _is_digit(s[i] as int) != 0:
+    i = i + 1
+  if i == start:
+    ret 0
+  i = _skip_ws(s, i)
+  if s[i] != 0 as char:
+    ret 0
+  ret 1
+
+fn _is_float(s:str) -> int:
+  if s == 0:
+    ret 0
+  i:int = _skip_ws(s, 0)
+  if s[i] == 0 as char:
+    ret 0
+  if s[i] == 45 as char || s[i] == 43 as char:
+    i = i + 1
+  has_digit:int = 0
+  while _is_digit(s[i] as int) != 0:
+    has_digit = 1
+    i = i + 1
+  if s[i] == 46 as char:
+    i = i + 1
+    while _is_digit(s[i] as int) != 0:
+      has_digit = 1
+      i = i + 1
+  if has_digit == 0:
+    ret 0
+  if s[i] == 101 as char || s[i] == 69 as char:
+    i = i + 1
+    if s[i] == 45 as char || s[i] == 43 as char:
+      i = i + 1
+    exp_start:int = i
+    while _is_digit(s[i] as int) != 0:
+      i = i + 1
+    if i == exp_start:
+      ret 0
+  i = _skip_ws(s, i)
+  if s[i] != 0 as char:
+    ret 0
+  ret 1
+
+fn _parse_int(s:str) -> int:
+  if s == 0:
+    ret 0
+  i:int = 0
+  sign:int = 1
+  if s[0] == 45 as char:
+    sign = 0 - 1
+    i = 1
+  n:int = 0
+  while s[i] != 0 as char:
+    c:int = s[i] as int
+    if c < 48 || c > 57:
+      break
+    n = n * 10 + (c - 48)
+    i = i + 1
+  ret n * sign
+
+fn _parse_float(s:str) -> float:
+  if s == 0:
+    ret 0.0
+  i:int = 0
+  sign:float = 1.0
+  if s[0] == 45 as char:
+    sign = 0.0 - 1.0
+    i = 1
+  n:float = 0.0
+  while s[i] != 0 as char:
+    c:int = s[i] as int
+    if c < 48 || c > 57:
+      break
+    n = n * 10.0 + (c - 48) as float
+    i = i + 1
+  if s[i] == 46 as char:
+    i = i + 1
+    div:float = 10.0
+    while s[i] != 0 as char:
+      c = s[i] as int
+      if c < 48 || c > 57:
+        break
+      n = n + (c - 48) as float / div
+      div = div * 10.0
+      i = i + 1
+  if s[i] == 101 as char || s[i] == 69 as char:
+    i = i + 1
+    esign:int = 1
+    if s[i] == 45 as char:
+      esign = 0 - 1
+      i = i + 1
+    else if s[i] == 43 as char:
+      i = i + 1
+    exp:int = 0
+    while s[i] != 0 as char:
+      c2:int = s[i] as int
+      if c2 < 48 || c2 > 57:
+        break
+      exp = exp * 10 + (c2 - 48)
+      i = i + 1
+    pow10:float = 1.0
+    j:int = 0
+    while j < exp:
+      pow10 = pow10 * 10.0
+      j = j + 1
+    if esign < 0:
+      n = n / pow10
+    else:
+      n = n * pow10
+  ret n * sign
+
+// Easy syntax helpers (high-level prelude)
+// These helpers keep TezzNative code concise for common day-to-day tasks.
+
+// print/println aliases (same behavior for now; newline is handled by `say`)
+fn print(msg:str) -> int:
+  say msg
+  ret 0
+
+fn println(msg:str) -> int:
+  say msg
+  ret 0
+
+// Strongly-typed input helpers on top of `input_line`.
+fn input_text(prompt:str) -> str:
+  if prompt != 0 && prompt[0] != 0 as char:
+    say prompt
+  v:str = input_line
+  if v == 0:
+    ret ""
+  ret v
+
+fn input_int(prompt:str, fallback:int) -> int:
+  raw:str = input_text(prompt)
+  if raw == 0 || raw[0] == 0 as char:
+    ret fallback
+  if _is_int(raw) == 0:
+    ret fallback
+  ret _parse_int(raw)
+
+fn input_float(prompt:str, fallback:float) -> float:
+  raw:str = input_text(prompt)
+  if raw == 0 || raw[0] == 0 as char:
+    ret fallback
+  if _is_float(raw) == 0:
+    ret fallback
+  ret _parse_float(raw)

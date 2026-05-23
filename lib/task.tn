@@ -1,0 +1,34 @@
+// task module: minimal async/await wrappers (native runs concurrently; VM runs synchronously)
+
+struct AsyncTask:
+  handle:*char
+
+fn spawn(f:fn()->int) -> AsyncTask:
+  t:AsyncTask
+  t.handle = async(f)
+  ret t
+
+fn join(t:AsyncTask) -> int:
+  ret await(t.handle)
+
+fn await_task(t:AsyncTask) -> int:
+  ret join(t)
+
+fn await(t:AsyncTask) -> int:
+  ret join(t)
+
+fn workers() -> int:
+  // compatibility fallback: some compiler builds do not expose worker introspection builtins.
+  ret 1
+
+fn pending() -> int:
+  // compatibility fallback: pending-task introspection may be unavailable.
+  ret 0
+
+fn detach(t:AsyncTask) -> int:
+  // placeholder for future cancellation
+  ret 0
+
+fn yield() -> int:
+  // cooperative yield (implemented as sleep_ms(0))
+  ret sleep_ms(0)

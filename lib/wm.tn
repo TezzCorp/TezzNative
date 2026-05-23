@@ -1,0 +1,400 @@
+// wm module: compositor-style host window management lane.
+//
+// Features:
+// - Multiple managed windows with z-order and focus.
+// - Pointer-driven title-bar dragging.
+// - Keyboard dispatch to focused window callbacks.
+// - Explicit lifecycle operations (create/show/move/resize/remove).
+
+import "gui"
+
+let WM_MAX_WINDOWS:int = 24
+let WM_TITLEBAR_H:int = 20
+let WM_TITLE_MAX:int = 96
+
+struct WmWindow:
+  id:int
+  alive:int
+  visible:int
+  draggable:int
+  x:int
+  y:int
+  w:int
+  h:int
+  z:int
+  on_key:*char
+  title:[char;96]
+
+static let g_wins:[WmWindow;24]
+static let g_win_n:int = 0
+static let g_next_id:int = 1
+static let g_next_z:int = 1
+static let g_focus:int = 0
+static let g_drag_id:int = 0
+static let g_drag_off_x:int = 0
+static let g_drag_off_y:int = 0
+static let g_ptr_x:int = 0
+static let g_ptr_y:int = 0
+static let g_ptr_buttons:int = 0
+static let g_prev_ptr_buttons:int = 0
+
+fn _buf_clear(dst:*char, cap:int) -> int:
+  if dst == 0 || cap <= 0:
+    ret 0 - 1
+  i:int = 0
+  while i < cap:
+    dst[i] = 0 as char
+    i = i + 1
+  ret 0
+
+fn _buf_copy(dst:*char, cap:int, src:str) -> int:
+  if dst == 0 || cap <= 0:
+    ret 0 - 1
+  _buf_clear(dst, cap)
+  if src == 0:
+    ret 0
+  n:int = len(src)
+  if n > (cap - 1):
+    n = cap - 1
+  if n > 0:
+    unsafe:
+      memcpy(dst, src as *char, n)
+  dst[n] = 0 as char
+  ret 0
+
+fn _point_in(x:int, y:int, rx:int, ry:int, rw:int, rh:int) -> int:
+  if rw <= 0 || rh <= 0:
+    ret 0
+  if x < rx || y < ry:
+    ret 0
+  if x >= (rx + rw):
+    ret 0
+  if y >= (ry + rh):
+    ret 0
+  ret 1
+
+fn _slot_by_id(id:int) -> int:
+  if id <= 0:
+    ret 0 - 1
+  i:int = 0
+  while i < WM_MAX_WINDOWS:
+    if g_wins[i].alive != 0 && g_wins[i].id == id:
+      ret i
+    i = i + 1
+  ret 0 - 1
+
+fn _slot_free() -> int:
+  i:int = 0
+  while i < WM_MAX_WINDOWS:
+    if g_wins[i].alive == 0:
+      ret i
+    i = i + 1
+  ret 0 - 1
+
+fn _title_hit(slot:int, x:int, y:int) -> int:
+  if slot < 0 || slot >= WM_MAX_WINDOWS:
+    ret 0
+  if g_wins[slot].alive == 0 || g_wins[slot].visible == 0:
+    ret 0
+  ret _point_in(x, y, g_wins[slot].x, g_wins[slot].y, g_wins[slot].w, WM_TITLEBAR_H)
+
+fn _topmost_at(x:int, y:int) -> int:
+  best_slot:int = 0 - 1
+  best_z:int = 0 - 2147483647
+  i:int = 0
+  while i < WM_MAX_WINDOWS:
+    if g_wins[i].alive != 0 && g_wins[i].visible != 0:
+      if _point_in(x, y, g_wins[i].x, g_wins[i].y, g_wins[i].w, g_wins[i].h) != 0:
+        if best_slot < 0 || g_wins[i].z >= best_z:
+          best_slot = i
+          best_z = g_wins[i].z
+    i = i + 1
+  ret best_slot
+
+fn _focus_slot(slot:int) -> int:
+  if slot < 0 || slot >= WM_MAX_WINDOWS:
+    ret 0 - 1
+  if g_wins[slot].alive == 0 || g_wins[slot].visible == 0:
+    ret 0 - 2
+  g_focus = g_wins[slot].id
+  g_wins[slot].z = g_next_z
+  g_next_z = g_next_z + 1
+  ret g_focus
+
+fn _sort_by_z(idxs:*int, n:int) -> int:
+  if idxs == 0 || n <= 1:
+    ret 0
+  i:int = 1
+  while i < n:
+    key:int = idxs[i]
+    j:int = i - 1
+    while j >= 0:
+      if g_wins[idxs[j]].z <= g_wins[key].z:
+        break
+      idxs[j + 1] = idxs[j]
+      j = j - 1
+    idxs[j + 1] = key
+    i = i + 1
+  ret 0
+
+fn wm_init() -> int:
+  g_win_n = 0
+  g_next_id = 1
+  g_next_z = 1
+  g_focus = 0
+  g_drag_id = 0
+  g_drag_off_x = 0
+  g_drag_off_y = 0
+  g_ptr_x = 0
+  g_ptr_y = 0
+  g_ptr_buttons = 0
+  g_prev_ptr_buttons = 0
+  i:int = 0
+  while i < WM_MAX_WINDOWS:
+    g_wins[i].id = 0
+    g_wins[i].alive = 0
+    g_wins[i].visible = 0
+    g_wins[i].draggable = 1
+    g_wins[i].x = 0
+    g_wins[i].y = 0
+    g_wins[i].w = 0
+    g_wins[i].h = 0
+    g_wins[i].z = 0
+    g_wins[i].on_key = 0 as *char
+    _buf_clear(&g_wins[i].title[0], WM_TITLE_MAX)
+    i = i + 1
+  ret 0
+
+fn wm_add_window(x:int, y:int, w:int, h:int, title:str, on_key:*char) -> int:
+  slot:int = _slot_free()
+  if slot < 0:
+    ret 0 - 1
+  if w < 80:
+    w = 80
+  if h < 48:
+    h = 48
+  g_wins[slot].id = g_next_id
+  g_next_id = g_next_id + 1
+  g_wins[slot].alive = 1
+  g_wins[slot].visible = 1
+  g_wins[slot].draggable = 1
+  g_wins[slot].x = x
+  g_wins[slot].y = y
+  g_wins[slot].w = w
+  g_wins[slot].h = h
+  g_wins[slot].z = g_next_z
+  g_next_z = g_next_z + 1
+  g_wins[slot].on_key = on_key
+  _buf_copy(&g_wins[slot].title[0], WM_TITLE_MAX, title)
+  g_win_n = g_win_n + 1
+  if g_focus == 0:
+    g_focus = g_wins[slot].id
+  ret g_wins[slot].id
+
+fn wm_window_count() -> int:
+  ret g_win_n
+
+fn wm_focus(id:int) -> int:
+  slot:int = _slot_by_id(id)
+  if slot < 0:
+    ret 0 - 1
+  ret _focus_slot(slot)
+
+fn wm_focus_id() -> int:
+  ret g_focus
+
+fn wm_focus_next() -> int:
+  idxs:[int;24]
+  n:int = 0
+  i:int = 0
+  while i < WM_MAX_WINDOWS:
+    if g_wins[i].alive != 0 && g_wins[i].visible != 0:
+      idxs[n] = i
+      n = n + 1
+    i = i + 1
+  if n <= 0:
+    g_focus = 0
+    ret 0
+  _sort_by_z(&idxs[0], n)
+  if g_focus <= 0:
+    ret _focus_slot(idxs[n - 1])
+  i = 0
+  while i < n:
+    if g_wins[idxs[i]].id == g_focus:
+      next_i:int = i + 1
+      if next_i >= n:
+        next_i = 0
+      ret _focus_slot(idxs[next_i])
+    i = i + 1
+  ret _focus_slot(idxs[n - 1])
+
+fn wm_window_remove(id:int) -> int:
+  slot:int = _slot_by_id(id)
+  if slot < 0:
+    ret 0 - 1
+  g_wins[slot].alive = 0
+  g_wins[slot].visible = 0
+  g_wins[slot].id = 0
+  g_wins[slot].z = 0
+  g_wins[slot].on_key = 0 as *char
+  _buf_clear(&g_wins[slot].title[0], WM_TITLE_MAX)
+  if g_win_n > 0:
+    g_win_n = g_win_n - 1
+  if g_focus == id:
+    g_focus = 0
+  if g_drag_id == id:
+    g_drag_id = 0
+  ret 0
+
+fn wm_window_show(id:int, visible:int) -> int:
+  slot:int = _slot_by_id(id)
+  if slot < 0:
+    ret 0 - 1
+  if visible != 0:
+    g_wins[slot].visible = 1
+  else:
+    g_wins[slot].visible = 0
+    if g_focus == id:
+      g_focus = 0
+    if g_drag_id == id:
+      g_drag_id = 0
+  ret 0
+
+fn wm_window_move(id:int, x:int, y:int) -> int:
+  slot:int = _slot_by_id(id)
+  if slot < 0:
+    ret 0 - 1
+  g_wins[slot].x = x
+  g_wins[slot].y = y
+  ret 0
+
+fn wm_window_resize(id:int, w:int, h:int) -> int:
+  slot:int = _slot_by_id(id)
+  if slot < 0:
+    ret 0 - 1
+  if w < 80:
+    w = 80
+  if h < 48:
+    h = 48
+  g_wins[slot].w = w
+  g_wins[slot].h = h
+  ret 0
+
+fn wm_window_x(id:int) -> int:
+  slot:int = _slot_by_id(id)
+  if slot < 0:
+    ret 0
+  ret g_wins[slot].x
+
+fn wm_window_y(id:int) -> int:
+  slot:int = _slot_by_id(id)
+  if slot < 0:
+    ret 0
+  ret g_wins[slot].y
+
+fn wm_window_w(id:int) -> int:
+  slot:int = _slot_by_id(id)
+  if slot < 0:
+    ret 0
+  ret g_wins[slot].w
+
+fn wm_window_h(id:int) -> int:
+  slot:int = _slot_by_id(id)
+  if slot < 0:
+    ret 0
+  ret g_wins[slot].h
+
+fn wm_draw(s:*GuiSurface) -> int:
+  if s == 0:
+    ret 0 - 1
+  idxs:[int;24]
+  n:int = 0
+  i:int = 0
+  while i < WM_MAX_WINDOWS:
+    if g_wins[i].alive != 0 && g_wins[i].visible != 0:
+      idxs[n] = i
+      n = n + 1
+    i = i + 1
+  _sort_by_z(&idxs[0], n)
+  i = 0
+  while i < n:
+    slot:int = idxs[i]
+    gui.gui_window(s, g_wins[slot].x, g_wins[slot].y, g_wins[slot].w, g_wins[slot].h, &g_wins[slot].title[0])
+    if g_focus == g_wins[slot].id:
+      gui.gui_rect(s, g_wins[slot].x, g_wins[slot].y, g_wins[slot].w, 2, 32768)
+    i = i + 1
+  ret n
+
+fn wm_dispatch_key(key:int) -> int:
+  if key <= 0:
+    ret 0
+  slot:int = _slot_by_id(g_focus)
+  if slot < 0:
+    ret 0
+  fnptr:*char = g_wins[slot].on_key
+  if fnptr != 0:
+    unsafe:
+      fnk:fn(int)->int = fnptr as fn(int)->int
+      fnk(key)
+  ret 0
+
+fn wm_pump() -> int:
+  gui.gui_pump_input()
+  g_prev_ptr_buttons = g_ptr_buttons
+  next_x:int = g_ptr_x
+  next_y:int = g_ptr_y
+  next_buttons:int = g_ptr_buttons
+  ev:GuiEvent
+  while gui.gui_event_next(&ev) != 0:
+    if ev.kind == 2 || ev.kind == 3:
+      next_x = ev.x
+      next_y = ev.y
+      next_buttons = ev.buttons
+    if ev.kind == 1 && ev.key != 0:
+      if ev.key == 9:
+        wm_focus_next()
+      else:
+        wm_dispatch_key(ev.key)
+  g_ptr_x = next_x
+  g_ptr_y = next_y
+  g_ptr_buttons = next_buttons
+
+  left_down:int = 0
+  left_pressed:int = 0
+  left_released:int = 0
+  if (g_ptr_buttons & 1) != 0:
+    left_down = 1
+  if (g_prev_ptr_buttons & 1) == 0 && (g_ptr_buttons & 1) != 0:
+    left_pressed = 1
+  if (g_prev_ptr_buttons & 1) != 0 && (g_ptr_buttons & 1) == 0:
+    left_released = 1
+
+  if left_pressed != 0:
+    slot:int = _topmost_at(g_ptr_x, g_ptr_y)
+    if slot >= 0:
+      _focus_slot(slot)
+      if g_wins[slot].draggable != 0 && _title_hit(slot, g_ptr_x, g_ptr_y) != 0:
+        g_drag_id = g_wins[slot].id
+        g_drag_off_x = g_ptr_x - g_wins[slot].x
+        g_drag_off_y = g_ptr_y - g_wins[slot].y
+    else:
+      g_focus = 0
+
+  if left_released != 0:
+    g_drag_id = 0
+
+  if left_down != 0 && g_drag_id > 0:
+    drag_slot:int = _slot_by_id(g_drag_id)
+    if drag_slot >= 0 && g_wins[drag_slot].alive != 0:
+      g_wins[drag_slot].x = g_ptr_x - g_drag_off_x
+      g_wins[drag_slot].y = g_ptr_y - g_drag_off_y
+  ret 0
+
+fn wm_begin_frame() -> int:
+  ret wm_pump()
+
+fn wm_end_frame(s:*GuiSurface) -> int:
+  if s == 0:
+    ret 0 - 1
+  wm_draw(s)
+  ret gui.gui_end(s)

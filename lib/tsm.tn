@@ -1,0 +1,553 @@
+// tsm module: TezzServiceManager (cross-platform service/process control scaffold).
+// Registry format: TNX array of service objects.
+//
+// Service object keys:
+// - name:str
+// - cmd:str
+// - cwd:str
+// - autostart:int (0/1)
+// - restart:int (0=never,1=always)
+// - enabled:int (0/1)
+
+import "std"
+import "io"
+import "tnx"
+
+let TSM_RESTART_NEVER:int = 0
+let TSM_RESTART_ALWAYS:int = 1
+
+fn _dup(s:str) -> str:
+  if s == 0:
+    ret 0 as str
+  n:int = len(s)
+  out:*char = malloc(n + 1)
+  if out == 0:
+    ret 0 as str
+  if n > 0:
+    unsafe:
+      memcpy(out, s as *char, n)
+  out[n] = 0 as char
+  ret out as str
+
+fn str_join2(a:str, b:str) -> str:
+  if a == 0:
+    a = ""
+  if b == 0:
+    b = ""
+  na:int = len(a)
+  nb:int = len(b)
+  out:*char = malloc(na + nb + 1)
+  if out == 0:
+    ret 0 as str
+  if na > 0:
+    unsafe:
+      memcpy(out, a as *char, na)
+  if nb > 0:
+    unsafe:
+      memcpy(out + na, b as *char, nb)
+  out[na + nb] = 0 as char
+  ret out as str
+
+fn str_join3(a:str, b:str, c:str) -> str:
+  t0:str = str_join2(a, b)
+  if t0 == 0:
+    ret 0 as str
+  out:str = str_join2(t0, c)
+  free(t0)
+  ret out
+
+fn _is_windows() -> int:
+  ret io.path_sep_ch() == 92
+
+fn _ensure_parent_dir(path:str) -> int:
+  if path == 0:
+    ret 0
+  parent:str = io.path_dir(path)
+  if parent != 0 && len(parent) > 0 && path_exists(parent) == 0:
+    mkdir(parent)
+  if parent != 0:
+    free(parent)
+  ret 0
+
+fn _parse_int(s:str) -> int:
+  if s == 0:
+    ret 0
+  i:int = 0
+  sign:int = 1
+  if s[0] == 45 as char:
+    sign = 0 - 1
+    i = 1
+  n:int = 0
+  while s[i] != 0 as char:
+    c:int = s[i] as int
+    if c < 48 || c > 57:
+      break
+    n = n * 10 + (c - 48)
+    i = i + 1
+  ret n * sign
+
+fn _int_to_str(x:int) -> str:
+  neg:int = 0
+  v:int = x
+  if v < 0:
+    neg = 1
+    v = 0 - v
+  buf:[char;32]
+  i:int = 0
+  if v == 0:
+    buf[i] = 48 as char
+    i = i + 1
+  else:
+    while v > 0:
+      d:int = v % 10
+      buf[i] = (48 + d) as char
+      i = i + 1
+      v = v / 10
+  if neg != 0:
+    buf[i] = 45 as char
+    i = i + 1
+  out:*char = malloc(i + 1)
+  if out == 0:
+    ret 0 as str
+  j:int = 0
+  while j < i:
+    out[j] = buf[i - 1 - j]
+    j = j + 1
+  out[i] = 0 as char
+  ret out as str
+
+fn _registry_default() -> str:
+  ret "build/tsm/registry.tnx"
+
+fn registry_default() -> str:
+  ret _registry_default()
+
+fn _registry_new() -> *TnxValue:
+  ret tnx.arr()
+
+fn _registry_load(path:str) -> *TnxValue:
+  if path == 0 || len(path) == 0:
+    path = _registry_default()
+  if path_exists(path) == 0:
+    ret _registry_new()
+  v:*TnxValue = tnx.load(path)
+  if v == 0:
+    ret _registry_new()
+  ret v
+
+fn _registry_save(path:str, reg:*TnxValue) -> int:
+  if path == 0 || len(path) == 0:
+    path = _registry_default()
+  if reg == 0:
+    ret 0 - 1
+  _ensure_parent_dir(path)
+  ret tnx.save(path, reg)
+
+fn _service_name_at(reg:*TnxValue, idx:int) -> str:
+  it:*TnxValue = tnx.arr_get(reg, idx)
+  if it == 0:
+    ret 0 as str
+  nv:*TnxValue = tnx.obj_get(it, "name")
+  if nv == 0:
+    ret 0 as str
+  n:str = tnx.tnx_as_str(nv)
+  if n == 0:
+    ret 0 as str
+  ret n
+
+fn _find_index(reg:*TnxValue, name:str) -> int:
+  if reg == 0 || name == 0:
+    ret 0 - 1
+  i:int = 0
+  while 1:
+    n:str = _service_name_at(reg, i)
+    if n == 0:
+      break
+    if strcmp(n, name) == 0:
+      ret i
+    i = i + 1
+  ret 0 - 1
+
+fn _service_from_obj(obj:*TnxValue, out_name:*str, out_cmd:*str, out_cwd:*str, out_autostart:*int, out_restart:*int, out_enabled:*int) -> int:
+  if obj == 0:
+    ret 0 - 1
+  nv:*TnxValue = tnx.obj_get(obj, "name")
+  cv:*TnxValue = tnx.obj_get(obj, "cmd")
+  wv:*TnxValue = tnx.obj_get(obj, "cwd")
+  av:*TnxValue = tnx.obj_get(obj, "autostart")
+  rv:*TnxValue = tnx.obj_get(obj, "restart")
+  ev:*TnxValue = tnx.obj_get(obj, "enabled")
+  if nv == 0 || cv == 0:
+    ret 0 - 1
+  n:str = tnx.tnx_as_str(nv)
+  c:str = tnx.tnx_as_str(cv)
+  w:str = ""
+  if wv != 0 && tnx.tnx_as_str(wv) != 0:
+    w = tnx.tnx_as_str(wv)
+  if n == 0 || c == 0:
+    ret 0 - 1
+  out_name[0] = _dup(n)
+  out_cmd[0] = _dup(c)
+  out_cwd[0] = _dup(w)
+  out_autostart[0] = 0
+  out_restart[0] = TSM_RESTART_NEVER
+  out_enabled[0] = 1
+  if av != 0:
+    out_autostart[0] = tnx.tnx_as_int(av)
+  if rv != 0:
+    out_restart[0] = tnx.tnx_as_int(rv)
+  if ev != 0:
+    out_enabled[0] = tnx.tnx_as_int(ev)
+  ret 0
+
+fn _service_to_obj(name:str, cmd:str, cwd:str, autostart:int, restart:int, enabled:int) -> *TnxValue:
+  o:*TnxValue = tnx.obj()
+  if o == 0:
+    ret 0 as *TnxValue
+  tnx.obj_set(o, "name", tnx.tnx_str(name))
+  tnx.obj_set(o, "cmd", tnx.tnx_str(cmd))
+  tnx.obj_set(o, "cwd", tnx.tnx_str(cwd))
+  tnx.obj_set(o, "autostart", tnx.tnx_int(autostart != 0))
+  tnx.obj_set(o, "restart", tnx.tnx_int(restart))
+  tnx.obj_set(o, "enabled", tnx.tnx_int(enabled != 0))
+  ret o
+
+fn registry_init(path:str) -> int:
+  reg:*TnxValue = _registry_new()
+  rc:int = _registry_save(path, reg)
+  tnx.release(reg)
+  ret rc
+
+fn service_count(path:str) -> int:
+  reg:*TnxValue = _registry_load(path)
+  i:int = 0
+  while 1:
+    n:str = _service_name_at(reg, i)
+    if n == 0:
+      break
+    i = i + 1
+  tnx.release(reg)
+  ret i
+
+fn service_add(path:str, name:str, cmd:str, cwd:str, autostart:int, restart:int, enabled:int) -> int:
+  if name == 0 || cmd == 0 || len(name) == 0 || len(cmd) == 0:
+    ret 0 - 1
+  if restart != TSM_RESTART_NEVER && restart != TSM_RESTART_ALWAYS:
+    restart = TSM_RESTART_NEVER
+  reg:*TnxValue = _registry_load(path)
+  if _find_index(reg, name) >= 0:
+    tnx.release(reg)
+    ret 0 - 1
+  item:*TnxValue = _service_to_obj(name, cmd, cwd, autostart, restart, enabled)
+  if item == 0:
+    tnx.release(reg)
+    ret 0 - 1
+  if tnx.arr_push(reg, item) != 0:
+    tnx.release(item)
+    tnx.release(reg)
+    ret 0 - 1
+  rc:int = _registry_save(path, reg)
+  tnx.release(reg)
+  ret rc
+
+fn service_remove(path:str, name:str) -> int:
+  if name == 0 || len(name) == 0:
+    ret 0 - 1
+  reg:*TnxValue = _registry_load(path)
+  out:*TnxValue = _registry_new()
+  removed:int = 0
+  i:int = 0
+  while 1:
+    it:*TnxValue = tnx.arr_get(reg, i)
+    if it == 0:
+      break
+    nv:*TnxValue = tnx.obj_get(it, "name")
+    keep:int = 1
+    if nv != 0 && tnx.tnx_as_str(nv) != 0:
+      n:str = tnx.tnx_as_str(nv)
+      if strcmp(n, name) == 0:
+        keep = 0
+        removed = 1
+    if keep != 0:
+      cp:*TnxValue = tnx.tnx_clone(it)
+      if cp != 0:
+        tnx.arr_push(out, cp)
+    i = i + 1
+  rc:int = 0
+  if removed != 0:
+    rc = _registry_save(path, out)
+  else:
+    rc = 0 - 1
+  tnx.release(out)
+  tnx.release(reg)
+  ret rc
+
+fn service_set_enabled(path:str, name:str, enabled:int) -> int:
+  if name == 0 || len(name) == 0:
+    ret 0 - 1
+  reg:*TnxValue = _registry_load(path)
+  idx:int = _find_index(reg, name)
+  if idx < 0:
+    tnx.release(reg)
+    ret 0 - 1
+  item:*TnxValue = tnx.arr_get(reg, idx)
+  if item == 0:
+    tnx.release(reg)
+    ret 0 - 1
+  tnx.obj_set(item, "enabled", tnx.tnx_int(enabled != 0))
+  rc:int = _registry_save(path, reg)
+  tnx.release(reg)
+  ret rc
+
+fn _pid_path(log_dir:str, name:str) -> str:
+  d:str = log_dir
+  if d == 0 || len(d) == 0:
+    d = "build/tsm"
+  if path_exists(d) == 0:
+    mkdir(d)
+  p0:str = str_join3(d, "/", name)
+  p1:str = str_join2(p0, ".pid")
+  free(p0)
+  ret p1
+
+fn _log_path(log_dir:str, name:str) -> str:
+  d:str = log_dir
+  if d == 0 || len(d) == 0:
+    d = "build/tsm"
+  if path_exists(d) == 0:
+    mkdir(d)
+  p0:str = str_join3(d, "/", name)
+  p1:str = str_join2(p0, ".log")
+  free(p0)
+  ret p1
+
+fn _load_service(path:str, name:str, out_cmd:*str, out_cwd:*str, out_restart:*int, out_enabled:*int) -> int:
+  reg:*TnxValue = _registry_load(path)
+  idx:int = _find_index(reg, name)
+  if idx < 0:
+    tnx.release(reg)
+    ret 0 - 1
+  item:*TnxValue = tnx.arr_get(reg, idx)
+  if item == 0:
+    tnx.release(reg)
+    ret 0 - 1
+  n0:str = 0 as str
+  c0:str = 0 as str
+  w0:str = 0 as str
+  a0:int = 0
+  r0:int = 0
+  e0:int = 1
+  rc:int = _service_from_obj(item, &n0, &c0, &w0, &a0, &r0, &e0)
+  tnx.release(reg)
+  if rc != 0:
+    if n0 != 0:
+      free(n0)
+    if c0 != 0:
+      free(c0)
+    if w0 != 0:
+      free(w0)
+    ret 0 - 1
+  if n0 != 0:
+    free(n0)
+  out_cmd[0] = c0
+  out_cwd[0] = w0
+  out_restart[0] = r0
+  out_enabled[0] = e0
+  ret 0
+
+fn service_run_once(path:str, name:str) -> int:
+  cmd:str = 0 as str
+  cwd:str = 0 as str
+  restart:int = 0
+  enabled:int = 1
+  if _load_service(path, name, &cmd, &cwd, &restart, &enabled) != 0:
+    ret 0 - 1
+  if enabled == 0:
+    free(cmd)
+    free(cwd)
+    ret 0 - 1
+  exec_cmd:str = 0 as str
+  if cwd != 0 && len(cwd) > 0:
+    if _is_windows() != 0:
+      x0:str = str_join3("cmd /c \"cd /d ", cwd, " && ")
+      x1:str = str_join2(x0, cmd)
+      free(x0)
+      x2:str = str_join2(x1, "\"")
+      free(x1)
+      exec_cmd = x2
+    else:
+      x0 = str_join3("sh -lc \"cd ", cwd, " && ")
+      x1 = str_join2(x0, cmd)
+      free(x0)
+      x2 = str_join2(x1, "\"")
+      free(x1)
+      exec_cmd = x2
+  else:
+    exec_cmd = _dup(cmd)
+  free(cmd)
+  free(cwd)
+  rc:int = proc_run(exec_cmd)
+  free(exec_cmd)
+  ret rc
+
+fn service_start(path:str, name:str, log_dir:str) -> int:
+  cmd:str = 0 as str
+  cwd:str = 0 as str
+  restart:int = 0
+  enabled:int = 1
+  if _load_service(path, name, &cmd, &cwd, &restart, &enabled) != 0:
+    ret 0 - 1
+  if enabled == 0:
+    free(cmd)
+    free(cwd)
+    ret 0 - 1
+  log_path:str = _log_path(log_dir, name)
+  pid_path:str = _pid_path(log_dir, name)
+  launch:str = 0 as str
+  if _is_windows() != 0:
+    // Windows background launch; pid capture is best-effort via PowerShell.
+    p0:str = str_join3("powershell -NoProfile -Command \"$p=Start-Process -WindowStyle Hidden -PassThru cmd '/c ", cmd, "';")
+    p1a:str = str_join3(p0, "$p.Id | Out-File -Encoding ascii '", pid_path)
+    p1:str = str_join2(p1a, "';\"")
+    free(p1a)
+    free(p0)
+    launch = p1
+  else:
+    base:str = cmd
+    if cwd != 0 && len(cwd) > 0:
+      b0:str = str_join3("cd ", cwd, " && ")
+      b1:str = str_join2(b0, cmd)
+      free(b0)
+      base = b1
+    bg0:str = str_join3("sh -lc \"nohup ", base, " > ")
+    if base != cmd:
+      free(base)
+    bg1:str = str_join3(bg0, log_path, " 2>&1 & echo $! > ")
+    free(bg0)
+    bg2:str = str_join3(bg1, pid_path, "\"")
+    free(bg1)
+    launch = bg2
+  free(cmd)
+  free(cwd)
+  rc:int = proc_run(launch)
+  free(launch)
+  free(log_path)
+  free(pid_path)
+  ret rc
+
+fn service_stop(path:str, name:str, log_dir:str) -> int:
+  if path == 0:
+    path = _registry_default()
+  pid_path:str = _pid_path(log_dir, name)
+  if path_exists(pid_path) == 0:
+    free(pid_path)
+    ret 0 - 1
+  pid_txt:str = io.read_all(pid_path)
+  if pid_txt == 0 || len(pid_txt) == 0:
+    if pid_txt != 0:
+      free(pid_txt)
+    free(pid_path)
+    ret 0 - 1
+  pid:int = _parse_int(pid_txt)
+  free(pid_txt)
+  if pid <= 0:
+    free(pid_path)
+    ret 0 - 1
+  cmd:str = 0 as str
+  pid_s:str = _int_to_str(pid)
+  if pid_s == 0:
+    free(pid_path)
+    ret 0 - 1
+  if _is_windows() != 0:
+    cmd = str_join3("taskkill /PID ", pid_s, " /T /F")
+  else:
+    cmd = str_join3("kill -TERM ", pid_s, "")
+  free(pid_s)
+  rc:int = proc_run(cmd)
+  free(cmd)
+  remove(pid_path)
+  free(pid_path)
+  ret rc
+
+fn service_status(path:str, name:str, log_dir:str) -> str:
+  if path == 0:
+    path = _registry_default()
+  pid_path:str = _pid_path(log_dir, name)
+  if path_exists(pid_path) == 0:
+    free(pid_path)
+    ret _dup("stopped")
+  txt:str = io.read_all(pid_path)
+  free(pid_path)
+  if txt == 0 || len(txt) == 0:
+    if txt != 0:
+      free(txt)
+    ret _dup("stopped")
+  pid:int = _parse_int(txt)
+  free(txt)
+  if pid <= 0:
+    ret _dup("stopped")
+  pid_s:str = _int_to_str(pid)
+  if pid_s == 0:
+    ret _dup("stopped")
+  if _is_windows() != 0:
+    q0:str = str_join3("tasklist /FI \"PID eq ", pid_s, "\" | find \"")
+    q1:str = str_join2(q0, pid_s)
+    free(q0)
+    q2:str = str_join2(q1, "\"")
+    free(q1)
+    out:str = proc_out(q2)
+    free(q2)
+    free(pid_s)
+    if out != 0 && len(out) > 0:
+      free(out)
+      ret _dup("running")
+    if out != 0:
+      free(out)
+    ret _dup("stopped")
+  q3:str = str_join3("kill -0 ", pid_s, " >/dev/null 2>&1; echo $?")
+  free(pid_s)
+  out2:str = proc_out(q3)
+  free(q3)
+  if out2 != 0:
+    if len(out2) > 0 && out2[0] == 48 as char:
+      free(out2)
+      ret _dup("running")
+    free(out2)
+  ret _dup("stopped")
+
+fn service_list(path:str) -> str:
+  reg:*TnxValue = _registry_load(path)
+  out:str = _dup("")
+  i:int = 0
+  while 1:
+    it:*TnxValue = tnx.arr_get(reg, i)
+    if it == 0:
+      break
+    nv:*TnxValue = tnx.obj_get(it, "name")
+    cv:*TnxValue = tnx.obj_get(it, "cmd")
+    ev:*TnxValue = tnx.obj_get(it, "enabled")
+    nm:str = ""
+    cm:str = ""
+    if nv != 0 && tnx.tnx_as_str(nv) != 0:
+      nm = tnx.tnx_as_str(nv)
+    if cv != 0 && tnx.tnx_as_str(cv) != 0:
+      cm = tnx.tnx_as_str(cv)
+    en:int = 1
+    if ev != 0:
+      en = tnx.tnx_as_int(ev)
+    en_s:str = _int_to_str(en)
+    l0:str = str_join3(nm, " | ", cm)
+    l1:str = str_join3(l0, " | enabled=", en_s)
+    free(l0)
+    free(en_s)
+    if i > 0:
+      t0:str = str_join2(out, "\n")
+      free(out)
+      out = t0
+    t1:str = str_join2(out, l1)
+    free(out)
+    free(l1)
+    out = t1
+    i = i + 1
+  tnx.release(reg)
+  ret out

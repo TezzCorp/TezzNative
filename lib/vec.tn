@@ -1,0 +1,332 @@
+// vec module — type-erased dynamic array (growable slice)
+// All elements have the same size (elem_size). Use unsafe blocks to
+// read/write typed elements.
+//
+// Usage:
+//   v:*Vec = vec_new(sizeof(int))
+//   val:int = 42
+//   vec_push(v, &val as *char)
+//   got:int = 0
+//   vec_get_copy(v, 0, &got as *char)
+//   vec_free(v)
+
+struct Vec:
+  data:*char
+  len:int
+  cap:int
+  elem_size:int
+
+let VEC_INITIAL_CAP:int = 16
+
+// Create a new empty vector with given element size
+fn vec_new(elem_size:int) -> *Vec:
+  if elem_size <= 0:
+    ret 0 as *Vec
+  v:*Vec = (*Vec)malloc(sizeof(Vec))
+  if v == 0:
+    ret 0 as *Vec
+  (*v).data = malloc(elem_size * VEC_INITIAL_CAP)
+  if (*v).data == 0:
+    free(v)
+    ret 0 as *Vec
+  (*v).len = 0
+  (*v).cap = VEC_INITIAL_CAP
+  (*v).elem_size = elem_size
+  ret v
+
+// Create vector pre-allocated with cap elements (len=0)
+fn vec_new_cap(elem_size:int, cap:int) -> *Vec:
+  if elem_size <= 0 || cap <= 0:
+    ret vec_new(elem_size)
+  v:*Vec = (*Vec)malloc(sizeof(Vec))
+  if v == 0:
+    ret 0 as *Vec
+  (*v).data = malloc(elem_size * cap)
+  if (*v).data == 0:
+    free(v)
+    ret 0 as *Vec
+  (*v).len = 0
+  (*v).cap = cap
+  (*v).elem_size = elem_size
+  ret v
+
+// Internal: grow capacity to at least min_cap
+fn _vec_grow(v:*Vec, min_cap:int) -> int:
+  if v == 0:
+    ret 0 - 1
+  new_cap:int = (*v).cap * 2
+  if new_cap < min_cap:
+    new_cap = min_cap
+  elem:int = (*v).elem_size
+  new_data:*char = malloc(elem * new_cap)
+  if new_data == 0:
+    ret 0 - 1
+  if (*v).len > 0:
+    unsafe:
+      memcpy(new_data, (*v).data, (*v).len * elem)
+  free((*v).data)
+  (*v).data = new_data
+  (*v).cap = new_cap
+  ret 0
+
+// Push element (copy elem_size bytes from src)
+fn vec_push(v:*Vec, src:*char) -> int:
+  if v == 0 || src == 0:
+    ret 0 - 1
+  if (*v).len >= (*v).cap:
+    if _vec_grow(v, (*v).cap + 1) != 0:
+      ret 0 - 1
+  elem:int = (*v).elem_size
+  offset:int = (*v).len * elem
+  unsafe:
+    memcpy((*v).data + offset, src, elem)
+  (*v).len = (*v).len + 1
+  ret 0
+
+// Pop last element into dst (copies elem_size bytes)
+fn vec_pop(v:*Vec, dst:*char) -> int:
+  if v == 0 || (*v).len <= 0:
+    ret 0 - 1
+  (*v).len = (*v).len - 1
+  if dst != 0:
+    elem:int = (*v).elem_size
+    offset:int = (*v).len * elem
+    unsafe:
+      memcpy(dst, (*v).data + offset, elem)
+  ret 0
+
+// Get pointer to element at index (no bounds check in release)
+fn vec_at(v:*Vec, idx:int) -> *char:
+  if v == 0 || idx < 0 || idx >= (*v).len:
+    ret 0 as *char
+  unsafe:
+    ret (*v).data + idx * (*v).elem_size
+
+// Copy element at index into dst
+fn vec_get_copy(v:*Vec, idx:int, dst:*char) -> int:
+  p:*char = vec_at(v, idx)
+  if p == 0 || dst == 0:
+    ret 0 - 1
+  unsafe:
+    memcpy(dst, p, (*v).elem_size)
+  ret 0
+
+// Set element at index from src
+fn vec_set(v:*Vec, idx:int, src:*char) -> int:
+  p:*char = vec_at(v, idx)
+  if p == 0 || src == 0:
+    ret 0 - 1
+  unsafe:
+    memcpy(p, src, (*v).elem_size)
+  ret 0
+
+// Insert element at index, shifting elements right
+fn vec_insert(v:*Vec, idx:int, src:*char) -> int:
+  if v == 0 || src == 0 || idx < 0 || idx > (*v).len:
+    ret 0 - 1
+  if (*v).len >= (*v).cap:
+    if _vec_grow(v, (*v).cap + 1) != 0:
+      ret 0 - 1
+  elem:int = (*v).elem_size
+  // Shift elements [idx, len) right by one
+  if idx < (*v).len:
+    from:int = idx * elem
+    count:int = ((*v).len - idx) * elem
+    unsafe:
+      memmove((*v).data + from + elem, (*v).data + from, count)
+  unsafe:
+    memcpy((*v).data + idx * elem, src, elem)
+  (*v).len = (*v).len + 1
+  ret 0
+
+// Remove element at index, shifting elements left
+fn vec_remove(v:*Vec, idx:int) -> int:
+  if v == 0 || idx < 0 || idx >= (*v).len:
+    ret 0 - 1
+  elem:int = (*v).elem_size
+  if idx < (*v).len - 1:
+    from:int = (idx + 1) * elem
+    count:int = ((*v).len - idx - 1) * elem
+    unsafe:
+      memmove((*v).data + idx * elem, (*v).data + from, count)
+  (*v).len = (*v).len - 1
+  ret 0
+
+// Remove by swapping with last (O(1), doesn't preserve order)
+fn vec_remove_swap(v:*Vec, idx:int) -> int:
+  if v == 0 || idx < 0 || idx >= (*v).len:
+    ret 0 - 1
+  last:int = (*v).len - 1
+  if idx != last:
+    elem:int = (*v).elem_size
+    unsafe:
+      memcpy((*v).data + idx * elem, (*v).data + last * elem, elem)
+  (*v).len = (*v).len - 1
+  ret 0
+
+// Return number of elements
+fn vec_len(v:*Vec) -> int:
+  if v == 0:
+    ret 0
+  ret (*v).len
+
+// Return capacity
+fn vec_cap(v:*Vec) -> int:
+  if v == 0:
+    ret 0
+  ret (*v).cap
+
+// Return 1 if empty
+fn vec_empty(v:*Vec) -> int:
+  if v == 0:
+    ret 1
+  ret (*v).len == 0
+
+// Clear all elements (doesn't free memory)
+fn vec_clear(v:*Vec) -> int:
+  if v == 0:
+    ret 0 - 1
+  (*v).len = 0
+  ret 0
+
+// Reserve at least min_cap elements
+fn vec_reserve(v:*Vec, min_cap:int) -> int:
+  if v == 0 || min_cap <= (*v).cap:
+    ret 0
+  ret _vec_grow(v, min_cap)
+
+// Shrink internal buffer to exactly len elements
+fn vec_shrink(v:*Vec) -> int:
+  if v == 0 || (*v).len <= 0:
+    ret 0
+  new_data:*char = malloc((*v).len * (*v).elem_size)
+  if new_data == 0:
+    ret 0 - 1
+  unsafe:
+    memcpy(new_data, (*v).data, (*v).len * (*v).elem_size)
+  free((*v).data)
+  (*v).data = new_data
+  (*v).cap = (*v).len
+  ret 0
+
+// Free vector and its data
+fn vec_free(v:*Vec) -> int:
+  if v == 0:
+    ret 0 - 1
+  if (*v).data != 0:
+    free((*v).data)
+  free(v)
+  ret 0
+
+// Extend vector with n copies of elem
+fn vec_fill(v:*Vec, src:*char, n:int) -> int:
+  if v == 0 || src == 0 || n <= 0:
+    ret 0
+  i:int = 0
+  while i < n:
+    if vec_push(v, src) != 0:
+      ret 0 - 1
+    i = i + 1
+  ret 0
+
+// Linear search: find first element equal to key (memcmp comparison)
+fn vec_find(v:*Vec, key:*char) -> int:
+  if v == 0 || key == 0:
+    ret 0 - 1
+  elem:int = (*v).elem_size
+  i:int = 0
+  while i < (*v).len:
+    unsafe:
+      if memcmp((*v).data + i * elem, key, elem) == 0:
+        ret i
+    i = i + 1
+  ret 0 - 1
+
+// Iterate: call cb(elem_ptr, user_data) for each element
+// cb returns 0 to continue, non-zero to stop
+fn vec_foreach(v:*Vec, cb:fn(*char, *char)->int, user:*char) -> int:
+  if v == 0 || cb == 0:
+    ret 0
+  elem:int = (*v).elem_size
+  i:int = 0
+  while i < (*v).len:
+    p:*char = 0 as *char
+    unsafe:
+      p = (*v).data + i * elem
+    if cb(p, user) != 0:
+      ret i
+    i = i + 1
+  ret 0 - 1
+
+// ---------------------------------------------------------------------------
+// Convenience: int vector
+// ---------------------------------------------------------------------------
+
+fn ivec_new() -> *Vec:
+  ret vec_new(8)
+
+fn ivec_push(v:*Vec, val:int) -> int:
+  local_val:int = val
+  ret vec_push(v, (&local_val) as *char)
+
+fn ivec_pop(v:*Vec, out:*int) -> int:
+  ret vec_pop(v, out as *char)
+
+fn ivec_get(v:*Vec, idx:int) -> int:
+  p:*int = (*int)vec_at(v, idx)
+  if p == 0:
+    ret 0
+  ret *p
+
+fn ivec_set(v:*Vec, idx:int, val:int) -> int:
+  local_val:int = val
+  ret vec_set(v, idx, (&local_val) as *char)
+
+// ---------------------------------------------------------------------------
+// Convenience: float vector
+// ---------------------------------------------------------------------------
+
+fn fvec_new() -> *Vec:
+  ret vec_new(8)
+
+fn fvec_push(v:*Vec, val:float) -> int:
+  local_val:float = val
+  ret vec_push(v, (&local_val) as *char)
+
+fn fvec_get(v:*Vec, idx:int) -> float:
+  p:*float = (*float)vec_at(v, idx)
+  if p == 0:
+    ret 0.0
+  ret *p
+
+fn fvec_set(v:*Vec, idx:int, val:float) -> int:
+  local_val:float = val
+  ret vec_set(v, idx, (&local_val) as *char)
+
+// ---------------------------------------------------------------------------
+// Convenience: string (str) vector
+// ---------------------------------------------------------------------------
+
+fn svec_new() -> *Vec:
+  ret vec_new(8)    // str is a pointer (8 bytes on 64-bit)
+
+fn svec_push(v:*Vec, s:str) -> int:
+  local_s:str = s
+  ret vec_push(v, (&local_s) as *char)
+
+fn svec_get(v:*Vec, idx:int) -> str:
+  p:*str = (*str)vec_at(v, idx)
+  if p == 0:
+    ret 0 as str
+  ret *p
+
+fn svec_free_all(v:*Vec) -> int:
+  if v == 0:
+    ret 0
+  i:int = 0
+  while i < (*v).len:
+    s:str = svec_get(v, i)
+    if s != 0:
+      free(s)
+    i = i + 1
+  ret vec_free(v)

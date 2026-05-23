@@ -1,0 +1,740 @@
+// tezzui.tn — TezzNative Production UI Library v1.2
+// Immediate-mode widgets — no OS imports, pure gui_win bridge.
+
+import "gui_win"
+
+// ── Color palette ─────────────────────────────────────
+let TZ_BG      :int = 0x070B14
+let TZ_SURFACE :int = 0x0F1523
+let TZ_TITLEBAR:int = 0x16213A
+let TZ_ACCENT  :int = 0x2D5BE3
+let TZ_ACCENT2 :int = 0x4D82F0
+let TZ_BTN     :int = 0x1A3E8C
+let TZ_BTN_HOV :int = 0x2756C5
+let TZ_BTN_ACT :int = 0x0D2257
+let TZ_TEXT    :int = 0xE0EAFF
+let TZ_MUTED   :int = 0x8899AA
+let TZ_SUCCESS :int = 0x22CC88
+let TZ_WARN    :int = 0xF59E0B
+let TZ_ERROR   :int = 0xEF4444
+let TZ_WHITE   :int = 0xFFFFFF
+let TZ_BLACK   :int = 0x000000
+let TZ_SHADOW  :int = 0x03050A
+let TZ_BORDER  :int = 0x1A2C54
+
+// ── Font sizes ────────────────────────────────────────
+let TZ_SM:int = 1
+let TZ_MD:int = 2
+let TZ_LG:int = 3
+let TZ_XL:int = 4
+
+// ── UI context ────────────────────────────────────────
+struct TzUI:
+  mx:int
+  my:int
+  mb:int
+  pmb:int
+  key:int
+  tick:int
+  W:int
+  H:int
+  quit:int
+
+// ── Lifecycle ─────────────────────────────────────────
+fn ui_create(ctx:*TzUI, title:str, W:int, H:int) -> int:
+  ctx[0].mx   = 0
+  ctx[0].my   = 0
+  ctx[0].mb   = 0
+  ctx[0].pmb  = 0
+  ctx[0].key  = 0
+  ctx[0].tick = 0
+  ctx[0].W    = W
+  ctx[0].H    = H
+  ctx[0].quit = 0
+  gui_win.fb_init_ex(title, W, H)
+  ret 0
+
+fn ui_alive(ctx:*TzUI) -> int:
+  ret 1 - ctx[0].quit
+
+fn ui_begin(ctx:*TzUI) -> int:
+  ctx[0].pmb = ctx[0].mb
+  ctx[0].mb  = gui_win.mouse_buttons()
+  ctx[0].mx  = gui_win.mouse_pos_x()
+  ctx[0].my  = gui_win.mouse_pos_y()
+  ctx[0].W   = gui_win.fb_width()
+  ctx[0].H   = gui_win.fb_height()
+  ctx[0].key = 0
+  if gui_win.kbd_has_event() != 0:
+    ctx[0].key = gui_win.kbd_read_char()
+  gui_win.fb_fill(TZ_BG)
+  ret 0
+
+fn ui_end(ctx:*TzUI) -> int:
+  gui_win.fb_present()
+  k:int = ctx[0].key
+  if k == 27:
+    ctx[0].quit = 1
+  ctx[0].tick = ctx[0].tick + 1
+  ret 0
+
+// ── Internal helpers ──────────────────────────────────
+fn _hit(ctx:*TzUI, x:int, y:int, w:int, h:int) -> int:
+  if ctx[0].mx < x:
+    ret 0
+  if ctx[0].my < y:
+    ret 0
+  if ctx[0].mx >= x+w:
+    ret 0
+  if ctx[0].my >= y+h:
+    ret 0
+  ret 1
+
+fn _clicked(ctx:*TzUI, x:int, y:int, w:int, h:int) -> int:
+  if _hit(ctx,x,y,w,h) == 0:
+    ret 0
+  if (ctx[0].mb & 1) != 0 && (ctx[0].pmb & 1) == 0:
+    ret 1
+  ret 0
+
+fn _R(x:int,y:int,w:int,h:int,c:int) -> int:
+  ret gui_win.fb_fill_rect(x,y,w,h,c)
+
+fn _RR(x:int,y:int,w:int,h:int,c:int,r:int) -> int:
+  ret gui_win.fb_fill_rounded(x,y,w,h,c,r)
+
+fn _T(x:int,y:int,s:str,c:int) -> int:
+  ret gui_win.fb_text(x,y,s,c)
+
+fn _TX(x:int,y:int,s:str,c:int,sc:int,b:int) -> int:
+  ret gui_win.fb_text_ex(x,y,s,c,sc,b)
+
+fn _slen(s:str) -> int:
+  n:int = 0
+  while s[n] != 0:
+    n = n+1
+  ret n
+
+// ── Primitives ────────────────────────────────────────
+fn ui_clear(ctx:*TzUI, color:int) -> int:
+  ret gui_win.fb_fill(color)
+
+fn ui_rect(ctx:*TzUI, x:int,y:int,w:int,h:int,color:int) -> int:
+  ret _R(x,y,w,h,color)
+
+fn ui_rect_r(ctx:*TzUI, x:int,y:int,w:int,h:int,color:int,r:int) -> int:
+  ret _RR(x,y,w,h,color,r)
+
+fn ui_label(ctx:*TzUI, x:int,y:int,text:str,color:int,scale:int,bold:int) -> int:
+  if scale <= 1 && bold == 0:
+    ret _T(x,y,text,color)
+  ret _TX(x,y,text,color,scale,bold)
+
+fn ui_sep(ctx:*TzUI, x:int,y:int,w:int) -> int:
+  _R(x,y,w,1,TZ_BORDER)
+  ret 0
+
+fn ui_vsep(ctx:*TzUI, x:int,y:int,h:int) -> int:
+  _R(x,y,1,h,TZ_BORDER)
+  ret 0
+
+// ── Panel / Card ─────────────────────────────────────
+fn ui_panel(ctx:*TzUI, x:int,y:int,w:int,h:int,title:str) -> int:
+  _R(x+4,y+4,w,h,TZ_SHADOW)
+  _RR(x,y,w,h,TZ_SURFACE,4)
+  _RR(x,y,w,28,TZ_TITLEBAR,4)
+  _R(x+4,y,w-8,2,TZ_ACCENT)
+  _TX(x+10,y+9,title,TZ_TEXT,1,1)
+  _RR(x+w-24,y+6,18,18,0x8B1C1C,3)
+  _T(x+w-20,y+10,"x",0xFF8080)
+  _R(x,y,1,h,TZ_BORDER)
+  _R(x+w-1,y,1,h,TZ_BORDER)
+  _R(x,y+h-1,w,1,TZ_BORDER)
+  ret 0
+
+fn ui_card(ctx:*TzUI, x:int,y:int,w:int,h:int) -> int:
+  _R(x+3,y+3,w,h,TZ_SHADOW)
+  _RR(x,y,w,h,0x111827,4)
+  _R(x+4,y,w-8,1,TZ_BORDER)
+  ret 0
+
+// ── Button variants ───────────────────────────────────
+fn ui_button(ctx:*TzUI, x:int,y:int,w:int,h:int,label:str) -> int:
+  hot:int     = _hit(ctx,x,y,w,h)
+  clicked:int = _clicked(ctx,x,y,w,h)
+  bg:int = TZ_BTN
+  if hot != 0:
+    bg = TZ_BTN_HOV
+  if (ctx[0].mb & 1) != 0 && hot != 0:
+    bg = TZ_BTN_ACT
+  _RR(x,y,w,h,0x080F20,3)
+  _RR(x,y,w,h-1,bg,3)
+  _R(x+4,y,w-8,1,0x5090FF)
+  n:int  = _slen(label)
+  tx:int = x + (w - n*8)/2
+  ty:int = y + (h-8)/2
+  if tx < x+4:
+    tx = x+4
+  _T(tx,ty,label,TZ_TEXT)
+  ret clicked
+
+fn ui_button_danger(ctx:*TzUI, x:int,y:int,w:int,h:int,label:str) -> int:
+  hot:int     = _hit(ctx,x,y,w,h)
+  clicked:int = _clicked(ctx,x,y,w,h)
+  bg:int = 0x7F1D1D
+  if hot != 0:
+    bg = 0xAA2222
+  if (ctx[0].mb & 1) != 0 && hot != 0:
+    bg = 0x500F0F
+  _RR(x,y,w,h,0x080F20,3)
+  _RR(x,y,w,h-1,bg,3)
+  _R(x+4,y,w-8,1,0xFF5555)
+  n:int  = _slen(label)
+  tx:int = x + (w - n*8)/2
+  ty:int = y + (h-8)/2
+  if tx < x+4:
+    tx = x+4
+  _T(tx,ty,label,TZ_TEXT)
+  ret clicked
+
+fn ui_button_ok(ctx:*TzUI, x:int,y:int,w:int,h:int,label:str) -> int:
+  hot:int     = _hit(ctx,x,y,w,h)
+  clicked:int = _clicked(ctx,x,y,w,h)
+  bg:int = 0x145C36
+  if hot != 0:
+    bg = 0x1A8050
+  if (ctx[0].mb & 1) != 0 && hot != 0:
+    bg = 0x0A3020
+  _RR(x,y,w,h,0x080F20,3)
+  _RR(x,y,w,h-1,bg,3)
+  _R(x+4,y,w-8,1,0x44EE88)
+  n:int  = _slen(label)
+  tx:int = x + (w - n*8)/2
+  ty:int = y + (h-8)/2
+  if tx < x+4:
+    tx = x+4
+  _T(tx,ty,label,TZ_TEXT)
+  ret clicked
+
+fn ui_icon_btn(ctx:*TzUI, x:int,y:int,sz:int,glyph:str,color:int) -> int:
+  hot:int     = _hit(ctx,x,y,sz,sz)
+  clicked:int = _clicked(ctx,x,y,sz,sz)
+  bg:int = 0x0A1830
+  if hot != 0:
+    bg = 0x1A3060
+  _RR(x,y,sz,sz,bg,3)
+  ox:int = (sz-8)/2
+  oy:int = (sz-8)/2
+  _T(x+ox,y+oy,glyph,color)
+  ret clicked
+
+// ── Checkbox ──────────────────────────────────────────
+fn ui_checkbox(ctx:*TzUI, x:int,y:int,label:str,checked:int) -> int:
+  state:int = checked
+  if _clicked(ctx,x,y,200,14) != 0:
+    if state != 0:
+      state = 0
+    else:
+      state = 1
+  _R(x,y,14,14,0x080E1C)
+  _R(x,y,14,1,TZ_ACCENT)
+  _R(x,y,1,14,TZ_ACCENT)
+  _R(x+13,y,1,14,TZ_ACCENT)
+  _R(x,y+13,14,1,TZ_ACCENT)
+  if state != 0:
+    _R(x+3,y+3,8,8,TZ_ACCENT)
+  _T(x+18,y+3,label,TZ_TEXT)
+  ret state
+
+// ── Radio ─────────────────────────────────────────────
+fn ui_radio(ctx:*TzUI, x:int,y:int,label:str,selected:int) -> int:
+  clicked:int = _clicked(ctx,x,y,200,14)
+  _R(x+2,y,10,1,TZ_ACCENT)
+  _R(x+2,y+13,10,1,TZ_ACCENT)
+  _R(x,y+2,1,10,TZ_ACCENT)
+  _R(x+13,y+2,1,10,TZ_ACCENT)
+  _R(x+1,y+1,12,12,0x080E1C)
+  if selected != 0:
+    _R(x+4,y+4,6,6,TZ_ACCENT2)
+  _T(x+18,y+3,label,TZ_TEXT)
+  ret clicked
+
+// ── Slider ────────────────────────────────────────────
+fn ui_slider(ctx:*TzUI, x:int,y:int,w:int,lo:int,hi:int,val:int) -> int:
+  rng:int = hi-lo
+  if rng < 1:
+    rng = 1
+  _R(x,y+6,w,4,0x080E1C)
+  _R(x,y+6,1,4,TZ_ACCENT)
+  _R(x+w-1,y+6,1,4,TZ_ACCENT)
+  filled:int = (val-lo)*(w-8)/rng
+  if filled < 0:
+    filled = 0
+  if filled > w-8:
+    filled = w-8
+  _R(x+4,y+7,filled,2,TZ_ACCENT)
+  _RR(x+filled,y+2,12,12,TZ_ACCENT2,3)
+  if _hit(ctx,x,y,w,16) != 0 && (ctx[0].mb & 1) != 0:
+    rel:int = ctx[0].mx - x - 4
+    if rel < 0:
+      rel = 0
+    if rel > w-8:
+      rel = w-8
+    val = lo + rel*rng/(w-8)
+    if val < lo:
+      val = lo
+    if val > hi:
+      val = hi
+  ret val
+
+// ── Progress bar ─────────────────────────────────────
+fn ui_progress(ctx:*TzUI, x:int,y:int,w:int,h:int,pct:int,color:int) -> int:
+  _R(x,y,w,h,0x080E1C)
+  _R(x,y,w,1,TZ_BORDER)
+  _R(x,y,1,h,TZ_BORDER)
+  _R(x+w-1,y,1,h,TZ_BORDER)
+  _R(x,y+h-1,w,1,TZ_BORDER)
+  if pct > 0:
+    filled:int = pct*(w-2)/100
+    if filled > w-2:
+      filled = w-2
+    _R(x+1,y+1,filled,h-2,color)
+  ret 0
+
+// ── Loader (animated stripe) ─────────────────────────
+fn ui_loader(ctx:*TzUI, x:int,y:int,w:int) -> int:
+  t:int = ctx[0].tick
+  _R(x,y,w,8,0x080E1C)
+  pos:int = (t*4) % (w+40)
+  sx:int = pos - 40
+  if sx < 0:
+    sx = 0
+  ex:int = pos
+  if ex > w:
+    ex = w
+  if ex > sx:
+    _R(x+sx,y,ex-sx,8,TZ_ACCENT)
+  ret 0
+
+// ── Badge ─────────────────────────────────────────────
+fn ui_badge(ctx:*TzUI, x:int,y:int,text:str,bg:int) -> int:
+  n:int  = _slen(text)
+  bw:int = n*8+12
+  _RR(x,y,bw,16,bg,2)
+  _T(x+6,y+4,text,TZ_WHITE)
+  ret 0
+
+// ── Tooltip ───────────────────────────────────────────
+fn ui_tooltip(ctx:*TzUI, x:int,y:int,text:str) -> int:
+  n:int  = _slen(text)
+  bw:int = n*8+14
+  ty:int = y - 24
+  if ty < 0:
+    ty = y+20
+  _R(x,ty,bw,20,0x1A2C54)
+  _R(x,ty,bw,1,TZ_ACCENT)
+  _T(x+7,ty+6,text,TZ_TEXT)
+  ret 0
+
+// ── Input field ───────────────────────────────────────
+fn ui_input(ctx:*TzUI, x:int,y:int,w:int,h:int,text:str) -> int:
+  focused:int = _hit(ctx,x,y,w,h)
+  bc:int = TZ_BORDER
+  if focused != 0:
+    bc = TZ_ACCENT
+  _R(x,y,w,h,0x060C1A)
+  _R(x,y,w,1,bc)
+  _R(x,y,1,h,bc)
+  _R(x+w-1,y,1,h,bc)
+  _R(x,y+h-1,w,1,bc)
+  _T(x+6,y+(h-8)/2,text,TZ_TEXT)
+  ret focused
+
+// ── Dropdown ──────────────────────────────────────────
+fn ui_dropdown(ctx:*TzUI, x:int,y:int,w:int,selected:str) -> int:
+  clicked:int = _clicked(ctx,x,y,w,28)
+  hot:int     = _hit(ctx,x,y,w,28)
+  bg:int = 0x0A1830
+  if hot != 0:
+    bg = 0x162040
+  _RR(x,y,w,28,bg,3)
+  _R(x,y,w,1,TZ_ACCENT)
+  _T(x+8,y+10,selected,TZ_TEXT)
+  _T(x+w-14,y+10,"v",TZ_MUTED)
+  ret clicked
+
+// ── List item ─────────────────────────────────────────
+fn ui_list_item(ctx:*TzUI, x:int,y:int,w:int,text:str,selected:int) -> int:
+  clicked:int = _clicked(ctx,x,y,w,28)
+  hot:int     = _hit(ctx,x,y,w,28)
+  if selected != 0:
+    _R(x,y,w,28,0x162040)
+    _R(x,y,3,28,TZ_ACCENT)
+  else:
+    if hot != 0:
+      _R(x,y,w,28,0x0C1830)
+  _T(x+12,y+10,text,TZ_TEXT)
+  _R(x,y+27,w,1,0x0A1020)
+  ret clicked
+
+// ── Sidebar nav ───────────────────────────────────────
+fn ui_nav(ctx:*TzUI, x:int,y:int,w:int,label:str,active:int) -> int:
+  clicked:int = _clicked(ctx,x,y,w,32)
+  hot:int     = _hit(ctx,x,y,w,32)
+  if active != 0:
+    _R(x,y,3,32,TZ_ACCENT)
+    _R(x+3,y,w-3,32,0x162040)
+    _T(x+12,y+12,label,TZ_TEXT)
+  else:
+    if hot != 0:
+      _R(x,y,w,32,0x0E1A2E)
+    _T(x+12,y+12,label,TZ_MUTED)
+  ret clicked
+
+// ── Tab ───────────────────────────────────────────────
+fn ui_tab(ctx:*TzUI, x:int,y:int,w:int,label:str,active:int) -> int:
+  clicked:int = _clicked(ctx,x,y,w,28)
+  hot:int     = _hit(ctx,x,y,w,28)
+  n:int  = _slen(label)
+  tx:int = x + (w - n*8)/2
+  if active != 0:
+    _R(x,y,w,28,TZ_SURFACE)
+    _R(x,y+26,w,2,TZ_ACCENT)
+    _T(tx,y+10,label,TZ_TEXT)
+  else:
+    if hot != 0:
+      _R(x,y,w,28,0x0C1422)
+    _T(tx,y+10,label,TZ_MUTED)
+  ret clicked
+
+// ── Stat card ─────────────────────────────────────────
+fn ui_stat(ctx:*TzUI, x:int,y:int,w:int,h:int,num:str,label:str,color:int) -> int:
+  ui_card(ctx,x,y,w,h)
+  _T(x+12,y+12,label,TZ_MUTED)
+  _TX(x+12,y+30,num,color,2,1)
+  ret 0
+
+// ── Image placeholder ────────────────────────────────
+fn ui_image_box(ctx:*TzUI, x:int,y:int,w:int,h:int,label:str) -> int:
+  _RR(x,y,w,h,0x080E1C,4)
+  _R(x,y,w,1,TZ_BORDER)
+  _R(x,y,1,h,TZ_BORDER)
+  _R(x+w-1,y,1,h,TZ_BORDER)
+  _R(x,y+h-1,w,1,TZ_BORDER)
+  _R(x+w/2-1,y+4,2,h-8,0x1A2C54)
+  _R(x+4,y+h/2-1,w-8,2,0x1A2C54)
+  n:int = _slen(label)
+  _T(x+(w-n*8)/2,y+h/2+4,label,TZ_MUTED)
+  ret 0
+
+// ── Scrollbar (vertical) ─────────────────────────────
+fn ui_scrollbar(ctx:*TzUI, x:int,y:int,h:int,content_h:int,offset:int) -> int:
+  _R(x,y,8,h,0x080E1C)
+  if content_h <= h:
+    ret offset
+  thumb_h:int = h*h/content_h
+  if thumb_h < 16:
+    thumb_h = 16
+  max_off:int = content_h - h
+  if max_off < 1:
+    max_off = 1
+  thumb_y:int = y + offset*(h-thumb_h)/max_off
+  hot:int = _hit(ctx,x,y,8,h)
+  if hot != 0 && (ctx[0].mb & 1) != 0:
+    rel:int = ctx[0].my - y - thumb_h/2
+    if rel < 0:
+      rel = 0
+    if rel > h-thumb_h:
+      rel = h-thumb_h
+    offset = rel * max_off / (h-thumb_h)
+    if offset < 0:
+      offset = 0
+    if offset > max_off:
+      offset = max_off
+  tc:int = TZ_BORDER
+  if hot != 0:
+    tc = TZ_ACCENT
+  _RR(x+1,thumb_y,6,thumb_h,tc,2)
+  ret offset
+
+// ── Taskbar ───────────────────────────────────────────
+fn ui_taskbar(ctx:*TzUI, app_name:str) -> int:
+  H:int = ctx[0].H
+  W:int = ctx[0].W
+  _R(0,H-36,W,36,0x06090F)
+  _R(0,H-36,W,1,TZ_BORDER)
+  _RR(4,H-30,80,24,TZ_ACCENT,3)
+  _T(16,H-24,"Start",TZ_WHITE)
+  n:int = _slen(app_name)
+  _T(W - n*8 - 8,H-24,app_name,TZ_MUTED)
+  ret 0
+
+// ── Toast notification ────────────────────────────────
+fn ui_toast(ctx:*TzUI, text:str, color:int) -> int:
+  n:int  = _slen(text)
+  bw:int = n*8 + 24
+  tx:int = ctx[0].W - bw - 12
+  _RR(tx,8,bw,32,0x111827,4)
+  _R(tx,8,3,32,color)
+  _T(tx+10,16,text,TZ_TEXT)
+  ret 0
+
+// ── Web UI Components Compatibility ─────────────────────────────────
+
+fn _web_dup(s:str) -> str:
+  if s == 0:
+    ret 0 as str
+  n:int = len(s)
+  out:*char = malloc(n + 1)
+  if out == 0:
+    ret 0 as str
+  if n > 0:
+    unsafe:
+      memcpy(out, s as *char, n)
+  out[n] = 0 as char
+  ret out as str
+
+fn _web_join2(a:str, b:str) -> str:
+  if a == 0:
+    a = ""
+  if b == 0:
+    b = ""
+  na:int = len(a)
+  nb:int = len(b)
+  out:*char = malloc(na + nb + 1)
+  if out == 0:
+    ret 0 as str
+  if na > 0:
+    unsafe:
+      memcpy(out, a as *char, na)
+  if nb > 0:
+    unsafe:
+      memcpy(out + na, b as *char, nb)
+  out[na + nb] = 0 as char
+  ret out as str
+
+fn _web_join3(a:str, b:str, c:str) -> str:
+  t0:str = _web_join2(a, b)
+  if t0 == 0:
+    ret 0 as str
+  out:str = _web_join2(t0, c)
+  free(t0)
+  ret out
+
+fn _web_slice(s:str, a:int, b:int) -> str:
+  if s == 0:
+    ret 0 as str
+  n:int = len(s)
+  if a < 0:
+    a = 0
+  if b < a:
+    b = a
+  if b > n:
+    b = n
+  m:int = b - a
+  out:*char = malloc(m + 1)
+  if out == 0:
+    ret 0 as str
+  if m > 0:
+    unsafe:
+      memcpy(out, (s as *char) + a, m)
+  out[m] = 0 as char
+  ret out as str
+
+fn _web_append(dst:*str, part:str) -> int:
+  if dst == 0 || part == 0:
+    ret 0
+  if dst[0] == 0:
+    dst[0] = _web_dup(part)
+    ret 0
+  next:str = _web_join2(dst[0], part)
+  free(dst[0])
+  dst[0] = next
+  ret 0
+
+fn _web_non_empty(s:str) -> int:
+  if s == 0:
+    ret 0
+  ret len(s) > 0
+
+fn html_escape(s:str) -> str:
+  if s == 0:
+    ret _web_dup("")
+  out:str = _web_dup("")
+  i:int = 0
+  while s[i] != 0 as char:
+    c:int = s[i] as int
+    if c == 38:
+      _web_append(&out, "&amp;")
+    else if c == 60:
+      _web_append(&out, "&lt;")
+    else if c == 62:
+      _web_append(&out, "&gt;")
+    else if c == 34:
+      _web_append(&out, "&quot;")
+    else if c == 39:
+      _web_append(&out, "&#39;")
+    else:
+      ch:str = _web_slice(s, i, i + 1)
+      _web_append(&out, ch)
+      if ch != 0:
+        free(ch)
+    i = i + 1
+  ret out
+
+fn attr(key:str, val:str) -> str:
+  if key == 0 || len(key) == 0:
+    ret _web_dup("")
+  ev:str = html_escape(val)
+  t0:str = _web_join3(key, "=\"", "")
+  t1:str = _web_join2(t0, ev)
+  free(t0)
+  t2:str = _web_join2(t1, "\"")
+  free(t1)
+  free(ev)
+  ret t2
+
+fn attrs_join(a:str, b:str) -> str:
+  if _web_non_empty(a) == 0:
+    ret _web_dup(b)
+  if _web_non_empty(b) == 0:
+    ret _web_dup(a)
+  t0:str = _web_join3(a, " ", b)
+  ret t0
+
+fn tag(name:str, attrs:str, body:str) -> str:
+  if name == 0 || len(name) == 0:
+    ret _web_dup("")
+  t0:str = _web_join3("<", name, "")
+  if _web_non_empty(attrs) != 0:
+    t1:str = _web_join3(t0, " ", attrs)
+    free(t0)
+    t0 = t1
+  t2:str = _web_join2(t0, ">")
+  free(t0)
+  if body == 0:
+    body = ""
+  t3:str = _web_join2(t2, body)
+  free(t2)
+  t4:str = _web_join3(t3, "</", name)
+  free(t3)
+  t5:str = _web_join2(t4, ">")
+  free(t4)
+  ret t5
+
+fn tag_empty(name:str, attrs:str) -> str:
+  if name == 0 || len(name) == 0:
+    ret _web_dup("")
+  t0:str = _web_join3("<", name, "")
+  if _web_non_empty(attrs) != 0:
+    t1:str = _web_join3(t0, " ", attrs)
+    free(t0)
+    t0 = t1
+  t2:str = _web_join2(t0, " />")
+  free(t0)
+  ret t2
+
+fn text(s:str) -> str:
+  ret html_escape(s)
+
+fn div(attrs:str, body:str) -> str:
+  ret tag("div", attrs, body)
+
+fn span(attrs:str, body:str) -> str:
+  ret tag("span", attrs, body)
+
+fn h1(attrs:str, body:str) -> str:
+  ret tag("h1", attrs, body)
+
+fn p(attrs:str, body:str) -> str:
+  ret tag("p", attrs, body)
+
+fn button(label:str, idv:str, classv:str, action:str) -> str:
+  a0:str = _web_dup("")
+  if _web_non_empty(idv) != 0:
+    id_attr:str = attr("id", idv)
+    a1:str = attrs_join(a0, id_attr)
+    free(a0)
+    free(id_attr)
+    a0 = a1
+  if _web_non_empty(classv) != 0:
+    cls_attr:str = attr("class", classv)
+    a2:str = attrs_join(a0, cls_attr)
+    free(a0)
+    free(cls_attr)
+    a0 = a2
+  if _web_non_empty(action) != 0:
+    act_attr:str = attr("data-action", action)
+    a3:str = attrs_join(a0, act_attr)
+    free(a0)
+    free(act_attr)
+    a0 = a3
+  lab:str = text(label)
+  out:str = tag("button", a0, lab)
+  free(a0)
+  free(lab)
+  ret out
+
+fn input_text(namev:str, valuev:str, placeholderv:str, classv:str) -> str:
+  attrs:str = _web_dup("")
+  nm:str = attr("name", namev)
+  a1:str = attrs_join(attrs, nm)
+  free(attrs)
+  free(nm)
+  attrs = a1
+  tp:str = attr("type", "text")
+  a2:str = attrs_join(attrs, tp)
+  free(attrs)
+  free(tp)
+  attrs = a2
+  if _web_non_empty(valuev) != 0:
+    vv:str = attr("value", valuev)
+    a3:str = attrs_join(attrs, vv)
+    free(attrs)
+    free(vv)
+    attrs = a3
+  if _web_non_empty(placeholderv) != 0:
+    ph:str = attr("placeholder", placeholderv)
+    a4:str = attrs_join(attrs, ph)
+    free(attrs)
+    free(ph)
+    attrs = a4
+  if _web_non_empty(classv) != 0:
+    cl:str = attr("class", classv)
+    a5:str = attrs_join(attrs, cl)
+    free(attrs)
+    free(cl)
+    attrs = a5
+  out:str = tag_empty("input", attrs)
+  free(attrs)
+  ret out
+
+fn card(title:str, body_html:str, classv:str) -> str:
+  ttl:str = text(title)
+  h:str = tag("h3", "", ttl)
+  free(ttl)
+  content:str = _web_join2(h, body_html)
+  free(h)
+  attrs:str = _web_dup("class=\"tezzui-card\"")
+  if _web_non_empty(classv) != 0:
+    x:str = attr("data-variant", classv)
+    a1:str = attrs_join(attrs, x)
+    free(attrs)
+    free(x)
+    attrs = a1
+  out:str = tag("section", attrs, content)
+  free(attrs)
+  free(content)
+  ret out
+
+fn page(title:str, body_html:str) -> str:
+  tt:str = text(title)
+  t0:str = _web_join2("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>", tt)
+  free(tt)
+  t1:str = _web_join2(t0, "</title><style>body{font-family:Inter,Segoe UI,Arial,sans-serif;margin:0;padding:24px;background:#0e1116;color:#e8eef7}.tezzui-card{background:#171c24;border:1px solid #283243;border-radius:12px;padding:16px;margin-bottom:12px}button{background:#2f8cff;color:#fff;border:0;border-radius:8px;padding:10px 14px;cursor:pointer}input{padding:10px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#fff}</style></head><body>")
+  free(t0)
+  t2:str = _web_join2(t1, body_html)
+  free(t1)
+  t3:str = _web_join2(t2, "</body></html>")
+  free(t2)
+  ret t3

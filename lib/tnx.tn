@@ -1,0 +1,1516 @@
+// TezzNative eXchange (TNX): JSON-like data encoding for payloads and storage.
+// Types: null, bool, int, float, string, array, object.
+// Memory: all returned values/strings are heap-allocated; call tnx.release().
+
+import "io"
+
+let TNX_NULL:int = 0
+let TNX_BOOL:int = 1
+let TNX_INT:int = 2
+let TNX_FLOAT:int = 3
+let TNX_STR:int = 4
+let TNX_ARR:int = 4 + 1
+let TNX_OBJ:int = 4 + 2
+
+struct TnxValue:
+  kind:int
+  i:int
+  f:float
+  s:*char
+  head:*TnxNode
+
+struct TnxNode:
+  key:*char
+  val:*TnxValue
+  next:*TnxNode
+
+struct TnxBytes:
+  buf:*char
+  len:int
+
+struct TnxBb:
+  buf:*char
+  len:int
+  cap:int
+
+fn tnx_is_space(c:int) -> int:
+  ret c == 32 || c == 9 || c == 10 || c == 13
+
+fn tnx_hex_val(c:int) -> int:
+  if c >= 48 && c <= 57:
+    ret c - 48
+  if c >= 65 && c <= 70:
+    ret c - 55
+  if c >= 97 && c <= 102:
+    ret c - 87
+  ret 0 - 1
+
+fn tnx_strdup(s:str) -> str:
+  if s == 0:
+    ret 0 as str
+  n:int = len(s)
+  out:*char = (*char)malloc(n + 1)
+  i:int = 0
+  while i < n:
+    out[i] = s[i]
+    i = i + 1
+  out[n] = 0 as char
+  ret out
+
+fn tnx_substr(s:str, a:int, b:int) -> str:
+  if s == 0:
+    ret 0 as str
+  if b < a:
+    ret 0 as str
+  n:int = b - a
+  out:*char = (*char)malloc(n + 1)
+  i:int = 0
+  while i < n:
+    out[i] = s[a + i]
+    i = i + 1
+  out[n] = 0 as char
+  ret out
+
+fn tnx_int_to_str(x:int) -> str:
+  neg:int = 0
+  v:int = x
+  if v < 0:
+    neg = 1
+    v = 0 - v
+  buf:[char;32]
+  i:int = 0
+  if v == 0:
+    buf[i] = 48 as char
+    i = i + 1
+  else:
+    while v > 0:
+      d:int = v % 10
+      buf[i] = (48 + d) as char
+      i = i + 1
+      v = v / 10
+  if neg != 0:
+    buf[i] = 45 as char
+    i = i + 1
+  out:*char = (*char)malloc(i + 1)
+  j:int = 0
+  while j < i:
+    out[j] = buf[i - 1 - j]
+    j = j + 1
+  out[i] = 0 as char
+  ret out
+
+fn tnx_new(kind:int) -> *TnxValue:
+  v:*TnxValue = (*TnxValue)malloc(sizeof(TnxValue))
+  (*v).kind = kind
+  (*v).i = 0
+  (*v).f = 0.0
+  (*v).s = 0 as *char
+  (*v).head = 0 as *TnxNode
+  ret v
+
+fn tnx_null() -> *TnxValue:
+  ret tnx_new(TNX_NULL)
+
+fn tnx_bool(b:int) -> *TnxValue:
+  v:*TnxValue = tnx_new(TNX_BOOL)
+  (*v).i = b != 0
+  ret v
+
+fn tnx_int(x:int) -> *TnxValue:
+  v:*TnxValue = tnx_new(TNX_INT)
+  (*v).i = x
+  ret v
+
+fn tnx_float(x:float) -> *TnxValue:
+  v:*TnxValue = tnx_new(TNX_FLOAT)
+  (*v).f = x
+  ret v
+
+fn tnx_str(s:str) -> *TnxValue:
+  v:*TnxValue = tnx_new(TNX_STR)
+  (*v).s = tnx_strdup(s)
+  ret v
+
+fn tnx_arr() -> *TnxValue:
+  k:int = 5
+  v:*TnxValue = tnx_new(k)
+  ret v
+
+fn tnx_obj() -> *TnxValue:
+  k:int = 6
+  v:*TnxValue = tnx_new(k)
+  ret v
+
+fn tnx_arr_push_take(arr:*TnxValue, v:*TnxValue) -> int:
+  if arr == 0 || (*arr).kind != 5:
+    ret 0 - 1
+  n:*TnxNode = (*TnxNode)malloc(sizeof(TnxNode))
+  if n == 0:
+    ret 0 - 1
+  (*n).key = 0 as *char
+  (*n).val = v
+  (*n).next = 0 as *TnxNode
+  if (*arr).head == 0:
+    (*arr).head = n
+    ret 0
+  cur:*TnxNode = (*arr).head
+  while (*cur).next != 0:
+    cur = (*cur).next
+  (*cur).next = n
+  ret 0
+
+fn tnx_obj_set_take(obj:*TnxValue, key:str, v:*TnxValue) -> int:
+  if obj == 0 || (*obj).kind != 6 || key == 0:
+    ret 0 - 1
+  n:*TnxNode = (*TnxNode)malloc(sizeof(TnxNode))
+  if n == 0:
+    ret 0 - 1
+  (*n).key = tnx_strdup(key)
+  if (*n).key == 0:
+    free(n)
+    ret 0 - 1
+  (*n).val = v
+  (*n).next = 0 as *TnxNode
+  if (*obj).head == 0:
+    (*obj).head = n
+  else:
+    cur:*TnxNode = (*obj).head
+    while (*cur).next != 0:
+      cur = (*cur).next
+    (*cur).next = n
+  ret 0
+
+fn tnx_obj_get(obj:*TnxValue, key:str) -> *TnxValue:
+  if obj == 0 || (*obj).kind != 6 || key == 0:
+    ret 0 as *TnxValue
+  cur:*TnxNode = (*obj).head
+  while cur != 0:
+    if (*cur).key != 0 && strcmp((*cur).key, key) == 0:
+      ret (*cur).val
+    cur = (*cur).next
+  ret 0 as *TnxValue
+
+fn tnx_arr_get(arr:*TnxValue, idx:int) -> *TnxValue:
+  if arr == 0 || (*arr).kind != 5 || idx < 0:
+    ret 0 as *TnxValue
+  cur:*TnxNode = (*arr).head
+  i:int = 0
+  while cur != 0:
+    if i == idx:
+      ret (*cur).val
+    i = i + 1
+    cur = (*cur).next
+  ret 0 as *TnxValue
+
+fn tnx_clone(v:*TnxValue) -> *TnxValue:
+  if v == 0:
+    ret 0 as *TnxValue
+  if (*v).kind == TNX_NULL:
+    ret tnx_null()
+  if (*v).kind == TNX_BOOL:
+    ret tnx_bool((*v).i)
+  if (*v).kind == TNX_INT:
+    ret tnx_int((*v).i)
+  if (*v).kind == TNX_FLOAT:
+    ret tnx_float((*v).f)
+  if (*v).kind == TNX_STR:
+    ret tnx_str((*v).s)
+  if (*v).kind == TNX_ARR:
+    outa:*TnxValue = tnx_arr()
+    if outa == 0:
+      ret 0 as *TnxValue
+    cura:*TnxNode = (*v).head
+    while cura != 0:
+      cv:*TnxValue = tnx_clone((*cura).val)
+      if (*cura).val != 0 && cv == 0:
+        tnx_free(outa)
+        ret 0 as *TnxValue
+      if tnx_arr_push_take(outa, cv) != 0:
+        if cv != 0:
+          tnx_free(cv)
+        tnx_free(outa)
+        ret 0 as *TnxValue
+      cura = (*cura).next
+    ret outa
+  if (*v).kind == TNX_OBJ:
+    outo:*TnxValue = tnx_obj()
+    if outo == 0:
+      ret 0 as *TnxValue
+    curo:*TnxNode = (*v).head
+    while curo != 0:
+      cv2:*TnxValue = tnx_clone((*curo).val)
+      if (*curo).val != 0 && cv2 == 0:
+        tnx_free(outo)
+        ret 0 as *TnxValue
+      if tnx_obj_set_take(outo, (*curo).key, cv2) != 0:
+        if cv2 != 0:
+          tnx_free(cv2)
+        tnx_free(outo)
+        ret 0 as *TnxValue
+      curo = (*curo).next
+    ret outo
+  ret tnx_null()
+
+fn tnx_arr_push(arr:*TnxValue, v:*TnxValue) -> int:
+  ret tnx_arr_push_take(arr, v)
+
+fn tnx_obj_set(obj:*TnxValue, key:str, v:*TnxValue) -> int:
+  ret tnx_obj_set_take(obj, key, v)
+
+fn tnx_as_int(v:*TnxValue) -> int:
+  if v == 0:
+    ret 0
+  if (*v).kind == TNX_INT || (*v).kind == TNX_BOOL:
+    ret (*v).i
+  if (*v).kind == TNX_FLOAT:
+    ret (*v).f as int
+  ret 0
+
+fn tnx_as_float(v:*TnxValue) -> float:
+  if v == 0:
+    ret 0.0
+  if (*v).kind == TNX_FLOAT:
+    ret (*v).f
+  if (*v).kind == TNX_INT || (*v).kind == TNX_BOOL:
+    ret (*v).i as float
+  ret 0.0
+
+fn tnx_as_str(v:*TnxValue) -> str:
+  if v == 0:
+    ret 0 as str
+  if (*v).kind == TNX_STR:
+    ret (*v).s
+  ret 0 as str
+
+fn tnx_free(v:*TnxValue) -> int:
+  if v == 0:
+    ret 0
+  if (*v).kind == TNX_STR:
+    if (*v).s != 0:
+      free((*v).s)
+  if (*v).kind == 5 || (*v).kind == 6:
+    cur:*TnxNode = (*v).head
+    while cur != 0:
+      nxt:*TnxNode = (*cur).next
+      if (*cur).key != 0:
+        free((*cur).key)
+      if (*cur).val != 0:
+        tnx_free((*cur).val)
+      free(cur)
+      cur = nxt
+  free(v)
+  ret 0
+
+// --- String builder ---
+struct TnxSb:
+  buf:*char
+  len:int
+  cap:int
+
+fn sb_init(sb:*TnxSb) -> int:
+  (*sb).cap = 256
+  (*sb).len = 0
+  (*sb).buf = (*char)malloc((*sb).cap)
+  if (*sb).buf == 0:
+    (*sb).cap = 0
+    ret 0 - 1
+  (*sb).buf[0] = 0 as char
+  ret 0
+
+fn sb_reserve(sb:*TnxSb, add:int) -> int:
+  if sb == 0:
+    ret 0 - 1
+  need:int = (*sb).len + add + 1
+  if need <= (*sb).cap:
+    ret 0
+  ncap:int = (*sb).cap
+  if ncap < 1:
+    ncap = 1
+  while ncap < need:
+    ncap = ncap * 2
+  nbuf:*char = (*char)malloc(ncap)
+  if nbuf == 0:
+    ret 0 - 1
+  if (*sb).buf != 0 && (*sb).len > 0:
+    unsafe:
+      memcpy(nbuf, (*sb).buf, (*sb).len)
+  if (*sb).buf != 0:
+    free((*sb).buf)
+  (*sb).buf = nbuf
+  (*sb).cap = ncap
+  ret 0
+
+fn sb_putc(sb:*TnxSb, c:int) -> int:
+  if sb_reserve(sb, 1) != 0:
+    ret 0 - 1
+  (*sb).buf[(*sb).len] = c as char
+  (*sb).len = (*sb).len + 1
+  (*sb).buf[(*sb).len] = 0 as char
+  ret 0
+
+fn sb_puts(sb:*TnxSb, s:str) -> int:
+  if s == 0:
+    ret 0
+  n:int = len(s)
+  if sb_reserve(sb, n) != 0:
+    ret 0 - 1
+  unsafe:
+    memcpy((*sb).buf + (*sb).len, s, n)
+  (*sb).len = (*sb).len + n
+  (*sb).buf[(*sb).len] = 0 as char
+  ret 0
+
+fn tnx_hex_digit(d:int) -> int:
+  if d < 10:
+    ret 48 + d
+  ret 55 + d
+
+fn tnx_hex4(sb:*TnxSb, v:int) -> int:
+  // v expected 0..65535
+  n:int = v & 65535
+  d1:int = (n >> 12) & 15
+  d2:int = (n >> 8) & 15
+  d3:int = (n >> 4) & 15
+  d4:int = n & 15
+  h1:int = tnx_hex_digit(d1)
+  h2:int = tnx_hex_digit(d2)
+  h3:int = tnx_hex_digit(d3)
+  h4:int = tnx_hex_digit(d4)
+  sb_putc(sb, h1)
+  sb_putc(sb, h2)
+  sb_putc(sb, h3)
+  sb_putc(sb, h4)
+  ret 0
+
+fn sb_take(sb:*TnxSb) -> str:
+  if sb == 0:
+    ret 0 as str
+  out:*char = (*sb).buf
+  (*sb).buf = 0 as *char
+  (*sb).len = 0
+  (*sb).cap = 0
+  ret out
+
+// --- Binary builder ---
+fn bb_init(bb:*TnxBb) -> int:
+  (*bb).cap = 256
+  (*bb).len = 0
+  (*bb).buf = (*char)malloc((*bb).cap)
+  if (*bb).buf == 0:
+    (*bb).cap = 0
+    ret 0 - 1
+  ret 0
+
+fn bb_reserve(bb:*TnxBb, add:int) -> int:
+  need:int = (*bb).len + add
+  if need <= (*bb).cap:
+    ret 0
+  ncap:int = (*bb).cap
+  if ncap < 1:
+    ncap = 1
+  while ncap < need:
+    ncap = ncap * 2
+  nbuf:*char = (*char)malloc(ncap)
+  if nbuf == 0:
+    ret 0 - 1
+  if (*bb).buf != 0 && (*bb).len > 0:
+    unsafe:
+      memcpy(nbuf, (*bb).buf, (*bb).len)
+  if (*bb).buf != 0:
+    free((*bb).buf)
+  (*bb).buf = nbuf
+  (*bb).cap = ncap
+  ret 0
+
+fn bb_put_u8(bb:*TnxBb, v:int) -> int:
+  if bb_reserve(bb, 1) != 0:
+    ret 0 - 1
+  (*bb).buf[(*bb).len] = (v & 255) as char
+  (*bb).len = (*bb).len + 1
+  ret 0
+
+fn bb_put_bytes(bb:*TnxBb, p:*char, n:int) -> int:
+  if n <= 0:
+    ret 0
+  if bb_reserve(bb, n) != 0:
+    ret 0 - 1
+  unsafe:
+    memcpy((*bb).buf + (*bb).len, p, n)
+  (*bb).len = (*bb).len + n
+  ret 0
+
+fn bb_put_uvarint(bb:*TnxBb, v:int) -> int:
+  x:int = v
+  if x < 0:
+    x = 0 - x
+  while x >= 128:
+    bb_put_u8(bb, (x & 127) | 128)
+    x = x >> 7
+  bb_put_u8(bb, x & 127)
+  ret 0
+
+fn bb_put_i64(bb:*TnxBb, v:int) -> int:
+  if v < 0:
+    bb_put_u8(bb, 1)
+    bb_put_uvarint(bb, 0 - v)
+  else:
+    bb_put_u8(bb, 0)
+    bb_put_uvarint(bb, v)
+  ret 0
+
+fn bb_put_f64(bb:*TnxBb, v:float) -> int:
+  tmp:[char;8]
+  unsafe:
+    memcpy(&tmp[0], &v, 8)
+  bb_put_bytes(bb, &tmp[0], 8)
+  ret 0
+
+fn bb_take(bb:*TnxBb) -> *TnxBytes:
+  out:*TnxBytes = (*TnxBytes)malloc(sizeof(TnxBytes))
+  (*out).buf = (*bb).buf
+  (*out).len = (*bb).len
+  (*bb).buf = 0 as *char
+  (*bb).len = 0
+  (*bb).cap = 0
+  ret out
+
+// --- Stringify ---
+fn tnx_escape_str(sb:*TnxSb, s:str) -> int:
+  if sb == 0 || s == 0:
+    ret 0 - 1
+  i:int = 0
+  while s[i] != 0:
+    c:int = s[i] as int
+    if c == 34:
+      sb_puts(sb, "\\\"")
+    else if c == 92:
+      sb_puts(sb, "\\\\")
+    else if c == 10:
+      sb_puts(sb, "\\n")
+    else if c == 13:
+      sb_puts(sb, "\\r")
+    else if c == 9:
+      sb_puts(sb, "\\t")
+    else if c < 32 || c > 126:
+      u:int = c
+      if u < 0:
+        u = u + 256
+      sb_puts(sb, "\\u")
+      tnx_hex4(sb, u & 255)
+    else:
+      sb_putc(sb, c)
+    i = i + 1
+  ret 0
+
+fn tnx_pow10_i(exp:int) -> int:
+  p:int = 1
+  i:int = 0
+  while i < exp:
+    p = p * 10
+    i = i + 1
+  ret p
+
+fn tnx_float_to_g_str(x:float) -> str:
+  if x == 0.0:
+    ret tnx_strdup("0")
+  sign:int = 0
+  v:float = x
+  if v < 0.0:
+    sign = 1
+    v = 0.0 - v
+  // normalize to [1,10)
+  exp10:int = 0
+  if v >= 10.0:
+    while v >= 10.0:
+      v = v / 10.0
+      exp10 = exp10 + 1
+  else if v < 1.0:
+    while v < 1.0:
+      v = v * 10.0
+      exp10 = exp10 - 1
+  // 6 significant digits
+  scaled:float = v * 100000.0 + 0.5
+  sig:int = scaled as int
+  if sig >= 1000000:
+    sig = sig / 10
+    exp10 = exp10 + 1
+  digits:str = tnx_int_to_str(sig)
+  // pad to 6 digits
+  if len(digits) < 6:
+    pad:int = 6 - len(digits)
+    sbp:TnxSb
+    sb_init(&sbp)
+    while pad > 0:
+      sb_putc(&sbp, 48)
+      pad = pad - 1
+    sb_puts(&sbp, digits)
+    free(digits)
+    digits = sb_take(&sbp)
+
+  use_exp:int = 0
+  if exp10 >= 6 || exp10 <= 0 - 5:
+    use_exp = 1
+
+  sb:TnxSb
+  sb_init(&sb)
+  if sign != 0:
+    sb_putc(&sb, 45)
+
+  if use_exp != 0:
+    sb_putc(&sb, digits[0] as int)
+    // fractional part
+    i:int = 1
+    last:int = 5
+    while last >= 1 && digits[last] == 48 as char:
+      last = last - 1
+    if last >= 1:
+      sb_putc(&sb, 46)
+      while i <= last:
+        sb_putc(&sb, digits[i] as int)
+        i = i + 1
+    sb_putc(&sb, 101) // 'e'
+    if exp10 >= 0:
+      sb_putc(&sb, 43)
+    else:
+      sb_putc(&sb, 45)
+      exp10 = 0 - exp10
+    expstr:str = tnx_int_to_str(exp10)
+    sb_puts(&sb, expstr)
+    free(expstr)
+  else:
+    pos:int = exp10 + 1
+    if pos >= 6:
+      // integer with trailing zeros
+      i2:int = 0
+      while i2 < 6:
+        sb_putc(&sb, digits[i2] as int)
+        i2 = i2 + 1
+      z:int = pos - 6
+      while z > 0:
+        sb_putc(&sb, 48)
+        z = z - 1
+    else if pos > 0:
+      i3:int = 0
+      while i3 < pos:
+        sb_putc(&sb, digits[i3] as int)
+        i3 = i3 + 1
+      // fractional
+      last2:int = 5
+      while last2 >= pos && digits[last2] == 48 as char:
+        last2 = last2 - 1
+      if last2 >= pos:
+        sb_putc(&sb, 46)
+        i4:int = pos
+        while i4 <= last2:
+          sb_putc(&sb, digits[i4] as int)
+          i4 = i4 + 1
+    else:
+      // 0.xxx
+      sb_putc(&sb, 48)
+      sb_putc(&sb, 46)
+      z2:int = (0 - pos)
+      while z2 > 0:
+        sb_putc(&sb, 48)
+        z2 = z2 - 1
+      last3:int = 5
+      while last3 >= 0 && digits[last3] == 48 as char:
+        last3 = last3 - 1
+      i5:int = 0
+      while i5 <= last3:
+        sb_putc(&sb, digits[i5] as int)
+        i5 = i5 + 1
+
+  free(digits)
+  ret sb_take(&sb)
+
+fn tnx_write_value(sb:*TnxSb, v:*TnxValue) -> int:
+  if v == 0:
+    sb_puts(sb, "null")
+    ret 0
+  if (*v).kind == TNX_NULL:
+    sb_puts(sb, "null")
+    ret 0
+  if (*v).kind == TNX_BOOL:
+    if (*v).i != 0:
+      sb_puts(sb, "true")
+    else:
+      sb_puts(sb, "false")
+    ret 0
+  if (*v).kind == TNX_INT:
+    s:str = tnx_int_to_str((*v).i)
+    sb_puts(sb, s)
+    free(s)
+    ret 0
+  if (*v).kind == TNX_FLOAT:
+    s:str = tnx_float_to_g_str((*v).f)
+    if s != 0:
+      sb_puts(sb, s)
+      free(s)
+    ret 0
+  if (*v).kind == TNX_STR:
+    sb_putc(sb, 34)
+    if (*v).s != 0:
+      tnx_escape_str(sb, (*v).s)
+    sb_putc(sb, 34)
+    ret 0
+  if (*v).kind == 5:
+    sb_putc(sb, 91)
+    cur:*TnxNode = (*v).head
+    first:int = 1
+    while cur != 0:
+      if first == 0:
+        sb_putc(sb, 44)
+      first = 0
+      tnx_write_value(sb, (*cur).val)
+      cur = (*cur).next
+    sb_putc(sb, 93)
+    ret 0
+  if (*v).kind == 6:
+    sb_putc(sb, 123)
+    cur2:*TnxNode = (*v).head
+    first2:int = 1
+    while cur2 != 0:
+      if first2 == 0:
+        sb_putc(sb, 44)
+      first2 = 0
+      sb_putc(sb, 34)
+      if (*cur2).key != 0:
+        tnx_escape_str(sb, (*cur2).key)
+      sb_putc(sb, 34)
+      sb_putc(sb, 58)
+      tnx_write_value(sb, (*cur2).val)
+      cur2 = (*cur2).next
+    sb_putc(sb, 125)
+    ret 0
+  sb_puts(sb, "null")
+  ret 0
+
+fn tnx_stringify(v:*TnxValue) -> str:
+  sb:TnxSb
+  sb_init(&sb)
+  tnx_write_value(&sb, v)
+  ret sb_take(&sb)
+
+fn tnx_write_file(path:str, v:*TnxValue) -> int:
+  if path == 0:
+    ret 0 - 1
+  s:str = tnx_stringify(v)
+  if s == 0:
+    ret 0 - 1
+  wrote:int = io.write_all(path, s)
+  free(s)
+  if wrote < 0:
+    ret 0 - 1
+  ret 0
+
+// --- Parsing ---
+fn tnx_skip_ws(s:str, idx:*int) -> int:
+  if s == 0 || idx == 0:
+    ret 0
+  i:int = 0
+  unsafe:
+    i = *idx
+  while s[i] != 0 && tnx_is_space(s[i] as int) != 0:
+    i = i + 1
+  unsafe:
+    *idx = i
+  ret 0
+
+fn tnx_parse_string(s:str, idx:*int) -> str:
+  if s == 0 || idx == 0:
+    ret 0 as str
+  i:int = 0
+  unsafe:
+    i = *idx
+  if s[i] != 34 as char:
+    ret 0 as str
+  i = i + 1
+  // first pass: compute length
+  j:int = i
+  out_len:int = 0
+  while s[j] != 0:
+    c:int = s[j] as int
+    if c == 34:
+      break
+    if c == 92:
+      j = j + 1
+      if s[j] == 0:
+        ret 0 as str
+    out_len = out_len + 1
+    j = j + 1
+  if s[j] != 34 as char:
+    ret 0 as str
+  out:*char = (*char)malloc(out_len + 1)
+  if out == 0:
+    ret 0 as str
+  k:int = 0
+  while i < j:
+    c2:int = s[i] as int
+    if c2 == 92:
+      i = i + 1
+      esc:int = s[i] as int
+      if esc == 34:
+        out[k] = 34 as char
+        k = k + 1
+        i = i + 1
+        continue
+      if esc == 92:
+        out[k] = 92 as char
+        k = k + 1
+        i = i + 1
+        continue
+      if esc == 110:
+        out[k] = 10 as char
+        k = k + 1
+        i = i + 1
+        continue
+      if esc == 114:
+        out[k] = 13 as char
+        k = k + 1
+        i = i + 1
+        continue
+      if esc == 116:
+        out[k] = 9 as char
+        k = k + 1
+        i = i + 1
+        continue
+      if esc == 117:
+        // \uXXXX
+        if (i + 4) > j:
+          free(out)
+          ret 0 as str
+        d1:int = tnx_hex_val(s[i + 1] as int)
+        d2:int = tnx_hex_val(s[i + 2] as int)
+        d3:int = tnx_hex_val(s[i + 3] as int)
+        d4:int = tnx_hex_val(s[i + 4] as int)
+        if d1 < 0 || d2 < 0 || d3 < 0 || d4 < 0:
+          free(out)
+          ret 0 as str
+        code:int = (d1 << 12) | (d2 << 8) | (d3 << 4) | d4
+        if code <= 255:
+          out[k] = code as char
+        else:
+          out[k] = 63 as char
+        k = k + 1
+        i = i + 5
+        continue
+      // unsupported escape -> invalid
+      free(out)
+      ret 0 as str
+    out[k] = s[i]
+    k = k + 1
+    i = i + 1
+  out[k] = 0 as char
+  j = j + 1
+  unsafe:
+    *idx = j
+  ret out
+
+fn tnx_parse_int(s:str) -> int:
+  if s == 0:
+    ret 0
+  i:int = 0
+  sign:int = 1
+  if s[0] == 45 as char:
+    sign = 0 - 1
+    i = 1
+  n:int = 0
+  while s[i] != 0 as char:
+    c:int = s[i] as int
+    if c < 48 || c > 57:
+      break
+    n = n * 10 + (c - 48)
+    i = i + 1
+  ret n * sign
+
+fn tnx_parse_float(s:str) -> float:
+  if s == 0:
+    ret 0.0
+  i:int = 0
+  sign:float = 1.0
+  if s[0] == 45 as char:
+    sign = 0.0 - 1.0
+    i = 1
+  n:float = 0.0
+  while s[i] != 0 as char:
+    c:int = s[i] as int
+    if c < 48 || c > 57:
+      break
+    n = n * 10.0 + (c - 48) as float
+    i = i + 1
+  if s[i] == 46 as char:
+    i = i + 1
+    div:float = 10.0
+    while s[i] != 0 as char:
+      c = s[i] as int
+      if c < 48 || c > 57:
+        break
+      n = n + (c - 48) as float / div
+      div = div * 10.0
+      i = i + 1
+  if s[i] == 101 as char || s[i] == 69 as char:
+    i = i + 1
+    esign:int = 1
+    if s[i] == 45 as char:
+      esign = 0 - 1
+      i = i + 1
+    else if s[i] == 43 as char:
+      i = i + 1
+    exp:int = 0
+    while s[i] != 0 as char:
+      c2:int = s[i] as int
+      if c2 < 48 || c2 > 57:
+        break
+      exp = exp * 10 + (c2 - 48)
+      i = i + 1
+    pow10:float = 1.0
+    j:int = 0
+    while j < exp:
+      pow10 = pow10 * 10.0
+      j = j + 1
+    if esign < 0:
+      n = n / pow10
+    else:
+      n = n * pow10
+  ret n * sign
+
+fn tnx_parse_number(s:str, idx:*int) -> *TnxValue:
+  if s == 0 || idx == 0:
+    ret 0 as *TnxValue
+  i:int = 0
+  unsafe:
+    i = *idx
+  start:int = i
+  if s[i] == 45 as char:
+    i = i + 1
+
+  // integer part
+  digit_count:int = 0
+  if s[i] == 48 as char:
+    digit_count = 1
+    i = i + 1
+    if s[i] >= 48 as char && s[i] <= 57 as char:
+      ret 0 as *TnxValue
+  else:
+    while s[i] != 0:
+      c0:int = s[i] as int
+      if c0 < 48 || c0 > 57:
+        break
+      digit_count = digit_count + 1
+      i = i + 1
+    if digit_count == 0:
+      ret 0 as *TnxValue
+
+  has_dot:int = 0
+  has_exp:int = 0
+
+  // fractional
+  if s[i] == 46 as char:
+    has_dot = 1
+    i = i + 1
+    frac_digits:int = 0
+    while s[i] != 0:
+      c1:int = s[i] as int
+      if c1 < 48 || c1 > 57:
+        break
+      frac_digits = frac_digits + 1
+      i = i + 1
+    if frac_digits == 0:
+      ret 0 as *TnxValue
+
+  // exponent
+  if s[i] == 101 as char || s[i] == 69 as char:
+    has_exp = 1
+    i = i + 1
+    if s[i] == 45 as char || s[i] == 43 as char:
+      i = i + 1
+    exp_digits:int = 0
+    while s[i] != 0:
+      c2:int = s[i] as int
+      if c2 < 48 || c2 > 57:
+        break
+      exp_digits = exp_digits + 1
+      i = i + 1
+    if exp_digits == 0:
+      ret 0 as *TnxValue
+
+  end:int = i
+  unsafe:
+    *idx = i
+  num:str = tnx_substr(s, start, end)
+  if num == 0:
+    ret 0 as *TnxValue
+  if has_dot != 0 || has_exp != 0:
+    f:float = tnx_parse_float(num)
+    free(num)
+    ret tnx_float(f)
+  iv:int = tnx_parse_int(num)
+  free(num)
+  ret tnx_int(iv)
+
+fn tnx_parse_value(s:str, idx:*int) -> *TnxValue:
+  tnx_skip_ws(s, idx)
+  i:int = 0
+  unsafe:
+    i = *idx
+  c:int = s[i] as int
+  if c == 34:
+    strv:str = tnx_parse_string(s, idx)
+    if strv == 0:
+      ret 0 as *TnxValue
+    v:*TnxValue = tnx_new(TNX_STR)
+    (*v).s = strv
+    ret v
+  if c == 123:
+    // object
+    i = i + 1
+    unsafe:
+      *idx = i
+    obj:*TnxValue = tnx_obj()
+    tnx_skip_ws(s, idx)
+    unsafe:
+      i = *idx
+    if s[i] == 125 as char:
+      unsafe:
+        *idx = i + 1
+      ret obj
+    while 1:
+      tnx_skip_ws(s, idx)
+      key:str = tnx_parse_string(s, idx)
+      if key == 0:
+        tnx_free(obj)
+        ret 0 as *TnxValue
+      tnx_skip_ws(s, idx)
+      unsafe:
+        i = *idx
+      if s[i] != 58 as char:
+        tnx_free(obj)
+        ret 0 as *TnxValue
+      i = i + 1
+      unsafe:
+        *idx = i
+      val:*TnxValue = tnx_parse_value(s, idx)
+      if val == 0:
+        tnx_free(obj)
+        ret 0 as *TnxValue
+      if tnx_obj_set_take(obj, key, val) != 0:
+        free(key)
+        tnx_free(val)
+        tnx_free(obj)
+        ret 0 as *TnxValue
+      free(key)
+      tnx_skip_ws(s, idx)
+      unsafe:
+        i = *idx
+      if s[i] == 44 as char:
+        i = i + 1
+        unsafe:
+          *idx = i
+        continue
+      if s[i] == 125 as char:
+        unsafe:
+          *idx = i + 1
+        break
+      tnx_free(obj)
+      ret 0 as *TnxValue
+    ret obj
+  if c == 91:
+    // array
+    i = i + 1
+    unsafe:
+      *idx = i
+    arr:*TnxValue = tnx_arr()
+    tnx_skip_ws(s, idx)
+    unsafe:
+      i = *idx
+    if s[i] == 93 as char:
+      unsafe:
+        *idx = i + 1
+      ret arr
+    while 1:
+      val2:*TnxValue = tnx_parse_value(s, idx)
+      if val2 == 0:
+        tnx_free(arr)
+        ret 0 as *TnxValue
+      if tnx_arr_push_take(arr, val2) != 0:
+        tnx_free(val2)
+        tnx_free(arr)
+        ret 0 as *TnxValue
+      tnx_skip_ws(s, idx)
+      unsafe:
+        i = *idx
+      if s[i] == 44 as char:
+        i = i + 1
+        unsafe:
+          *idx = i
+        continue
+      if s[i] == 93 as char:
+        unsafe:
+          *idx = i + 1
+        break
+      tnx_free(arr)
+      ret 0 as *TnxValue
+    ret arr
+  if c == 110: // null
+    if s[i+1] == 117 as char && s[i+2] == 108 as char && s[i+3] == 108 as char:
+      unsafe:
+        *idx = i + 4
+      ret tnx_null()
+  if c == 116: // true
+    if s[i+1] == 114 as char && s[i+2] == 117 as char && s[i+3] == 101 as char:
+      unsafe:
+        *idx = i + 4
+      ret tnx_bool(1)
+  if c == 102: // false
+    if s[i+1] == 97 as char && s[i+2] == 108 as char && s[i+3] == 115 as char && s[i+4] == 101 as char:
+      unsafe:
+        *idx = i + 5
+      ret tnx_bool(0)
+  if c == 45 || (c >= 48 && c <= 57):
+    ret tnx_parse_number(s, idx)
+  ret 0 as *TnxValue
+
+fn tnx_parse(s:str) -> *TnxValue:
+  if s == 0:
+    ret 0 as *TnxValue
+  idx:int = 0
+  v:*TnxValue = tnx_parse_value(s, &idx)
+  if v == 0:
+    ret 0 as *TnxValue
+  tnx_skip_ws(s, &idx)
+  if s[idx] != 0:
+    tnx_free(v)
+    ret 0 as *TnxValue
+  ret v
+
+fn tnx_validate(s:str) -> int:
+  v:*TnxValue = tnx_parse(s)
+  if v == 0:
+    ret 0
+  tnx_free(v)
+  ret 1
+
+fn tnx_read_file(path:str) -> *TnxValue:
+  if path == 0:
+    ret 0 as *TnxValue
+  s:str = io.read_all(path)
+  if s == 0:
+    ret 0 as *TnxValue
+  v:*TnxValue = tnx_parse(s)
+  free(s)
+  ret v
+
+// --- Binary (TNX-B) ---
+fn tnx_node_count(n:*TnxNode) -> int:
+  c:int = 0
+  cur:*TnxNode = n
+  while cur != 0:
+    c = c + 1
+    cur = (*cur).next
+  ret c
+
+fn tnx_b_write_value(bb:*TnxBb, v:*TnxValue) -> int:
+  if v == 0:
+    bb_put_u8(bb, TNX_NULL)
+    ret 0
+  bb_put_u8(bb, (*v).kind)
+  if (*v).kind == TNX_NULL:
+    ret 0
+  if (*v).kind == TNX_BOOL:
+    bb_put_u8(bb, (*v).i != 0)
+    ret 0
+  if (*v).kind == TNX_INT:
+    bb_put_i64(bb, (*v).i)
+    ret 0
+  if (*v).kind == TNX_FLOAT:
+    bb_put_f64(bb, (*v).f)
+    ret 0
+  if (*v).kind == TNX_STR:
+    if (*v).s == 0:
+      bb_put_uvarint(bb, 0)
+    else:
+      n:int = len((*v).s)
+      bb_put_uvarint(bb, n)
+      bb_put_bytes(bb, (*v).s, n)
+    ret 0
+  if (*v).kind == 5:
+    cnt:int = tnx_node_count((*v).head)
+    bb_put_uvarint(bb, cnt)
+    cur:*TnxNode = (*v).head
+    while cur != 0:
+      tnx_b_write_value(bb, (*cur).val)
+      cur = (*cur).next
+    ret 0
+  if (*v).kind == 6:
+    cnt2:int = tnx_node_count((*v).head)
+    bb_put_uvarint(bb, cnt2)
+    cur2:*TnxNode = (*v).head
+    while cur2 != 0:
+      key:str = (*cur2).key
+      if key == 0:
+        bb_put_uvarint(bb, 0)
+      else:
+        kn:int = len(key)
+        bb_put_uvarint(bb, kn)
+        bb_put_bytes(bb, key, kn)
+      tnx_b_write_value(bb, (*cur2).val)
+      cur2 = (*cur2).next
+    ret 0
+  ret 0
+
+fn tnx_encode_b(v:*TnxValue) -> *TnxBytes:
+  bb:TnxBb
+  bb_init(&bb)
+  // header: "TNXB" + version 1
+  bb_put_u8(&bb, 84)
+  bb_put_u8(&bb, 78)
+  bb_put_u8(&bb, 88)
+  bb_put_u8(&bb, 66)
+  bb_put_u8(&bb, 1)
+  tnx_b_write_value(&bb, v)
+  ret bb_take(&bb)
+
+fn tnx_free_bytes(b:*TnxBytes) -> int:
+  if b == 0:
+    ret 0
+  if (*b).buf != 0:
+    free((*b).buf)
+  free(b)
+  ret 0
+
+fn tnx_b_read_uvarint(buf:*char, len:int, idx:*int) -> int:
+  if buf == 0 || idx == 0:
+    ret 0
+  i:int = 0
+  unsafe:
+    i = *idx
+  shift:int = 0
+  v:int = 0
+  ok:int = 0
+  while i < len:
+    b:int = buf[i] as int
+    v = v | ((b & 127) << shift)
+    i = i + 1
+    if (b & 128) == 0:
+      ok = 1
+      break
+    shift = shift + 7
+  if ok == 0:
+    unsafe:
+      *idx = len + 1
+    ret 0
+  unsafe:
+    *idx = i
+  ret v
+
+fn tnx_b_read_i64(buf:*char, len:int, idx:*int) -> int:
+  if buf == 0 || idx == 0:
+    ret 0
+  i:int = 0
+  unsafe:
+    i = *idx
+  if i >= len:
+    unsafe:
+      *idx = len + 1
+    ret 0
+  sign:int = buf[i] as int
+  i = i + 1
+  unsafe:
+    *idx = i
+  v:int = tnx_b_read_uvarint(buf, len, idx)
+  if sign != 0:
+    ret 0 - v
+  ret v
+
+fn tnx_b_read_f64(buf:*char, len:int, idx:*int) -> float:
+  f:float = 0.0
+  if buf == 0 || idx == 0:
+    ret f
+  i:int = 0
+  unsafe:
+    i = *idx
+  if (i + 8) > len:
+    unsafe:
+      *idx = len + 1
+    ret f
+  unsafe:
+    memcpy(&f, buf + i, 8)
+  i = i + 8
+  unsafe:
+    *idx = i
+  ret f
+
+fn tnx_b_read_bytes(buf:*char, len:int, idx:*int, n:int) -> str:
+  if buf == 0 || idx == 0:
+    ret 0 as str
+  i:int = 0
+  unsafe:
+    i = *idx
+  if n <= 0:
+    ret tnx_strdup("")
+  if (i + n) > len:
+    ret 0 as str
+  out:*char = (*char)malloc(n + 1)
+  unsafe:
+    memcpy(out, buf + i, n)
+  out[n] = 0 as char
+  i = i + n
+  unsafe:
+    *idx = i
+  ret out
+
+fn tnx_b_read_value(buf:*char, len:int, idx:*int) -> *TnxValue:
+  if buf == 0 || idx == 0:
+    ret 0 as *TnxValue
+  i:int = 0
+  unsafe:
+    i = *idx
+  if i >= len:
+    ret 0 as *TnxValue
+  kind:int = buf[i] as int
+  i = i + 1
+  unsafe:
+    *idx = i
+  if kind == TNX_NULL:
+    ret tnx_null()
+  if kind == TNX_BOOL:
+    if i >= len:
+      ret 0 as *TnxValue
+    b:int = buf[i] as int
+    i = i + 1
+    unsafe:
+      *idx = i
+    ret tnx_bool(b != 0)
+  if kind == TNX_INT:
+    v:int = tnx_b_read_i64(buf, len, idx)
+    curi:int = 0
+    unsafe:
+      curi = *idx
+    if curi > len:
+      ret 0 as *TnxValue
+    ret tnx_int(v)
+  if kind == TNX_FLOAT:
+    f:float = tnx_b_read_f64(buf, len, idx)
+    curf:int = 0
+    unsafe:
+      curf = *idx
+    if curf > len:
+      ret 0 as *TnxValue
+    ret tnx_float(f)
+  if kind == TNX_STR:
+    slen:int = tnx_b_read_uvarint(buf, len, idx)
+    curs:int = 0
+    unsafe:
+      curs = *idx
+    if curs > len:
+      ret 0 as *TnxValue
+    s:str = tnx_b_read_bytes(buf, len, idx, slen)
+    if slen > 0 && s == 0:
+      ret 0 as *TnxValue
+    vstr:*TnxValue = tnx_new(TNX_STR)
+    (*vstr).s = s
+    ret vstr
+  if kind == 5:
+    cnt:int = tnx_b_read_uvarint(buf, len, idx)
+    cura:int = 0
+    unsafe:
+      cura = *idx
+    if cura > len:
+      ret 0 as *TnxValue
+    arr:*TnxValue = tnx_arr()
+    j:int = 0
+    while j < cnt:
+      vv:*TnxValue = tnx_b_read_value(buf, len, idx)
+      if vv == 0:
+        tnx_free(arr)
+        ret 0 as *TnxValue
+      if tnx_arr_push_take(arr, vv) != 0:
+        tnx_free(vv)
+        tnx_free(arr)
+        ret 0 as *TnxValue
+      j = j + 1
+    ret arr
+  if kind == 6:
+    cnt2:int = tnx_b_read_uvarint(buf, len, idx)
+    curo:int = 0
+    unsafe:
+      curo = *idx
+    if curo > len:
+      ret 0 as *TnxValue
+    obj:*TnxValue = tnx_obj()
+    j2:int = 0
+    while j2 < cnt2:
+      klen:int = tnx_b_read_uvarint(buf, len, idx)
+      curk:int = 0
+      unsafe:
+        curk = *idx
+      if curk > len:
+        tnx_free(obj)
+        ret 0 as *TnxValue
+      key:str = tnx_b_read_bytes(buf, len, idx, klen)
+      if klen > 0 && key == 0:
+        tnx_free(obj)
+        ret 0 as *TnxValue
+      vv2:*TnxValue = tnx_b_read_value(buf, len, idx)
+      if vv2 == 0:
+        tnx_free(obj)
+        ret 0 as *TnxValue
+      if tnx_obj_set_take(obj, key, vv2) != 0:
+        if key != 0:
+          free(key)
+        tnx_free(vv2)
+        tnx_free(obj)
+        ret 0 as *TnxValue
+      if key != 0:
+        free(key)
+      j2 = j2 + 1
+    ret obj
+  ret 0 as *TnxValue
+
+fn tnx_parse_b(buf:*char, len:int) -> *TnxValue:
+  if buf == 0 || len < 5:
+    ret 0 as *TnxValue
+  // header check
+  if buf[0] != 84 as char || buf[1] != 78 as char || buf[2] != 88 as char || buf[3] != 66 as char:
+    ret 0 as *TnxValue
+  if buf[4] != 1 as char:
+    ret 0 as *TnxValue
+  idx:int = 5
+  v:*TnxValue = tnx_b_read_value(buf, len, &idx)
+  if v == 0:
+    ret 0 as *TnxValue
+  if idx != len:
+    tnx_free(v)
+    ret 0 as *TnxValue
+  ret v
+
+fn tnx_validate_b(buf:*char, len:int) -> int:
+  v:*TnxValue = tnx_parse_b(buf, len)
+  if v == 0:
+    ret 0
+  tnx_free(v)
+  ret 1
+
+fn tnx_write_file_b(path:str, v:*TnxValue) -> int:
+  if path == 0:
+    ret 0 - 1
+  b:*TnxBytes = tnx_encode_b(v)
+  if b == 0:
+    ret 0 - 1
+  n:int = (*b).len
+  f:*File = io.file_open(path, "wb")
+  wrote:int = 0 - 1
+  rc_close:int = 0 - 1
+  if f != 0 && (*f).h != 0:
+    if n > 0:
+      wrote = io.file_write(f, (*b).buf, n)
+    else:
+      wrote = 0
+    rc_close = io.file_close(f)
+  else:
+    if f != 0:
+      unsafe:
+        free(f)
+  tnx_free_bytes(b)
+  if wrote == n && rc_close == 0 && path_exists(path) != 0:
+    ret 0
+  // Fallback to text TNX write path if binary write backend is unavailable.
+  ret tnx_write_file(path, v)
+
+fn tnx_read_file_b(path:str) -> *TnxValue:
+  if path == 0:
+    ret 0 as *TnxValue
+  f:*File = io.file_open(path, "rb")
+  if f == 0 || (*f).h == 0:
+    if f != 0:
+      unsafe:
+        free(f)
+    ret 0 as *TnxValue
+  io.file_seek(f, 0, io.seek_end())
+  sz:int = io.file_tell(f)
+  io.file_seek(f, 0, io.seek_set())
+  err:int = 0
+  buf:*char = 0 as *char
+  if sz <= 0:
+    err = 1
+  else:
+    buf = (*char)malloc(sz)
+    if buf == 0:
+      err = 1
+    else:
+      got:int = io.file_read(f, buf, sz)
+      if got != sz:
+        err = 1
+  io.file_close(f)
+  if err != 0:
+    if buf != 0:
+      free(buf)
+    ret 0 as *TnxValue
+  v:*TnxValue = tnx_parse_b(buf, sz)
+  free(buf)
+  ret v
+
+// --- Friendly module API (tnx.*) ---
+fn obj() -> *TnxValue:
+  ret tnx_obj()
+
+fn arr() -> *TnxValue:
+  ret tnx_arr()
+
+
+fn arr_push(a:*TnxValue, v:*TnxValue) -> int:
+  ret tnx_arr_push(a, v)
+
+fn arr_get(a:*TnxValue, idx:int) -> *TnxValue:
+  ret tnx_arr_get(a, idx)
+
+fn obj_set(o:*TnxValue, key:str, v:*TnxValue) -> int:
+  ret tnx_obj_set(o, key, v)
+
+fn obj_get(o:*TnxValue, key:str) -> *TnxValue:
+  ret tnx_obj_get(o, key)
+
+fn as_int(v:*TnxValue) -> int:
+  ret tnx_as_int(v)
+
+fn as_float(v:*TnxValue) -> float:
+  ret tnx_as_float(v)
+
+fn as_str(v:*TnxValue) -> str:
+  ret tnx_as_str(v)
+
+fn decode(s:str) -> *TnxValue:
+  ret tnx_parse(s)
+
+fn validate(s:str) -> int:
+  ret tnx_validate(s)
+
+fn stringify(v:*TnxValue) -> str:
+  ret tnx_stringify(v)
+
+fn load(path:str) -> *TnxValue:
+  ret tnx_read_file(path)
+
+fn save(path:str, v:*TnxValue) -> int:
+  ret tnx_write_file(path, v)
+
+fn release(v:*TnxValue) -> int:
+  ret tnx_free(v)
+
+fn encode_b(v:*TnxValue) -> *TnxBytes:
+  ret tnx_encode_b(v)
+
+fn free_bytes(b:*TnxBytes) -> int:
+  ret tnx_free_bytes(b)
+
+fn decode_b(buf:*char, len:int) -> *TnxValue:
+  ret tnx_parse_b(buf, len)
+
+fn validate_b(buf:*char, len:int) -> int:
+  ret tnx_validate_b(buf, len)
+
+fn load_b(path:str) -> *TnxValue:
+  ret tnx_read_file_b(path)
+
+fn save_b(path:str, v:*TnxValue) -> int:
+  ret tnx_write_file_b(path, v)

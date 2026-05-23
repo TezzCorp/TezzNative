@@ -1,0 +1,41 @@
+// Win32 Mmap Wrapper for TezzNative
+// Used for instantly mapping massive .gguf AI model files into memory
+
+extern fn CreateFileA(lpFileName:str, dwDesiredAccess:int, dwShareMode:int, lpSecurityAttributes:int, dwCreationDisposition:int, dwFlagsAndAttributes:int, hTemplateFile:int) -> int
+extern fn CreateFileMappingA(hFile:int, lpFileMappingAttributes:int, flProtect:int, dwMaximumSizeHigh:int, dwMaximumSizeLow:int, lpName:int) -> int
+extern fn MapViewOfFile(hFileMappingObject:int, dwDesiredAccess:int, dwFileOffsetHigh:int, dwFileOffsetLow:int, dwNumberOfBytesToMap:int) -> *char
+extern fn UnmapViewOfFile(lpBaseAddress:*char) -> int
+extern fn CloseHandle(hObject:int) -> int
+
+fn map_file(path:str) -> *char:
+  GENERIC_READ:int = 2147483648
+  FILE_SHARE_READ:int = 1
+  OPEN_EXISTING:int = 3
+  FILE_ATTRIBUTE_NORMAL:int = 128
+  
+  hFile:int = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0)
+  
+  // INVALID_HANDLE_VALUE = -1 (0xFFFFFFFF in 32-bit, but in 64-bit int we can check < 0)
+  if hFile < 0:
+    say "Error: Failed to open file for memory mapping: ", path
+    ret 0 as *char
+    
+  PAGE_READONLY:int = 2
+  hMap:int = CreateFileMappingA(hFile, 0, PAGE_READONLY, 0, 0, 0)
+  
+  if hMap == 0:
+    say "Error: Failed to create memory mapping for: ", path
+    CloseHandle(hFile)
+    ret 0 as *char
+    
+  FILE_MAP_READ:int = 4
+  pBuf:*char = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0)
+  
+  // Clean up handles (the mapping view keeps the file open implicitly until unmapped)
+  CloseHandle(hMap)
+  CloseHandle(hFile)
+  
+  ret pBuf
+
+fn unmap_file(view:*char) -> int:
+  ret UnmapViewOfFile(view)

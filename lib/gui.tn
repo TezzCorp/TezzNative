@@ -1,0 +1,315 @@
+// gui module: minimal immediate-mode GUI for freestanding targets
+// Uses the Limine framebuffer when available (via os.fb_* accessors).
+
+import "os"
+import "event"
+
+struct GuiSurface:
+  addr:*char
+  width:int
+  height:int
+  pitch:int
+  bpp:int
+
+struct GuiWindow:
+  x:int
+  y:int
+  w:int
+  h:int
+  title:str
+
+struct GuiEvent:
+  kind:int
+  key:int
+  x:int
+  y:int
+  buttons:int
+  mods:int
+  data:int
+
+static let g_event_q:TzEventQueue
+static let g_event_ready:int = 0
+static let g_mouse_x:int = 0
+static let g_mouse_y:int = 0
+static let g_mouse_buttons:int = 0
+static let g_ime_active:int = 0
+static let g_ime_cursor:int = 0
+static let g_ime_length:int = 0
+
+static let g_windows:[GuiWindow;16]
+static let g_win_count:int = 0
+
+fn _gui_event_ensure_ready() -> int:
+  if g_event_ready == 0:
+    event.tz_event_queue_init(&g_event_q)
+    w:int = os.fb_width()
+    h:int = os.fb_height()
+    if w > 0:
+      g_mouse_x = w / 2
+    else:
+      g_mouse_x = 0
+    if h > 0:
+      g_mouse_y = h / 2
+    else:
+      g_mouse_y = 0
+    g_mouse_buttons = 0
+    g_ime_active = 0
+    g_ime_cursor = 0
+    g_ime_length = 0
+    g_event_ready = 1
+  ret 0
+
+
+fn gui_surface(out:*GuiSurface) -> int:
+  if out == 0:
+    ret 0 - 1
+  unsafe:
+    out[0].addr = os.fb_addr()
+    out[0].width = os.fb_width()
+    out[0].height = os.fb_height()
+    out[0].pitch = os.fb_pitch()
+    out[0].bpp = os.fb_bpp()
+  ret 0
+
+fn gui_putpixel(s:*GuiSurface, x:int, y:int, color:int) -> int:
+  if s == 0:
+    ret 0
+  if s[0].addr == 0:
+    ret 0
+  if x < 0 || y < 0 || x >= s[0].width || y >= s[0].height:
+    ret 0
+  if s[0].bpp < 24:
+    ret 0
+  off:int = y * s[0].pitch + x * (s[0].bpp / 8)
+  b:int = color % 256
+  g:int = (color / 256) % 256
+  r:int = (color / 65536) % 256
+  unsafe:
+    p:*char = s[0].addr + off
+    p[0] = b as char
+    p[1] = g as char
+    p[2] = r as char
+    if s[0].bpp >= 32:
+      p[3] = 0 as char
+  ret 0
+
+fn gui_clear(s:*GuiSurface, color:int) -> int:
+  if s == 0:
+    ret 0
+  if s[0].addr == 0:
+    ret 0
+  y:int = 0
+  while y < s[0].height:
+    x:int = 0
+    while x < s[0].width:
+      gui_putpixel(s, x, y, color)
+      x = x + 1
+    y = y + 1
+  ret 0
+
+fn gui_rect(s:*GuiSurface, x:int, y:int, w:int, h:int, color:int) -> int:
+  if w <= 0 || h <= 0:
+    ret 0
+  yy:int = 0
+  while yy < h:
+    xx:int = 0
+    while xx < w:
+      gui_putpixel(s, x + xx, y + yy, color)
+      xx = xx + 1
+    yy = yy + 1
+  ret 0
+
+fn gui_text(s:*GuiSurface, x:int, y:int, text:str, color:int) -> int:
+  if text == 0:
+    ret 0
+  // Delegate to OS framebuffer text renderer when available.
+  ret os.fb_text(x, y, text, color)
+
+fn gui_button(s:*GuiSurface, x:int, y:int, w:int, h:int, label:str) -> int:
+  // Simple boxed button (no input handling yet).
+  gui_rect(s, x, y, w, h, 2241348)
+  gui_rect(s, x + 2, y + 2, w - 4, h - 4, 4482696)
+  gui_text(s, x + 6, y + 6, label, 16777215)
+  ret 0
+
+fn gui_begin() -> int:
+  g_win_count = 0
+  ret 0
+
+fn gui_window(s:*GuiSurface, x:int, y:int, w:int, h:int, title:str) -> int:
+  if g_win_count < 16:
+    g_windows[g_win_count].x = x
+    g_windows[g_win_count].y = y
+    g_windows[g_win_count].w = w
+    g_windows[g_win_count].h = h
+    g_windows[g_win_count].title = title
+    g_win_count = g_win_count + 1
+  // draw immediately for now
+  gui_rect(s, x, y, w, h, 2236962)
+  gui_rect(s, x, y, w, 16, 3355443)
+  gui_text(s, x + 4, y + 4, title, 16777215)
+  ret 0
+
+fn gui_end(s:*GuiSurface) -> int:
+  if s == 0:
+    ret 0
+  // Host backends present on frame end; freestanding targets treat this as no-op.
+  ret os.fb_present()
+
+fn gui_event_push_key(key:int) -> int:
+  _gui_event_ensure_ready()
+  ret event.tz_event_push_key(&g_event_q, key)
+
+fn gui_event_next(ev:*GuiEvent) -> int:
+  _gui_event_ensure_ready()
+  if ev == 0:
+    ret 0
+  tev:TzEvent
+  if event.tz_event_pop(&g_event_q, &tev) == 0:
+    ret 0
+  ev[0].kind = tev.kind
+  ev[0].key = tev.key
+  ev[0].x = tev.x
+  ev[0].y = tev.y
+  ev[0].buttons = tev.buttons
+  ev[0].mods = tev.mods
+  ev[0].data = tev.data
+  ret 1
+
+fn gui_pump_input() -> int:
+  _gui_event_ensure_ready()
+  // Pull keyboard chars into the GUI event queue.
+  c:int = os.kbd_poll_char()
+  if c > 0:
+    gui_event_push_key(c)
+  if os.mouse_poll_has_packet() != 0:
+    os.mouse_poll_packet()
+    dx:int = os.mouse_poll_dx()
+    dy:int = os.mouse_poll_dy()
+    buttons:int = os.mouse_poll_buttons()
+    if dx != 0 || dy != 0:
+      g_mouse_x = g_mouse_x + dx
+      g_mouse_y = g_mouse_y + dy
+      w:int = os.fb_width()
+      h:int = os.fb_height()
+      if g_mouse_x < 0:
+        g_mouse_x = 0
+      if g_mouse_y < 0:
+        g_mouse_y = 0
+      if w > 0 && g_mouse_x >= w:
+        g_mouse_x = w - 1
+      if h > 0 && g_mouse_y >= h:
+        g_mouse_y = h - 1
+      event.tz_event_push_pointer(&g_event_q, g_mouse_x, g_mouse_y, buttons, 0)
+    if buttons != g_mouse_buttons:
+      event.tz_event_push_button(&g_event_q, g_mouse_x, g_mouse_y, buttons, 0)
+      g_mouse_buttons = buttons
+  ime_active:int = os.kbd_poll_ime_active()
+  ime_cursor:int = os.kbd_poll_ime_cursor()
+  ime_length:int = os.kbd_poll_ime_length()
+  if ime_active < 0:
+    ime_active = 0
+  if ime_active > 0:
+    ime_active = 1
+  if ime_cursor < 0:
+    ime_cursor = 0
+  if ime_length < 0:
+    ime_length = 0
+  if ime_active != g_ime_active || ime_cursor != g_ime_cursor || ime_length != g_ime_length:
+    g_ime_active = ime_active
+    g_ime_cursor = ime_cursor
+    g_ime_length = ime_length
+    event.tz_event_push(&g_event_q, 5, g_ime_active, g_mouse_x, g_mouse_y, g_mouse_buttons, g_ime_cursor, g_ime_length)
+  ret 0
+
+fn gui_mouse_x() -> int:
+  _gui_event_ensure_ready()
+  ret g_mouse_x
+
+fn gui_mouse_y() -> int:
+  _gui_event_ensure_ready()
+  ret g_mouse_y
+
+fn gui_mouse_buttons() -> int:
+  _gui_event_ensure_ready()
+  ret g_mouse_buttons
+
+fn gui_ime_active() -> int:
+  _gui_event_ensure_ready()
+  ret g_ime_active
+
+fn gui_ime_cursor() -> int:
+  _gui_event_ensure_ready()
+  ret g_ime_cursor
+
+fn gui_ime_length() -> int:
+  _gui_event_ensure_ready()
+  ret g_ime_length
+
+fn rgba(r:int, g:int, b:int, a:int) -> int:
+  ret ((a & 255) << 24) | ((r & 255) << 16) | ((g & 255) << 8) | (b & 255)
+
+fn gui_getpixel(s:*GuiSurface, x:int, y:int) -> int:
+  if s == 0 || s[0].addr == 0: ret 0
+  if x < 0 || y < 0 || x >= s[0].width || y >= s[0].height: ret 0
+  if s[0].bpp < 24: ret 0
+  off:int = y * s[0].pitch + x * (s[0].bpp / 8)
+  unsafe:
+    p:*char = s[0].addr + off
+    b:int = (p[0] as int) & 255
+    g:int = (p[1] as int) & 255
+    r:int = (p[2] as int) & 255
+    a:int = 255
+    if s[0].bpp >= 32:
+      a = (p[3] as int) & 255
+    ret (a << 24) | (r << 16) | (g << 8) | b
+
+fn gui_blend_pixel(src:int, dst:int) -> int:
+  sa:int = (src >> 24) & 255
+  if sa == 255: ret src
+  if sa == 0: ret dst
+  sr:int = (src >> 16) & 255
+  sg:int = (src >> 8) & 255
+  sb:int = src & 255
+  dr:int = (dst >> 16) & 255
+  dg:int = (dst >> 8) & 255
+  db:int = dst & 255
+  r:int = (sr * sa + dr * (255 - sa)) / 255
+  g:int = (sg * sa + dg * (255 - sa)) / 255
+  b:int = (sb * sa + db * (255 - sa)) / 255
+  ret (255 << 24) | (r << 16) | (g << 8) | b
+
+fn gui_fill_rect_rgba(s:*GuiSurface, x:int, y:int, w:int, h:int, color:int) -> int:
+  if s == 0 || w <= 0 || h <= 0: ret 0
+  sa:int = (color >> 24) & 255
+  if sa == 0: ret 0
+  if sa == 255:
+    yy:int = 0
+    while yy < h:
+      xx:int = 0
+      while xx < w:
+        gui_putpixel(s, x + xx, y + yy, color)
+        xx = xx + 1
+      yy = yy + 1
+    ret 0
+  yy2:int = 0
+  while yy2 < h:
+    xx2:int = 0
+    while xx2 < w:
+      px:int = x + xx2
+      py:int = y + yy2
+      if px >= 0 && py >= 0 && px < s[0].width && py < s[0].height:
+        dst:int = gui_getpixel(s, px, py)
+        blended:int = gui_blend_pixel(color, dst)
+        gui_putpixel(s, px, py, blended)
+      xx2 = xx2 + 1
+    yy2 = yy2 + 1
+  ret 0
+
+fn gui_text_rgba(s:*GuiSurface, x:int, y:int, text:str, color:int, bg_color:int) -> int:
+  if text == 0: ret 0
+  if bg_color != 0:
+    tlen:int = 0
+    while (text as *char)[tlen] != 0 as char: tlen = tlen + 1
+    gui_fill_rect_rgba(s, x, y, tlen * 8, 16, bg_color)
+  ret os.fb_text(x, y, text, color)

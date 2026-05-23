@@ -1,0 +1,1115 @@
+// tezzdbql module — TezzNative 2.0 SQL-like Query Language
+//
+// TezzDBQL provides a SQL-inspired query interface on top of
+// the native TezzDB B+ tree engine.
+//
+// Supported syntax (subset):
+//   SELECT * FROM table [WHERE col = ?] [LIMIT ?]
+//   INSERT INTO table (col1, col2, ...) VALUES (?, ?, ...)
+//   UPDATE table SET col1 = ? [WHERE id = ?]
+//   DELETE FROM table [WHERE id = ?]
+//
+// Parameterized queries use "?" placeholders.
+// Results are accessed through a cursor-like QueryResult.
+//
+// Usage:
+//   import "../lib/tezzdb.tn"
+//   import "../lib/tezzdbql.tn"
+//
+//   db:*char = db_open("mydb.db")
+//   db_table_create(db, "users")
+//   params:[str;4]
+//   params[0] = "alice"
+//   params[1] = "alice@example.com"
+//   r:*TzQueryResult = db_query(db, "INSERT INTO users (name, email) VALUES (?, ?)", &params[0], 2)
+//   db_result_free(r)
+//
+//   r2:*TzQueryResult = db_query(db, "SELECT * FROM users WHERE name = ?", &params[0], 1)
+//   while db_result_next(r2) != 0:
+//     say cursor_field_str(r2, "name"), cursor_field_str(r2, "email")
+//   db_result_free(r2)
+
+import "../lib/tezzdb.tn"
+
+// ─────────────────────────────────────────────────────────────
+// Query result cursor type
+// ─────────────────────────────────────────────────────────────
+
+struct TzQueryResult:
+  // Internal raw data: JSON array of matching rows
+  rows:str          // heap-allocated JSON array "[{...},{...}]"
+  rows_len:int
+  // Iteration state
+  cur_pos:int       // current byte position inside rows
+  cur_row:str       // current row JSON object (heap, or 0)
+  row_count:int     // total rows in result
+  rows_iterated:int
+  // Scalar result for INSERT/UPDATE/DELETE
+  affected_rows:int
+  last_insert_id:int
+  // Error state
+  error:int         // 0 = ok, non-zero = error code
+
+// ─────────────────────────────────────────────────────────────
+// Internal string helpers (no stdlib dependency)
+// ─────────────────────────────────────────────────────────────
+
+fn _ql_strlen(s:str) -> int:
+  if s == 0: ret 0
+  n:int = 0
+  while (s as *char)[n] != 0 as char:
+    n = n + 1
+  ret n
+
+fn _ql_strdup(s:str) -> str:
+  if s == 0: ret 0 as str
+  n:int = _ql_strlen(s)
+  out:*char = malloc(n + 1)
+  if out == 0: ret 0 as str
+  i:int = 0
+  while i < n:
+    out[i] = (s as *char)[i]
+    i = i + 1
+  out[n] = 0 as char
+  ret out as str
+
+fn _ql_strcmp(a:str, b:str) -> int:
+  if a == 0 && b == 0: ret 0
+  if a == 0: ret 0 - 1
+  if b == 0: ret 1
+  i:int = 0
+  while (a as *char)[i] != 0 as char && (b as *char)[i] != 0 as char:
+    ca:int = (a as *char)[i] as int
+    cb:int = (b as *char)[i] as int
+    if ca != cb: ret ca - cb
+    i = i + 1
+  ret ((a as *char)[i] as int) - ((b as *char)[i] as int)
+
+fn _ql_strncaseeq(a:str, b:str, n:int) -> int:
+  // Case-insensitive compare of first n chars
+  i:int = 0
+  while i < n:
+    ca:int = (a as *char)[i] as int
+    cb:int = (b as *char)[i] as int
+    // toLower
+    if ca >= 65 && ca <= 90: ca = ca + 32
+    if cb >= 65 && cb <= 90: cb = cb + 32
+    if ca != cb: ret 0
+    i = i + 1
+  ret 1
+
+fn _ql_isspace(c:int) -> int:
+  ret c == 32 || c == 9 || c == 10 || c == 13
+
+fn _ql_skip_spaces(s:str, pos:int) -> int:
+  n:int = _ql_strlen(s)
+  while pos < n && _ql_isspace((s as *char)[pos] as int) != 0:
+    pos = pos + 1
+  ret pos
+
+fn _ql_isalnum(c:int) -> int:
+  ret (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 95
+
+fn _ql_read_word(s:str, pos:int, out_word:*str, out_end:*int) -> int:
+  n:int = _ql_strlen(s)
+  start:int = pos
+  end:int = pos
+  while end < n && _ql_isalnum((s as *char)[end] as int) != 0:
+    end = end + 1
+  if end == start: ret 0
+  wlen:int = end - start
+  w:*char = malloc(wlen + 1)
+  if w == 0: ret 0
+  i:int = 0
+  while i < wlen:
+    c:int = (s as *char)[start + i] as int
+    if c >= 65 && c <= 90: c = c + 32
+    w[i] = c as char
+    i = i + 1
+  w[wlen] = 0 as char
+  *out_word = w as str
+  *out_end = end
+  ret 1
+
+fn _ql_read_quoted(s:str, pos:int, out_val:*str, out_end:*int) -> int:
+  n:int = _ql_strlen(s)
+  if pos >= n || (s as *char)[pos] != 39 as char: ret 0  // must start with '
+  pos = pos + 1
+  start:int = pos
+  while pos < n && (s as *char)[pos] != 39 as char:
+    pos = pos + 1
+  vlen:int = pos - start
+  v:*char = malloc(vlen + 1)
+  if v == 0: ret 0
+  i:int = 0
+  while i < vlen:
+    v[i] = (s as *char)[start + i]
+    i = i + 1
+  v[vlen] = 0 as char
+  *out_val = v as str
+  *out_end = pos + 1  // skip closing '
+  ret 1
+
+fn _ql_read_number(s:str, pos:int, out_val:*int, out_end:*int) -> int:
+  n:int = _ql_strlen(s)
+  if pos >= n: ret 0
+  sign:int = 1
+  if (s as *char)[pos] == 45 as char:
+    sign = 0 - 1
+    pos = pos + 1
+  start:int = pos
+  num:int = 0
+  while pos < n:
+    c:int = (s as *char)[pos] as int
+    if c < 48 || c > 57: break
+    num = num * 10 + (c - 48)
+    pos = pos + 1
+  if pos == start: ret 0
+  *out_val = num * sign
+  *out_end = pos
+  ret 1
+
+fn _ql_join2(a:str, b:str) -> str:
+  if a == 0 && b == 0: ret _ql_strdup("")
+  if a == 0: ret _ql_strdup(b)
+  if b == 0: ret _ql_strdup(a)
+  la:int = _ql_strlen(a)
+  lb:int = _ql_strlen(b)
+  out:*char = malloc(la + lb + 1)
+  if out == 0: ret 0 as str
+  i:int = 0
+  while i < la:
+    out[i] = (a as *char)[i]
+    i = i + 1
+  i = 0
+  while i < lb:
+    out[la + i] = (b as *char)[i]
+    i = i + 1
+  out[la + lb] = 0 as char
+  ret out as str
+
+fn _ql_itoa(n:int) -> str:
+  buf:[char;24]
+  i:int = 22
+  buf[23] = 0 as char
+  neg:int = 0
+  if n < 0:
+    neg = 1
+    n = 0 - n
+  while n >= 10:
+    buf[i] = ((n % 10) + 48) as char
+    n = n / 10
+    i = i - 1
+  buf[i] = (n + 48) as char
+  if neg != 0:
+    i = i - 1
+    buf[i] = 45 as char  // '-'
+  ret _ql_strdup((&buf[0] + i) as str)
+
+fn _ql_count_rows(json_arr:str) -> int:
+  if json_arr == 0: ret 0
+  n:int = _ql_strlen(json_arr)
+  if n <= 2: ret 0  // "[]"
+  count:int = 0
+  depth:int = 0
+  in_str:int = 0
+  i:int = 0
+  while i < n:
+    c:int = (json_arr as *char)[i] as int
+    if in_str != 0:
+      if c == 92: i = i + 1  // skip escaped
+      else if c == 34: in_str = 0
+    else:
+      if c == 34: in_str = 1
+      else if c == 123:  // '{'
+        if depth == 0: count = count + 1
+        depth = depth + 1
+      else if c == 125:  // '}'
+        depth = depth - 1
+    i = i + 1
+  ret count
+
+// Extract the Nth JSON object from a JSON array string.
+// Returns heap-allocated copy, caller frees. Returns 0 if out of range.
+fn _ql_array_get_row(json_arr:str, row_idx:int) -> str:
+  if json_arr == 0: ret 0 as str
+  n:int = _ql_strlen(json_arr)
+  count:int = 0
+  depth:int = 0
+  in_str:int = 0
+  obj_start:int = 0 - 1
+  i:int = 0
+  while i < n:
+    c:int = (json_arr as *char)[i] as int
+    if in_str != 0:
+      if c == 92: i = i + 1
+      else if c == 34: in_str = 0
+    else:
+      if c == 34: in_str = 1
+      else if c == 123:
+        if depth == 0:
+          if count == row_idx:
+            obj_start = i
+          count = count + 1
+        depth = depth + 1
+      else if c == 125:
+        depth = depth - 1
+        if depth == 0 && obj_start >= 0 && count - 1 == row_idx:
+          // Found the object
+          vlen:int = i - obj_start + 1
+          out:*char = malloc(vlen + 1)
+          if out == 0: ret 0 as str
+          k:int = 0
+          while k < vlen:
+            out[k] = (json_arr as *char)[obj_start + k]
+            k = k + 1
+          out[vlen] = 0 as char
+          ret out as str
+    i = i + 1
+  ret 0 as str
+
+// ─────────────────────────────────────────────────────────────
+// QueryResult lifecycle
+// ─────────────────────────────────────────────────────────────
+
+fn _ql_result_new() -> *TzQueryResult:
+  r:*TzQueryResult = (*TzQueryResult)malloc(sizeof(TzQueryResult))
+  if r == 0: ret 0 as *TzQueryResult
+  (*r).rows = 0 as str
+  (*r).rows_len = 0
+  (*r).cur_pos = 0
+  (*r).cur_row = 0 as str
+  (*r).row_count = 0
+  (*r).rows_iterated = 0
+  (*r).affected_rows = 0
+  (*r).last_insert_id = 0
+  (*r).error = 0
+  ret r
+
+fn db_result_free(r:*TzQueryResult) -> int:
+  if r == 0: ret 0
+  if (*r).rows != 0:
+    free((*r).rows)
+    (*r).rows = 0 as str
+  if (*r).cur_row != 0:
+    free((*r).cur_row)
+    (*r).cur_row = 0 as str
+  free(r as *char)
+  ret 0
+
+// Advance to next row. Returns 1 if row available, 0 at end.
+fn db_result_next(r:*TzQueryResult) -> int:
+  if r == 0: ret 0
+  if (*r).cur_row != 0:
+    free((*r).cur_row)
+    (*r).cur_row = 0 as str
+  if (*r).rows_iterated >= (*r).row_count: ret 0
+  row:str = _ql_array_get_row((*r).rows, (*r).rows_iterated)
+  if row == 0: ret 0
+  (*r).cur_row = row
+  (*r).rows_iterated = (*r).rows_iterated + 1
+  ret 1
+
+// ─────────────────────────────────────────────────────────────
+// Inline JSON field extractors (row_get_str / row_get_int equivalents)
+// duplicated here to avoid cross-module symbol dependency
+// ─────────────────────────────────────────────────────────────
+
+fn _ql_json_find_key(json:str, key:str) -> int:
+  if json == 0 || key == 0: ret 0 - 1
+  jlen:int = _ql_strlen(json)
+  klen:int = _ql_strlen(key)
+  i:int = 0
+  while i < jlen:
+    // Look for opening quote
+    if (json as *char)[i] as int == 34:
+      // Match key
+      i = i + 1
+      k:int = 0
+      while k < klen && i + k < jlen:
+        if (json as *char)[i + k] != (key as *char)[k]: break
+        k = k + 1
+      if k == klen && i + k < jlen && (json as *char)[i + k] as int == 34:
+        // Key matched, skip past closing quote and colon
+        i = i + k + 1
+        while i < jlen && (json as *char)[i] as int != 58:
+          i = i + 1
+        i = i + 1  // skip ':'
+        while i < jlen && (_ql_isspace((json as *char)[i] as int) != 0):
+          i = i + 1
+        ret i
+    i = i + 1
+  ret 0 - 1
+
+fn _ql_json_get_str(json:str, key:str) -> str:
+  off:int = _ql_json_find_key(json, key)
+  if off < 0: ret 0 as str
+  jlen:int = _ql_strlen(json)
+  if off >= jlen: ret 0 as str
+  if (json as *char)[off] as int != 34: ret 0 as str
+  start:int = off + 1
+  end:int = start
+  while end < jlen:
+    c:int = (json as *char)[end] as int
+    if c == 34 && (end == 0 || (json as *char)[end - 1] as int != 92): break
+    end = end + 1
+  n_c:int = end - start
+  out:*char = malloc(n_c + 1)
+  if out == 0: ret 0 as str
+  k2:int = 0
+  while k2 < n_c:
+    out[k2] = (json as *char)[start + k2]
+    k2 = k2 + 1
+  out[n_c] = 0 as char
+  ret out as str
+
+fn _ql_json_get_int(json:str, key:str) -> int:
+  off:int = _ql_json_find_key(json, key)
+  if off < 0: ret 0
+  jlen:int = _ql_strlen(json)
+  sign_j:int = 1
+  n_j:int = 0
+  i_j:int = off
+  if i_j < jlen && (json as *char)[i_j] as int == 45:
+    sign_j = 0 - 1
+    i_j = i_j + 1
+  while i_j < jlen:
+    c_j:int = (json as *char)[i_j] as int
+    if c_j < 48 || c_j > 57: break
+    n_j = n_j * 10 + (c_j - 48)
+    i_j = i_j + 1
+  ret n_j * sign_j
+
+// Get string field from current row
+fn cursor_field_str(r:*TzQueryResult, col:str) -> str:
+  if r == 0 || (*r).cur_row == 0: ret 0 as str
+  ret _ql_json_get_str((*r).cur_row, col)
+
+// Get integer field from current row
+fn cursor_field_int(r:*TzQueryResult, col:str) -> int:
+  if r == 0 || (*r).cur_row == 0: ret 0
+  ret _ql_json_get_int((*r).cur_row, col)
+
+fn db_result_row_count(r:*TzQueryResult) -> int:
+  if r == 0: ret 0
+  ret (*r).row_count
+
+fn db_result_affected(r:*TzQueryResult) -> int:
+  if r == 0: ret 0
+  ret (*r).affected_rows
+
+fn db_result_last_id(r:*TzQueryResult) -> int:
+  if r == 0: ret 0
+  ret (*r).last_insert_id
+
+fn db_result_error(r:*TzQueryResult) -> int:
+  if r == 0: ret (0 - 1)
+  ret (*r).error
+
+// ─────────────────────────────────────────────────────────────
+// Param substitution
+// Replaces ? placeholders with param values in order.
+// Returns heap-allocated substituted query string.
+// ─────────────────────────────────────────────────────────────
+
+
+
+// ─────────────────────────────────────────────────────────────
+// Parse helpers
+// ─────────────────────────────────────────────────────────────
+
+// Parses a WHERE clause value: either 'quoted' literal or integer or ?-param
+fn _ql_parse_where_val(q:str, pos:int, params:*str, param_count:int, pi:*int, out_val:*str, out_end:*int) -> int:
+  n:int = _ql_strlen(q)
+  pos = _ql_skip_spaces(q, pos)
+  if pos >= n: ret 0
+  c:int = (q as *char)[pos] as int
+  // '?' placeholder
+  if c == 63:
+    if *pi < param_count:
+      pv:str = params[*pi]
+      if pv == 0: pv = ""
+      *out_val = _ql_strdup(pv)
+      *pi = *pi + 1
+      *out_end = pos + 1
+      ret 1
+    ret 0
+  // quoted string
+  if c == 39 || c == 34:
+    qt:int = c
+    pos2:int = pos + 1
+    start:int = pos2
+    while pos2 < n && (q as *char)[pos2] as int != qt:
+      pos2 = pos2 + 1
+    vlen:int = pos2 - start
+    v:*char = malloc(vlen + 1)
+    if v == 0: ret 0
+    k:int = 0
+    while k < vlen:
+      v[k] = (q as *char)[start + k]
+      k = k + 1
+    v[vlen] = 0 as char
+    *out_val = v as str
+    *out_end = pos2 + 1
+    ret 1
+  // unquoted word/number
+  start2:int = pos
+  while pos < n:
+    cc:int = (q as *char)[pos] as int
+    if _ql_isspace(cc) != 0: break
+    if cc == 41: break  // ')'
+    pos = pos + 1
+  vlen2:int = pos - start2
+  if vlen2 == 0: ret 0
+  v2:*char = malloc(vlen2 + 1)
+  if v2 == 0: ret 0
+  k2:int = 0
+  while k2 < vlen2:
+    v2[k2] = (q as *char)[start2 + k2]
+    k2 = k2 + 1
+  v2[vlen2] = 0 as char
+  *out_val = v2 as str
+  *out_end = pos
+  ret 1
+
+// ─────────────────────────────────────────────────────────────
+// SQL statement builders
+// ─────────────────────────────────────────────────────────────
+
+// Build a JSON row from a column-list and a value-list (both as comma-separated)
+fn _ql_build_json(cols:*str, vals:*str, count:int) -> str:
+  json:str = _ql_strdup("{")
+  i:int = 0
+  while i < count:
+    if i > 0:
+      t:str = _ql_join2(json, ",")
+      free(json); json = t
+    t:str = _ql_join2(json, "\"")
+    free(json); json = t
+    t = _ql_join2(json, cols[i])
+    free(json); json = t
+    t = _ql_join2(json, "\":\"")
+    free(json); json = t
+    t = _ql_join2(json, vals[i])
+    free(json); json = t
+    t = _ql_join2(json, "\"")
+    free(json); json = t
+    i = i + 1
+  t2:str = _ql_join2(json, "}")
+  free(json)
+  ret t2
+
+// ─────────────────────────────────────────────────────────────
+// Main parser/executor: db_query
+// ─────────────────────────────────────────────────────────────
+
+fn db_query(h:*char, query:str, params:*str, param_count:int) -> *TzQueryResult:
+  r:*TzQueryResult = _ql_result_new()
+  if r == 0: ret 0 as *TzQueryResult
+  if h == 0 as *char || query == 0:
+    (*r).error = (0 - 1)
+    ret r
+
+  db:*TezzDb = h as *TezzDb
+
+  // Skip leading whitespace
+  pos:int = _ql_skip_spaces(query, 0)
+  n:int = _ql_strlen(query)
+  if pos >= n:
+    (*r).error = (0 - 1)
+    ret r
+
+  // ── Read first keyword ──────────────────────────────────────
+  kw:str = 0 as str
+  kw_end:int = pos
+  if _ql_read_word(query, pos, &kw, &kw_end) == 0:
+    (*r).error = (0 - 1)
+    ret r
+
+  // ── SELECT * FROM table [WHERE col = ?] [LIMIT ?] ──────────
+  if _ql_strcmp(kw, "select") == 0:
+    free(kw)
+    pos = _ql_skip_spaces(query, kw_end)
+    // Skip columns until "from"
+    found_from:int = 0
+    while pos < n:
+      pos = _ql_skip_spaces(query, pos)
+      w2:str = 0 as str
+      w2_end:int = pos
+      if _ql_read_word(query, pos, &w2, &w2_end) != 0:
+        if _ql_strcmp(w2, "from") == 0:
+          free(w2)
+          found_from = 1
+          pos = w2_end
+          break
+        free(w2)
+        pos = w2_end
+      else:
+        pos = pos + 1
+    if found_from == 0:
+      (*r).error = (0 - 1)
+      ret r
+    pos = _ql_skip_spaces(query, pos)
+    // table name
+    wtable:str = 0 as str
+    wtable_end:int = pos
+    if _ql_read_word(query, pos, &wtable, &wtable_end) == 0:
+      (*r).error = (0 - 1); ret r
+    table:str = wtable
+    pos = _ql_skip_spaces(query, wtable_end)
+
+    // Optional: WHERE and/or LIMIT
+    where_col:str = 0 as str
+    where_val:str = 0 as str
+    limit:int = 0 - 1
+    pi:int = 0
+
+    while pos < n:
+      pos = _ql_skip_spaces(query, pos)
+      wopt:str = 0 as str
+      wopt_end:int = pos
+      if _ql_read_word(query, pos, &wopt, &wopt_end) == 0: break
+      
+      if _ql_strcmp(wopt, "where") == 0:
+        free(wopt)
+        pos = _ql_skip_spaces(query, wopt_end)
+        wcol:str = 0 as str
+        wcol_end:int = pos
+        _ql_read_word(query, pos, &wcol, &wcol_end)
+        where_col = wcol
+        pos = _ql_skip_spaces(query, wcol_end)
+        // skip '='
+        if pos < n && (query as *char)[pos] as int == 61:
+          pos = pos + 1
+        pos = _ql_skip_spaces(query, pos)
+        wval_end:int = pos
+        _ql_parse_where_val(query, pos, params, param_count, &pi, &where_val, &wval_end)
+        pos = _ql_skip_spaces(query, wval_end)
+      else if _ql_strcmp(wopt, "limit") == 0:
+        free(wopt)
+        pos = _ql_skip_spaces(query, wopt_end)
+        limval:str = 0 as str
+        limval_end:int = pos
+        _ql_parse_where_val(query, pos, params, param_count, &pi, &limval, &limval_end)
+        if limval != 0:
+          lv:int = 0
+          li:int = 0
+          llen:int = _ql_strlen(limval)
+          while li < llen:
+            lc:int = (limval as *char)[li] as int
+            if lc < 48 || lc > 57: break
+            lv = lv * 10 + (lc - 48)
+            li = li + 1
+          limit = lv
+          free(limval)
+        pos = _ql_skip_spaces(query, limval_end)
+      else:
+        free(wopt)
+        break
+
+    // Execute the query
+    rows:str = 0 as str
+    if where_col != 0 && where_val != 0:
+      rows = tezzdb.query_where(h as *TezzDb, table, where_col, where_val)
+    else:
+      rows = tezzdb.query_all(h as *TezzDb, table)
+
+    if where_col != 0: free(where_col)
+    if where_val != 0: free(where_val)
+
+    // Apply LIMIT by trimming result
+    if rows != 0 && limit >= 0:
+      total:int = _ql_count_rows(rows)
+      if limit < total:
+        // Reconstruct array with limit rows
+        new_arr:str = _ql_strdup("[")
+        li2:int = 0
+        while li2 < limit:
+          row_s:str = _ql_array_get_row(rows, li2)
+          if row_s == 0: break
+          if li2 > 0:
+            t:str = _ql_join2(new_arr, ",")
+            free(new_arr); new_arr = t
+          t2:str = _ql_join2(new_arr, row_s)
+          free(new_arr); new_arr = t2
+          free(row_s)
+          li2 = li2 + 1
+        t3:str = _ql_join2(new_arr, "]")
+        free(new_arr)
+        free(rows)
+        rows = t3
+
+    (*r).rows = rows
+    (*r).rows_len = _ql_strlen(rows)
+    (*r).row_count = _ql_count_rows(rows)
+    (*r).affected_rows = (*r).row_count
+    free(table)
+    ret r
+
+  // ── INSERT INTO table (col1, col2) VALUES (?, ?) ───────────
+  if _ql_strcmp(kw, "insert") == 0:
+    free(kw)
+    pos = _ql_skip_spaces(query, kw_end)
+    winto:str = 0 as str
+    winto_end:int = pos
+    _ql_read_word(query, pos, &winto, &winto_end)
+    free(winto)
+    pos = _ql_skip_spaces(query, winto_end)
+    // table name
+    wtbl:str = 0 as str
+    wtbl_end:int = pos
+    _ql_read_word(query, pos, &wtbl, &wtbl_end)
+    table_i:str = wtbl
+    pos = _ql_skip_spaces(query, wtbl_end)
+
+    // Collect column names (col1, col2, ...)
+    cols:[str;32]
+    col_count:int = 0
+    if pos < n && (query as *char)[pos] as int == 40:  // '('
+      pos = pos + 1
+      while pos < n && (query as *char)[pos] as int != 41:
+        pos = _ql_skip_spaces(query, pos)
+        if (query as *char)[pos] as int == 41: break
+        colname:str = 0 as str
+        colname_end:int = pos
+        if _ql_read_word(query, pos, &colname, &colname_end) != 0 && col_count < 32:
+          cols[col_count] = colname
+          col_count = col_count + 1
+          pos = colname_end
+        pos = _ql_skip_spaces(query, pos)
+        if pos < n && (query as *char)[pos] as int == 44:  // ','
+          pos = pos + 1
+      if pos < n && (query as *char)[pos] as int == 41: pos = pos + 1
+    pos = _ql_skip_spaces(query, pos)
+
+    // VALUES keyword
+    wvals:str = 0 as str
+    wvals_end:int = pos
+    _ql_read_word(query, pos, &wvals, &wvals_end)
+    free(wvals)
+    pos = _ql_skip_spaces(query, wvals_end)
+
+    // Collect values (?, 'x', ...) 
+    pi2:int = 0
+    vals:[str;32]
+    val_count:int = 0
+    if pos < n && (query as *char)[pos] as int == 40:  // '('
+      pos = pos + 1
+      while pos < n && (query as *char)[pos] as int != 41:
+        pos = _ql_skip_spaces(query, pos)
+        if (query as *char)[pos] as int == 41: break
+        valname:str = 0 as str
+        valname_end:int = pos
+        if _ql_parse_where_val(query, pos, params, param_count, &pi2, &valname, &valname_end) != 0 && val_count < 32:
+          vals[val_count] = valname
+          val_count = val_count + 1
+          pos = valname_end
+        pos = _ql_skip_spaces(query, pos)
+        if pos < n && (query as *char)[pos] as int == 44:  // ','
+          pos = pos + 1
+      if pos < n && (query as *char)[pos] as int == 41: pos = pos + 1
+
+    // Build JSON row
+    use_count:int = col_count
+    if val_count < use_count: use_count = val_count
+    json_row:str = _ql_build_json(&cols[0], &vals[0], use_count)
+
+    pk_i:int = tezzdb.insert(h as *TezzDb, table_i, json_row)
+
+    // Cleanup
+    free(json_row)
+    free(table_i)
+    ci:int = 0
+    while ci < col_count:
+      if cols[ci] != 0: free(cols[ci])
+      ci = ci + 1
+    vi:int = 0
+    while vi < val_count:
+      if vals[vi] != 0: free(vals[vi])
+      vi = vi + 1
+
+    if pk_i < 0:
+      (*r).error = (0 - 1)
+    else:
+      (*r).last_insert_id = pk_i
+      (*r).affected_rows = 1
+    ret r
+
+  // ── UPDATE table SET col = ? [WHERE id = ?] ────────────────
+  if _ql_strcmp(kw, "update") == 0:
+    free(kw)
+    pos = _ql_skip_spaces(query, kw_end)
+    wtbl_u:str = 0 as str
+    wtbl_u_end:int = pos
+    _ql_read_word(query, pos, &wtbl_u, &wtbl_u_end)
+    table_u:str = wtbl_u
+    pos = _ql_skip_spaces(query, wtbl_u_end)
+
+    // SET keyword
+    wset:str = 0 as str
+    wset_end:int = pos
+    _ql_read_word(query, pos, &wset, &wset_end)
+    free(wset)
+    pos = _ql_skip_spaces(query, wset_end)
+
+    // Collect col = val pairs until WHERE or end
+    set_cols:[str;32]
+    set_vals:[str;32]
+    set_count:int = 0
+    pi_u:int = 0
+    while pos < n && set_count < 32:
+      // Peek: if next word is WHERE, stop
+      peek:str = 0 as str
+      peek_end:int = pos
+      _ql_read_word(query, pos, &peek, &peek_end)
+      if peek != 0 && _ql_strcmp(peek, "where") == 0:
+        free(peek)
+        break
+      if peek != 0: free(peek)
+      // column name
+      sc:str = 0 as str
+      sc_end:int = pos
+      if _ql_read_word(query, pos, &sc, &sc_end) == 0: break
+      set_cols[set_count] = sc
+      pos = _ql_skip_spaces(query, sc_end)
+      // '='
+      if pos < n && (query as *char)[pos] as int == 61: pos = pos + 1
+      pos = _ql_skip_spaces(query, pos)
+      // value
+      sv:str = 0 as str
+      sv_end:int = pos
+      if _ql_parse_where_val(query, pos, params, param_count, &pi_u, &sv, &sv_end) == 0: break
+      set_vals[set_count] = sv
+      set_count = set_count + 1
+      pos = _ql_skip_spaces(query, sv_end)
+      // skip optional ','
+      if pos < n && (query as *char)[pos] as int == 44: pos = pos + 1
+      pos = _ql_skip_spaces(query, pos)
+
+    // WHERE id = ?
+    where_pk:int = 0 - 1
+    if pos < n:
+      ww2:str = 0 as str
+      ww2_end:int = pos
+      if _ql_read_word(query, pos, &ww2, &ww2_end) != 0 && _ql_strcmp(ww2, "where") == 0:
+        free(ww2)
+        pos = _ql_skip_spaces(query, ww2_end)
+        ww3:str = 0 as str
+        ww3_end:int = pos
+        _ql_read_word(query, pos, &ww3, &ww3_end)
+        free(ww3)
+        pos = _ql_skip_spaces(query, ww3_end)
+        // '='
+        if pos < n && (query as *char)[pos] as int == 61: pos = pos + 1
+        pos = _ql_skip_spaces(query, pos)
+        wv3:str = 0 as str
+        wv3_end:int = pos
+        if _ql_parse_where_val(query, pos, params, param_count, &pi_u, &wv3, &wv3_end) != 0:
+          // parse int from wv3
+          pk_n:int = 0
+          li_u:int = 0
+          llen_u:int = _ql_strlen(wv3)
+          while li_u < llen_u:
+            lc_u:int = (wv3 as *char)[li_u] as int
+            if lc_u < 48 || lc_u > 57: break
+            pk_n = pk_n * 10 + (lc_u - 48)
+            li_u = li_u + 1
+          where_pk = pk_n
+          free(wv3)
+      else:
+        if ww2 != 0: free(ww2)
+
+    // Perform UPDATE: build new JSON and call update
+    new_json:str = _ql_build_json(&set_cols[0], &set_vals[0], set_count)
+    ures:int = 0
+    if where_pk >= 0:
+      ures = tezzdb.update(h as *TezzDb, table_u, where_pk, new_json)
+    else:
+      ures = (0 - 1)
+
+    free(new_json)
+    free(table_u)
+    si2:int = 0
+    while si2 < set_count:
+      if set_cols[si2] != 0: free(set_cols[si2])
+      if set_vals[si2] != 0: free(set_vals[si2])
+      si2 = si2 + 1
+
+    if ures < 0:
+      (*r).error = ures
+    else:
+      (*r).affected_rows = 1
+    ret r
+
+  // ── DELETE FROM table [WHERE id = ?] ───────────────────────
+  if _ql_strcmp(kw, "delete") == 0:
+    free(kw)
+    pos = _ql_skip_spaces(query, kw_end)
+    wfrom2:str = 0 as str
+    wfrom2_end:int = pos
+    _ql_read_word(query, pos, &wfrom2, &wfrom2_end)
+    free(wfrom2)
+    pos = _ql_skip_spaces(query, wfrom2_end)
+    wtbl_d:str = 0 as str
+    wtbl_d_end:int = pos
+    _ql_read_word(query, pos, &wtbl_d, &wtbl_d_end)
+    table_d:str = wtbl_d
+    pos = _ql_skip_spaces(query, wtbl_d_end)
+
+    // WHERE id = ?
+    del_pk:int = 0 - 1
+    del_where_col:str = 0 as str
+    del_where_val:str = 0 as str
+    pi_d:int = 0
+    if pos < n:
+      wwd:str = 0 as str
+      wwd_end:int = pos
+      if _ql_read_word(query, pos, &wwd, &wwd_end) != 0 && _ql_strcmp(wwd, "where") == 0:
+        free(wwd)
+        pos = _ql_skip_spaces(query, wwd_end)
+        wdc:str = 0 as str
+        wdc_end:int = pos
+        _ql_read_word(query, pos, &wdc, &wdc_end)
+        del_where_col = wdc
+        pos = _ql_skip_spaces(query, wdc_end)
+        if pos < n && (query as *char)[pos] as int == 61: pos = pos + 1
+        pos = _ql_skip_spaces(query, pos)
+        wdv:str = 0 as str
+        wdv_end:int = pos
+        _ql_parse_where_val(query, pos, params, param_count, &pi_d, &wdv, &wdv_end)
+        del_where_val = wdv
+        // If column is "id", parse PK
+        if del_where_col != 0 && (_ql_strcmp(del_where_col, "id") == 0 || _ql_strcmp(del_where_col, "pk") == 0):
+          if del_where_val != 0:
+            pk_n2:int = 0
+            li_d:int = 0
+            llen_d:int = _ql_strlen(del_where_val)
+            while li_d < llen_d:
+              lc_d:int = (del_where_val as *char)[li_d] as int
+              if lc_d < 48 || lc_d > 57: break
+              pk_n2 = pk_n2 * 10 + (lc_d - 48)
+              li_d = li_d + 1
+            del_pk = pk_n2
+      else:
+        if wwd != 0: free(wwd)
+
+    dres:int = 0
+    if del_pk >= 0:
+      dres = tezzdb.delete(h as *TezzDb, table_d, del_pk)
+    else if del_where_col != 0 && del_where_val != 0:
+      // Scan and delete matching rows
+      all_rows:str = tezzdb.query_all(h as *TezzDb, table_d)
+      total_d:int = _ql_count_rows(all_rows)
+      di_r:int = 0
+      deleted_n:int = 0
+      while di_r < total_d:
+        rj:str = _ql_array_get_row(all_rows, di_r)
+        if rj != 0:
+          fv:str = _ql_json_get_str(rj, del_where_col)
+          if fv != 0 && _ql_strcmp(fv, del_where_val) == 0:
+            rpk:int = _ql_json_get_int(rj, "id")
+            if rpk <= 0: rpk = _ql_json_get_int(rj, "pk")
+            if rpk > 0:
+              tezzdb.delete(h as *TezzDb, table_d, rpk)
+              deleted_n = deleted_n + 1
+          if fv != 0: free(fv)
+          free(rj)
+        di_r = di_r + 1
+      if all_rows != 0: free(all_rows)
+      (*r).affected_rows = deleted_n
+    else:
+      dres = (0 - 1)
+
+    if del_where_col != 0: free(del_where_col)
+    if del_where_val != 0: free(del_where_val)
+    free(table_d)
+
+    if del_pk >= 0:
+      if dres != 0:
+        (*r).error = dres
+      else:
+        (*r).affected_rows = 1
+    ret r
+
+  // ── CREATE TABLE table ─────────────────────────────────────
+  if _ql_strcmp(kw, "create") == 0:
+    free(kw)
+    pos = _ql_skip_spaces(query, kw_end)
+    wtypewd:str = 0 as str
+    wtypewd_end:int = pos
+    _ql_read_word(query, pos, &wtypewd, &wtypewd_end)
+    free(wtypewd)
+    pos = _ql_skip_spaces(query, wtypewd_end)
+    wtbl_c:str = 0 as str
+    wtbl_c_end:int = pos
+    _ql_read_word(query, pos, &wtbl_c, &wtbl_c_end)
+    table_c:str = wtbl_c
+    cres:int = tezzdb.table_create(h as *TezzDb, table_c)
+    free(table_c)
+    if cres != 0 && cres != (0 - 3):
+      (*r).error = cres
+    ret r
+
+  // ── DROP TABLE table ───────────────────────────────────────
+  if _ql_strcmp(kw, "drop") == 0:
+    free(kw)
+    pos = _ql_skip_spaces(query, kw_end)
+    wtypewd2:str = 0 as str
+    wtypewd2_end:int = pos
+    _ql_read_word(query, pos, &wtypewd2, &wtypewd2_end)
+    free(wtypewd2)
+    pos = _ql_skip_spaces(query, wtypewd2_end)
+    wtbl_dr:str = 0 as str
+    wtbl_dr_end:int = pos
+    _ql_read_word(query, pos, &wtbl_dr, &wtbl_dr_end)
+    table_dr:str = wtbl_dr
+    drres:int = tezzdb.table_drop(h as *TezzDb, table_dr)
+    free(table_dr)
+    if drres != 0:
+      (*r).error = drres
+    ret r
+
+  // Unknown statement
+  free(kw)
+  (*r).error = (0 - 1)
+  ret r
+
+// ─────────────────────────────────────────────────────────────
+// Convenience single-value query (returns heap str or 0)
+// ─────────────────────────────────────────────────────────────
+
+// Execute query and return first row's field as a string. Caller frees.
+fn db_query_scalar_str(h:*char, query:str, params:*str, param_count:int, col:str) -> str:
+  r:*TzQueryResult = db_query(h, query, params, param_count)
+  if r == 0: ret 0 as str
+  val:str = 0 as str
+  if db_result_next(r) != 0:
+    val = cursor_field_str(r, col)
+  db_result_free(r)
+  ret val
+
+// Execute query and return first row's field as int.
+fn db_query_scalar_int(h:*char, query:str, params:*str, param_count:int, col:str) -> int:
+  r:*TzQueryResult = db_query(h, query, params, param_count)
+  if r == 0: ret 0
+  val:int = 0
+  if db_result_next(r) != 0:
+    val = cursor_field_int(r, col)
+  db_result_free(r)
+  ret val
+
+// Return affected row count from INSERT/UPDATE/DELETE
+fn db_exec(h:*char, query:str, params:*str, param_count:int) -> int:
+  r:*TzQueryResult = db_query(h, query, params, param_count)
+  if r == 0: ret (0 - 1)
+  err:int = (*r).error
+  aff:int = (*r).affected_rows
+  db_result_free(r)
+  if err != 0: ret err
+  ret aff
+
+// ─────────────────────────────────────────────────────────────
+// Safe arity wrappers — avoid *str array pointer arithmetic
+// Use these in TezzNative code to avoid unsafe blocks.
+// ─────────────────────────────────────────────────────────────
+
+// db_query0: query with no parameters (SELECT *, CREATE TABLE, DROP TABLE, etc.)
+fn db_query0(h:*char, query:str) -> *TzQueryResult:
+  dummy:[str;1]
+  dummy[0] = ""
+  unsafe:
+    ret db_query(h, query, &dummy[0], 0)
+
+// db_query1: query with 1 parameter
+fn db_query1(h:*char, query:str, p0:str) -> *TzQueryResult:
+  ps:[str;1]
+  ps[0] = p0
+  unsafe:
+    ret db_query(h, query, &ps[0], 1)
+
+// db_query2: query with 2 parameters
+fn db_query2(h:*char, query:str, p0:str, p1:str) -> *TzQueryResult:
+  ps:[str;2]
+  ps[0] = p0
+  ps[1] = p1
+  unsafe:
+    ret db_query(h, query, &ps[0], 2)
+
+// db_query3: query with 3 parameters
+fn db_query3(h:*char, query:str, p0:str, p1:str, p2:str) -> *TzQueryResult:
+  ps:[str;3]
+  ps[0] = p0
+  ps[1] = p1
+  ps[2] = p2
+  unsafe:
+    ret db_query(h, query, &ps[0], 3)
+
+// db_exec0: execute with no parameters; returns affected count or error
+fn db_exec0(h:*char, query:str) -> int:
+  r:*TzQueryResult = db_query0(h, query)
+  if r == 0: ret (0 - 1)
+  err:int = (*r).error
+  aff:int = (*r).affected_rows
+  db_result_free(r)
+  if err != 0: ret err
+  ret aff
+
+// db_exec1: execute with 1 parameter; returns affected count or error
+fn db_exec1(h:*char, query:str, p0:str) -> int:
+  r:*TzQueryResult = db_query1(h, query, p0)
+  if r == 0: ret (0 - 1)
+  err:int = (*r).error
+  aff:int = (*r).affected_rows
+  db_result_free(r)
+  if err != 0: ret err
+  ret aff
+
+// db_exec2: execute with 2 parameters; returns affected count or error
+fn db_exec2(h:*char, query:str, p0:str, p1:str) -> int:
+  r:*TzQueryResult = db_query2(h, query, p0, p1)
+  if r == 0: ret (0 - 1)
+  err:int = (*r).error
+  aff:int = (*r).affected_rows
+  db_result_free(r)
+  if err != 0: ret err
+  ret aff
+
+// db_scalar0: return first row's string field, no params
+fn db_scalar0(h:*char, query:str, col:str) -> str:
+  r:*TzQueryResult = db_query0(h, query)
+  if r == 0: ret 0 as str
+  val:str = 0 as str
+  if db_result_next(r) != 0:
+    val = cursor_field_str(r, col)
+  db_result_free(r)
+  ret val
+
+// db_scalar1: return first row's string field, 1 param
+fn db_scalar1(h:*char, query:str, p0:str, col:str) -> str:
+  r:*TzQueryResult = db_query1(h, query, p0)
+  if r == 0: ret 0 as str
+  val:str = 0 as str
+  if db_result_next(r) != 0:
+    val = cursor_field_str(r, col)
+  db_result_free(r)
+  ret val
+
+// db_int0: return first row's int field, no params
+fn db_int0(h:*char, query:str, col:str) -> int:
+  r:*TzQueryResult = db_query0(h, query)
+  if r == 0: ret 0
+  val:int = 0
+  if db_result_next(r) != 0:
+    val = cursor_field_int(r, col)
+  db_result_free(r)
+  ret val
+
+// db_int1: return first row's int field, 1 param
+fn db_int1(h:*char, query:str, p0:str, col:str) -> int:
+  r:*TzQueryResult = db_query1(h, query, p0)
+  if r == 0: ret 0
+  val:int = 0
+  if db_result_next(r) != 0:
+    val = cursor_field_int(r, col)
+  db_result_free(r)
+  ret val

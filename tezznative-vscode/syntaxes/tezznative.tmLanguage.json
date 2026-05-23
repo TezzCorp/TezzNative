@@ -1,0 +1,151 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "TezzNative",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#functions"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.tezznative",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.tezznative",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.tezznative",
+          "match": "\\b(if|else|while|for|break|continue|switch|case|default|match|try|catch|ret|fallthrough|in)\\b"
+        },
+        {
+          "name": "keyword.other.tezznative",
+          "match": "\\b(let|const|static|extern|unsafe|import|sizeof|alignof|typedef|say|say_str|free|malloc)\\b"
+        },
+        {
+          "name": "storage.type.struct.tezznative",
+          "match": "\\b(struct|enum)\\b"
+        },
+        {
+          "name": "keyword.operator.logical.tezznative",
+          "match": "(&&|\\|\\||!|==|!=|<|>|<=|>=)"
+        },
+        {
+          "name": "keyword.operator.assignment.tezznative",
+          "match": "(\\+=|-=|\\*=|/=|%=|\\^=|&=|\\|=|<<=|>>=|\\?=|=)"
+        },
+        {
+          "name": "keyword.operator.member.tezznative",
+          "match": "(\\?\\.|\\.\\.)"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.primitive.tezznative",
+          "match": "\\b(int|float|char|str|void|bool|Tokenizer|SttEngine|TtsEngine|ColorTable|BFile|BTree|WAL|DB|ApiResponse|TzWindow|GuiButton)\\b"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.interpolated.tezznative",
+          "begin": "f\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.tezznative",
+              "match": "\\\\."
+            },
+            {
+              "name": "meta.embedded.expression.tezznative",
+              "begin": "\\{",
+              "end": "\\}",
+              "patterns": [
+                {
+                  "include": "$self"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.double.tezznative",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.tezznative",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.tezznative",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            {
+              "name": "constant.character.escape.tezznative",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.tezznative",
+          "match": "\\b0[xX][0-9a-fA-F_]+\\b"
+        },
+        {
+          "name": "constant.numeric.binary.tezznative",
+          "match": "\\b0[bB][01_]+\\b"
+        },
+        {
+          "name": "constant.numeric.float.tezznative",
+          "match": "\\b[0-9_]+\\.[0-9_]+([eE][+-]?[0-9_]+)?\\b|\\b[0-9_]+[eE][+-]?[0-9_]+\\b"
+        },
+        {
+          "name": "constant.numeric.decimal.tezznative",
+          "match": "\\b[0-9_]+\\b"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "entity.name.function.tezznative",
+          "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*(?=\\s*\\()"
+        }
+      ]
+    }
+  },
+  "scopeName": "source.tezznative"
+}

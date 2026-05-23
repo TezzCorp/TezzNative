@@ -1,0 +1,667 @@
+// ============================================================
+// nn.tn  -  TezzAI Neural Network Library  v7.0
+// ============================================================
+// STRUCT-FREE ARCHITECTURE: The TezzNative compiler has severe
+// bugs with structs (field offsets, pass-by-value corruption).
+// Therefore, we use NO STRUCTS. A "NeuralNet" is simply a 
+// single *float slab pointer.
+//
+// SLAB slots (each slot = 8 bytes):
+//   [0]     magic
+//   [1]     n_layers
+//   [2]     total_w
+//   [3]     total_b
+//   [4..11] l_in_n[8]
+//  [12..19] l_out_n[8]
+//  [20..27] l_act[8]
+//  [28..35] l_w_off[8]
+//  [36..43] l_b_off[8]
+//  [44..]   weights[total_w]
+//  [44+tw..] biases[total_b]
+//  [...+tb]  outputs[total_b]
+//  [...+tb]  deltas[total_b]
+//  [...+tb]  grad_w[total_w]
+//  [...+tw]  grad_b[total_b]
+// ============================================================
+
+import "math"
+
+let ACT_SIGMOID:int = 0
+let ACT_RELU:int    = 1
+let ACT_TANH:int    = 2
+let ACT_LINEAR:int  = 3
+let _NN_HDR:int     = 44
+let _NN_MAGIC:int   = 1414676301
+
+// ── Safe slot accessors ──────────────────────────────────────
+
+fn _sf(s:*float, i:int) -> float:
+  v:float = 0.0
+  unsafe:
+    sc:*char = s as *char
+    p:*float = (sc + i * 8) as *float
+    v = p[0]
+  ret v
+
+fn _sw(s:*float, i:int, v:float) -> int:
+  unsafe:
+    sc:*char = s as *char
+    p:*float = (sc + i * 8) as *float
+    p[0] = v
+  ret 0
+
+fn _si(s:*float, i:int) -> int:
+  ret _sf(s, i) as int
+
+fn _wi(s:*float, i:int, v:int) -> int:
+  _sw(s, i, v as float)
+  ret 0
+
+// ── Slab region base slots ───────────────────────────────────
+
+fn _wb(tw:int) -> int:
+  ret _NN_HDR
+
+fn _bb(tw:int) -> int:
+  ret _NN_HDR + tw
+
+fn _ob(tw:int, tb:int) -> int:
+  ret _NN_HDR + tw + tb
+
+fn _db(tw:int, tb:int) -> int:
+  ret _NN_HDR + tw + tb * 2
+
+fn _gwb(tw:int, tb:int) -> int:
+  ret _NN_HDR + tw + tb * 3
+
+fn _gbb(tw:int, tb:int) -> int:
+  ret _NN_HDR + tw * 2 + tb * 3
+
+// ── Activation ───────────────────────────────────────────────
+
+fn _sigmoid(x:float) -> float:
+  ret 1.0 / (1.0 + math.exp(0.0 - x))
+
+fn _act(x:float, a:int) -> float:
+  if a == ACT_RELU:
+    if x > 0.0:
+      ret x
+    ret 0.0
+  if a == ACT_TANH:
+    ret math.tanh(x)
+  if a == ACT_LINEAR:
+    ret x
+  ret _sigmoid(x)
+
+fn _dact(y:float, a:int) -> float:
+  if a == ACT_RELU:
+    if y > 0.0:
+      ret 1.0
+    ret 0.0
+  if a == ACT_TANH:
+    ret 1.0 - y * y
+  if a == ACT_LINEAR:
+    ret 1.0
+  ret y * (1.0 - y)
+
+// ── PRNG ─────────────────────────────────────────────────────
+
+static let _seed:int = 42
+
+fn _randf() -> float:
+  _seed = _seed * 1664525 + 1013904223
+  bits:int = (_seed >> 8) & 16777215
+  ret (bits as float) / 16777216.0 - 0.5
+
+fn nn_set_seed(s:int) -> int:
+  _seed = s
+  ret 0
+
+// ── nn_new_custom ────────────────────────────────────────────
+//   sizes_slab: *float holding [n_layers+1] ints via _wi
+//   acts_slab:  *float holding [n_layers] ints via _wi
+//   returns:    *float slab
+fn nn_new_custom(sizes_slab:*float, acts_slab:*float, n_layers:int) -> *float:
+  tw:int = 0
+  tb:int = 0
+  i:int = 0
+  while i < n_layers:
+    in_i:int  = _si(sizes_slab, i)
+    out_i:int = _si(sizes_slab, i + 1)
+    tw = tw + in_i * out_i
+    tb = tb + out_i
+    i = i + 1
+
+  total_slots:int = _NN_HDR + tw * 2 + tb * 4
+  raw:*char
+  unsafe:
+    raw = malloc(total_slots * 8)
+  net:*float
+  unsafe:
+    net = raw as *float
+
+  // Write slab header
+  _wi(net, 0, _NN_MAGIC)
+  _wi(net, 1, n_layers)
+  _wi(net, 2, tw)
+  _wi(net, 3, tb)
+
+  // Layer metadata + compute offsets
+  w_off:int = 0
+  b_off:int = 0
+  i = 0
+  while i < n_layers:
+    in_i:int  = _si(sizes_slab, i)
+    out_i:int = _si(sizes_slab, i + 1)
+    act_i:int = _si(acts_slab,  i)
+    _wi(net, 4  + i, in_i)
+    _wi(net, 12 + i, out_i)
+    _wi(net, 20 + i, act_i)
+    _wi(net, 28 + i, w_off)
+    _wi(net, 36 + i, b_off)
+    w_off = w_off + in_i * out_i
+    b_off = b_off + out_i
+    i = i + 1
+
+  // Zero all data slots
+  j:int = _NN_HDR
+  while j < total_slots:
+    _sw(net, j, 0.0)
+    j = j + 1
+
+  // Xavier weight init
+  wb:int = _wb(tw)
+  i = 0
+  while i < n_layers:
+    in_i:int  = _si(net, 4  + i)
+    out_i:int = _si(net, 12 + i)
+    woff:int  = _si(net, 28 + i)
+    fan:float = (in_i + out_i) as float
+    sc:float  = math.sqrt(6.0 / fan)
+    cnt:int   = in_i * out_i
+    j = 0
+    while j < cnt:
+      _sw(net, wb + woff + j, _randf() * 2.0 * sc)
+      j = j + 1
+    i = i + 1
+
+  ret net
+
+// ── nn_new: 2-layer MLP shortcut ────────────────────────────
+fn nn_new(in_n:int, hidden_n:int, out_n:int) -> *float:
+  sz_raw:*char
+  act_raw:*char
+  unsafe:
+    sz_raw  = malloc(3 * 8)
+    act_raw = malloc(2 * 8)
+  sz:*float
+  actslab:*float
+  unsafe:
+    sz      = sz_raw  as *float
+    actslab = act_raw as *float
+  _wi(sz,      0, in_n)
+  _wi(sz,      1, hidden_n)
+  _wi(sz,      2, out_n)
+  _wi(actslab, 0, ACT_SIGMOID)
+  _wi(actslab, 1, ACT_SIGMOID)
+  net:*float = nn_new_custom(sz, actslab, 2)
+  unsafe:
+    free(sz_raw)
+    free(act_raw)
+  ret net
+
+// ── nn_free ──────────────────────────────────────────────────
+fn nn_free(net:*float) -> int:
+  unsafe:
+    sc:*char = net as *char
+    free(sc)
+  ret 0
+
+// ── nn_forward ───────────────────────────────────────────────
+fn nn_forward(net:*float, input_slab:*float, output_slab:*float) -> int:
+  nl:int = _si(net, 1)
+  tw:int = _si(net, 2)
+  tb:int = _si(net, 3)
+  wb:int = _wb(tw)
+  bb:int = _bb(tw)
+  ob:int = _ob(tw, tb)
+
+  use_inp:int   = 1
+  prev_boff:int = 0
+
+  i:int = 0
+  while i < nl:
+    in_n:int  = _si(net, 4  + i)
+    out_n:int = _si(net, 12 + i)
+    act_t:int = _si(net, 20 + i)
+    woff:int  = _si(net, 28 + i)
+    boff:int  = _si(net, 36 + i)
+
+    j:int = 0
+    while j < out_n:
+      bv:float = _sf(net, bb + boff + j)
+      sum:float = bv
+      k:int = 0
+      while k < in_n:
+        pv:float = 0.0
+        if use_inp == 1:
+          pv = _sf(input_slab, k)
+        else:
+          pv = _sf(net, ob + prev_boff + k)
+        wv:float = _sf(net, wb + woff + j * in_n + k)
+        sum = sum + wv * pv
+        k = k + 1
+      av:float = _act(sum, act_t)
+      _sw(net, ob + boff + j, av)
+      j = j + 1
+
+    use_inp   = 0
+    prev_boff = boff
+    i = i + 1
+
+  last_i:int    = nl - 1
+  last_boff:int = _si(net, 36 + last_i)
+  last_n:int    = _si(net, 12 + last_i)
+  j:int = 0
+  while j < last_n:
+    v:float = _sf(net, ob + last_boff + j)
+    _sw(output_slab, j, v)
+    j = j + 1
+  ret 0
+
+// ── nn_backward ──────────────────────────────────────────────
+fn nn_backward(net:*float, input_slab:*float, target_slab:*float, lr:float) -> float:
+  nl:int = _si(net, 1)
+  tw:int = _si(net, 2)
+  tb:int = _si(net, 3)
+  wb:int  = _wb(tw)
+  bb:int  = _bb(tw)
+  ob:int  = _ob(tw, tb)
+  db:int  = _db(tw, tb)
+
+  last_i:int    = nl - 1
+  last_boff:int = _si(net, 36 + last_i)
+  last_n:int    = _si(net, 12 + last_i)
+  last_act:int  = _si(net, 20 + last_i)
+
+  loss:float = 0.0
+  j:int = 0
+  while j < last_n:
+    y:float   = _sf(net, ob + last_boff + j)
+    t:float   = _sf(target_slab, j)
+    err:float = t - y
+    loss = loss + err * err
+    // Cross-entropy gradient for output layer to prevent saturation
+    dv:float  = err
+    _sw(net, db + last_boff + j, dv)
+    j = j + 1
+
+  i:int = nl - 2
+  while i >= 0:
+    b0:int    = _si(net, 36 + i)
+    b1:int    = _si(net, 36 + i + 1)
+    n0:int    = _si(net, 12 + i)
+    n1:int    = _si(net, 12 + i + 1)
+    w1off:int = _si(net, 28 + i + 1)
+    act0:int  = _si(net, 20 + i)
+    j = 0
+    while j < n0:
+      grad:float = 0.0
+      k:int = 0
+      while k < n1:
+        dv:float = _sf(net, db + b1 + k)
+        wv:float = _sf(net, wb + w1off + k * n0 + j)
+        grad = grad + dv * wv
+        k = k + 1
+      y2:float  = _sf(net, ob + b0 + j)
+      dv2:float = grad * _dact(y2, act0)
+      _sw(net, db + b0 + j, dv2)
+      j = j + 1
+    i = i - 1
+
+  use_inp:int   = 1
+  prev_boff:int = 0
+  i = 0
+  while i < nl:
+    in_n:int  = _si(net, 4  + i)
+    out_n:int = _si(net, 12 + i)
+    woff:int  = _si(net, 28 + i)
+    boff:int  = _si(net, 36 + i)
+    j = 0
+    while j < out_n:
+      d:float = _sf(net, db + boff + j)
+      k:int = 0
+      while k < in_n:
+        pv:float = 0.0
+        if use_inp == 1:
+          pv = _sf(input_slab, k)
+        else:
+          pv = _sf(net, ob + prev_boff + k)
+        idx:int     = wb + woff + j * in_n + k
+        old_w:float = _sf(net, idx)
+        _sw(net, idx, old_w + lr * d * pv)
+        k = k + 1
+      bidx:int    = bb + boff + j
+      old_b:float = _sf(net, bidx)
+      _sw(net, bidx, old_b + lr * d)
+      j = j + 1
+    use_inp   = 0
+    prev_boff = boff
+    i = i + 1
+
+  ret loss * 0.5
+
+fn nn_predict(net:*float, inp:*float, out:*float) -> int:
+  ret nn_forward(net, inp, out)
+
+// ── nn_info ──────────────────────────────────────────────────
+fn nn_info(net:*float) -> int:
+  nl:int = _si(net, 1)
+  tw:int = _si(net, 2)
+  tb:int = _si(net, 3)
+  say "[NeuralNet] layers=", nl, " weights=", tw, " neurons=", tb
+  i:int = 0
+  while i < nl:
+    in_i:int  = _si(net, 4  + i)
+    out_i:int = _si(net, 12 + i)
+    act_i:int = _si(net, 20 + i)
+    say "  Layer ", i, ": ", in_i, " -> ", out_i
+    i = i + 1
+  ret 0
+
+// ── File I/O ──────────────────────────────────────────────────
+fn _fw_i(f:*char, v:int) -> int:
+  b:*char
+  unsafe:
+    b = malloc(8)
+    p:*int = b as *int
+    p[0] = v
+    fwrite(b, 8, 1, f)
+    free(b)
+  ret 0
+
+fn _fw_f(f:*char, v:float) -> int:
+  b:*char
+  unsafe:
+    b = malloc(8)
+    p:*float = b as *float
+    p[0] = v
+    fwrite(b, 8, 1, f)
+    free(b)
+  ret 0
+
+fn _fr_i(f:*char) -> int:
+  v:int = 0
+  b:*char
+  unsafe:
+    b = malloc(8)
+    fread(b, 8, 1, f)
+    p:*int = b as *int
+    v = p[0]
+    free(b)
+  ret v
+
+fn _fr_f(f:*char) -> float:
+  v:float = 0.0
+  b:*char
+  unsafe:
+    b = malloc(8)
+    fread(b, 8, 1, f)
+    p:*float = b as *float
+    v = p[0]
+    free(b)
+  ret v
+
+// ── nn_save ───────────────────────────────────────────────────
+fn nn_save(net:*float, path:str) -> int:
+  f:*char = fopen(path, "wb")
+  unsafe:
+    if f == 0 as *char:
+      ret 0 - 1
+
+  nl:int = _si(net, 1)
+  tw:int = _si(net, 2)
+  tb:int = _si(net, 3)
+
+  _fw_i(f, _NN_MAGIC)
+  _fw_i(f, 2)   // version
+  _fw_i(f, nl)
+  _fw_i(f, tw)
+  _fw_i(f, tb)
+
+  i:int = 0
+  while i < nl:
+    _fw_i(f, _si(net, 4  + i))
+    _fw_i(f, _si(net, 12 + i))
+    _fw_i(f, _si(net, 20 + i))
+    i = i + 1
+
+  wb:int = _wb(tw)
+  bb:int = _bb(tw)
+  i = 0
+  while i < tw:
+    v:float = _sf(net, wb + i)
+    _fw_f(f, v)
+    i = i + 1
+  i = 0
+  while i < tb:
+    v:float = _sf(net, bb + i)
+    _fw_f(f, v)
+    i = i + 1
+
+  unsafe:
+    fclose(f)
+  ret 0
+
+// ── nn_load ───────────────────────────────────────────────────
+fn nn_load(path:str) -> *float:
+  null_f:*float
+  unsafe:
+    nc:*char = 0 as *char
+    null_f = nc as *float
+
+  f:*char = fopen(path, "rb")
+  unsafe:
+    if f == 0 as *char:
+      ret null_f
+
+  magic:int = _fr_i(f)
+  if magic != _NN_MAGIC:
+    unsafe:
+      fclose(f)
+    ret null_f
+
+  _fr_i(f)
+  nl:int = _fr_i(f)
+  tw:int = _fr_i(f)
+  tb:int = _fr_i(f)
+
+  sz_raw:*char
+  act_raw:*char
+  unsafe:
+    sz_raw  = malloc((nl + 1) * 8)
+    act_raw = malloc(nl * 8)
+  sz:*float
+  actslab:*float
+  unsafe:
+    sz      = sz_raw  as *float
+    actslab = act_raw as *float
+
+  i:int = 0
+  while i < nl:
+    in_i:int  = _fr_i(f)
+    out_i:int = _fr_i(f)
+    act_i:int = _fr_i(f)
+    _wi(sz,      i,     in_i)
+    _wi(sz,      i + 1, out_i)
+    _wi(actslab, i,     act_i)
+    i = i + 1
+
+  net:*float = nn_new_custom(sz, actslab, nl)
+  unsafe:
+    free(sz_raw)
+    free(act_raw)
+
+  wb:int = _wb(tw)
+  bb:int = _bb(tw)
+  i = 0
+  while i < tw:
+    v:float = _fr_f(f)
+    _sw(net, wb + i, v)
+    i = i + 1
+  i = 0
+  while i < tb:
+    v:float = _fr_f(f)
+    _sw(net, bb + i, v)
+    i = i + 1
+
+  unsafe:
+    fclose(f)
+  ret net
+
+// ── Transformer layers: Embedding, LayerNorm, Attention ───────
+
+// Embed raw token IDs into a continuous vector space
+// token_ids: *int of length seq_len
+// out: *float output of shape [seq_len, dim] (slab output)
+// embed_table: *float of shape [vocab_sz, dim] (flattened)
+fn nn_embed(token_ids:*int, out:*float, embed_table:*float, seq_len:int, dim:int) -> int:
+  i:int = 0
+  while i < seq_len:
+    tok:int = token_ids[i]
+    // Copy dim elements
+    j:int = 0
+    while j < dim:
+      v:float = _sf(embed_table, tok * dim + j)
+      _sw(out, i * dim + j, v)
+      j = j + 1
+    i = i + 1
+  ret 0
+
+// Apply Layer Normalization along the embedding dimension
+// x: *float input of shape [seq_len, dim]
+// out: *float output of shape [seq_len, dim]
+// gamma: *float gain vector of length dim
+// beta: *float bias vector of length dim
+fn nn_layernorm(x:*float, out:*float, gamma:*float, beta:*float, seq_len:int, dim:int) -> int:
+  eps:float = 1.0e-05
+  i:int = 0
+  while i < seq_len:
+    // Compute mean
+    sum:float = 0.0
+    j:int = 0
+    while j < dim:
+      sum = sum + _sf(x, i * dim + j)
+      j = j + 1
+    mean:float = sum / (dim as float)
+
+    // Compute variance
+    var_sum:float = 0.0
+    j = 0
+    while j < dim:
+      diff:float = _sf(x, i * dim + j) - mean
+      var_sum = var_sum + diff * diff
+      j = j + 1
+    variance:float = var_sum / (dim as float)
+    inv_std:float = 1.0 / math.sqrt(variance + eps)
+
+    // Normalize and scale/shift
+    j = 0
+    while j < dim:
+      xv:float = _sf(x, i * dim + j)
+      g:float = 1.0
+      b:float = 0.0
+      if gamma != 0 as *float: g = _sf(gamma, j)
+      if beta != 0 as *float:  b = _sf(beta, j)
+      norm:float = (xv - mean) * inv_std * g + b
+      _sw(out, i * dim + j, norm)
+      j = j + 1
+    i = i + 1
+  ret 0
+
+// Multi-Head Attention (SDPA with optional causal mask)
+// q: *float query matrix [seq_len, dim]
+// k: *float key matrix [seq_len, dim]
+// v: *float value matrix [seq_len, dim]
+// out: *float output matrix [seq_len, dim]
+// seq_len: sequence length
+// dim: embedding dimension
+// heads: number of attention heads
+// causal: 1 to apply causal autoregressive masking, 0 otherwise
+fn nn_attention(q:*float, k:*float, v:*float, out:*float, seq_len:int, dim:int, heads:int, causal:int) -> int:
+  d:int = dim / heads
+  scale:float = 1.0 / math.sqrt(d as float)
+  
+  // scores buffer to hold attention weights for one row
+  scores_raw:*char
+  unsafe:
+    scores_raw = malloc(seq_len * 8)
+  scores:*float
+  unsafe:
+    scores = scores_raw as *float
+
+  i:int = 0
+  while i < seq_len:
+    h:int = 0
+    while h < heads:
+      // Step 1: Compute attention scores QK^T / sqrt(d)
+      max_score:float = 0.0 - 1.0e+09
+      j:int = 0
+      while j < seq_len:
+        if causal != 0 && j > i:
+          _sw(scores, j, 0.0 - 1.0e+09)
+        else:
+          // Dot product for head h
+          sum:float = 0.0
+          c:int = 0
+          while c < d:
+            qv:float = _sf(q, i * dim + h * d + c)
+            kv:float = _sf(k, j * dim + h * d + c)
+            sum = sum + qv * kv
+            c = c + 1
+          score:float = sum * scale
+          _sw(scores, j, score)
+          if score > max_score:
+            max_score = score
+        j = j + 1
+
+      // Step 2: Compute Softmax
+      exp_sum:float = 0.0
+      j = 0
+      while j < seq_len:
+        if causal != 0 && j > i:
+          _sw(scores, j, 0.0)
+        else:
+          s:float = _sf(scores, j)
+          ev:float = math.exp(s - max_score)
+          _sw(scores, j, ev)
+          exp_sum = exp_sum + ev
+        j = j + 1
+
+      if exp_sum > 0.0:
+        j = 0
+        while j < seq_len:
+          ev:float = _sf(scores, j)
+          _sw(scores, j, ev / exp_sum)
+          j = j + 1
+
+      // Step 3: Compute weighted sum of values Attention * V
+      c = 0
+      while c < d:
+        sum_v:float = 0.0
+        j = 0
+        while j < seq_len:
+          attn:float = _sf(scores, j)
+          vv:float = _sf(v, j * dim + h * d + c)
+          sum_v = sum_v + attn * vv
+          j = j + 1
+        _sw(out, i * dim + h * d + c, sum_v)
+        c = c + 1
+
+      h = h + 1
+    i = i + 1
+
+  unsafe:
+    free(scores_raw)
+  ret 0
+

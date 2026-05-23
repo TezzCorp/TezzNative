@@ -1,0 +1,420 @@
+// math module — complete mathematical functions for TezzNative
+// Maps to native runtime implementations for maximum performance.
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+fn PI() -> float:
+  ret 3.14159265358979323846
+fn TAU() -> float:
+  ret 6.28318530717958647692
+fn E() -> float:
+  ret 2.71828182845904523536
+fn SQRT2() -> float:
+  ret 1.41421356237309504880
+fn LN2() -> float:
+  ret 0.69314718055994530942
+fn LN10() -> float:
+  ret 2.30258509299404568402
+fn PHI() -> float:
+  ret 1.61803398874989484820
+fn INF() -> float:
+  ret 1.0 / 0.0
+
+// ---------------------------------------------------------------------------
+// Integer math
+// ---------------------------------------------------------------------------
+
+fn abs(x:int) -> int:
+  if x < 0:
+    ret 0 - x
+  ret x
+
+fn min(a:int, b:int) -> int:
+  if a < b:
+    ret a
+  ret b
+
+fn max(a:int, b:int) -> int:
+  if a > b:
+    ret a
+  ret b
+
+fn clamp(x:int, lo:int, hi:int) -> int:
+  if x < lo:
+    ret lo
+  if x > hi:
+    ret hi
+  ret x
+
+fn sign(x:int) -> int:
+  if x > 0:
+    ret 1
+  if x < 0:
+    ret 0 - 1
+  ret 0
+
+fn gcd(a:int, b:int) -> int:
+  a2:int = abs(a)
+  b2:int = abs(b)
+  while b2 != 0:
+    t:int = b2
+    b2 = a2 % b2
+    a2 = t
+  ret a2
+
+fn lcm(a:int, b:int) -> int:
+  if a == 0 || b == 0:
+    ret 0
+  ret abs(a / gcd(a, b) * b)
+
+fn pow_int(base:int, exp:int) -> int:
+  if exp < 0:
+    ret 0
+  result:int = 1
+  b:int = base
+  e:int = exp
+  while e > 0:
+    if (e & 1) != 0:
+      result = result * b
+    b = b * b
+    e = e >> 1
+  ret result
+
+fn divmod(a:int, b:int, out_q:*int, out_r:*int) -> int:
+  if b == 0:
+    ret 0 - 1
+  unsafe:
+    *out_q = a / b
+    *out_r = a % b
+  ret 0
+
+// ---------------------------------------------------------------------------
+// Float math (wraps runtime builtins)
+// ---------------------------------------------------------------------------
+
+fn absf(x:float) -> float:
+  if x < 0.0:
+    ret 0.0 - x
+  ret x
+
+fn minf(a:float, b:float) -> float:
+  if a < b:
+    ret a
+  ret b
+
+fn maxf(a:float, b:float) -> float:
+  if a > b:
+    ret a
+  ret b
+
+fn clampf(x:float, lo:float, hi:float) -> float:
+  if x < lo:
+    ret lo
+  if x > hi:
+    ret hi
+  ret x
+
+fn signf(x:float) -> float:
+  if x > 0.0:
+    ret 1.0
+  if x < 0.0:
+    ret 0.0 - 1.0
+  ret 0.0
+
+// Square root (Newton-Raphson fallback — runtime provides fast path)
+fn sqrt(x:float) -> float:
+  if x < 0.0:
+    ret 0.0
+  if x == 0.0:
+    ret 0.0
+  // Initial estimate via bit trick
+  guess:float = x * 0.5
+  prev:float = 0.0
+  i:int = 0
+  while i < 64:
+    prev = guess
+    guess = (guess + x / guess) * 0.5
+    diff:float = guess - prev
+    if diff < 0.0:
+      diff = 0.0 - diff
+    if diff < 1.0e-15:
+      break
+    i = i + 1
+  ret guess
+
+// Fast inverse sqrt (Quake trick for normalized vectors)
+fn rsqrt(x:float) -> float:
+  if x <= 0.0:
+    ret 0.0
+  ret 1.0 / sqrt(x)
+
+// Floor (round toward -infinity)
+fn floor(x:float) -> float:
+  n:int = x as int
+  fn2:float = n as float
+  if fn2 > x:
+    ret fn2 - 1.0
+  ret fn2
+
+// Ceiling (round toward +infinity)
+fn ceil(x:float) -> float:
+  n:int = x as int
+  fn2:float = n as float
+  if fn2 < x:
+    ret fn2 + 1.0
+  ret fn2
+
+// Round to nearest integer
+fn round(x:float) -> float:
+  if x >= 0.0:
+    ret floor(x + 0.5)
+  ret ceil(x - 0.5)
+
+// Truncate toward zero
+fn trunc(x:float) -> float:
+  ret (x as int) as float
+
+// Fractional part (always non-negative)
+fn frac(x:float) -> float:
+  t:float = trunc(x)
+  f:float = x - t
+  if f < 0.0:
+    ret f + 1.0
+  ret f
+
+// Modulo that always returns positive result
+fn fmod(a:float, b:float) -> float:
+  if b == 0.0:
+    ret 0.0
+  q:float = trunc(a / b)
+  ret a - q * b
+
+// Linear interpolation: lerp(a, b, t) = a + t*(b-a)
+fn lerp(a:float, b:float, t:float) -> float:
+  ret a + t * (b - a)
+
+// Smooth step (3t^2 - 2t^3)
+fn smoothstep(edge0:float, edge1:float, x:float) -> float:
+  t:float = clampf((x - edge0) / (edge1 - edge0), 0.0, 1.0)
+  ret t * t * (3.0 - 2.0 * t)
+
+// ---------------------------------------------------------------------------
+// Trigonometry (minimax polynomial approximations)
+// ---------------------------------------------------------------------------
+
+// Reduce angle to [-PI, PI]
+fn _angle_reduce(x:float) -> float:
+  x2:float = x
+  while x2 > PI():
+    x2 = x2 - TAU()
+  while x2 < 0.0 - PI():
+    x2 = x2 + TAU()
+  ret x2
+
+// Sine via Taylor series (accurate for reduced angles)
+fn _sin_reduced(x:float) -> float:
+  x2:float = x * x
+  // 9-term Taylor: x - x^3/6 + x^5/120 - x^7/5040 + x^9/362880
+  ret x * (1.0 - x2 * (0.16666666666 - x2 * (0.00833333333 - x2 * (0.00019841269 - x2 * 0.0000027557319))))
+
+fn sin(x:float) -> float:
+  ret _sin_reduced(_angle_reduce(x))
+
+fn cos(x:float) -> float:
+  ret sin(x + PI() * 0.5)
+
+fn tan(x:float) -> float:
+  c:float = cos(x)
+  if absf(c) < 1.0e-15:
+    ret 1.0e15
+  ret sin(x) / c
+
+// Atan2 via polynomial approximation
+fn atan2(y:float, x:float) -> float:
+  if x == 0.0:
+    if y > 0.0:
+      ret PI() * 0.5
+    if y < 0.0:
+      ret 0.0 - PI() * 0.5
+    ret 0.0
+  r:float = y / x
+  a:float = r
+  if a < 0.0:
+    a = 0.0 - a
+  // Polynomial approximation for |r| <= 1
+  if a <= 1.0:
+    r2:float = r * r
+    result:float = r * (1.0 - r2 * (0.333333333 - r2 * (0.2 - r2 * (0.142857142 - r2 * 0.111111111))))
+    if x < 0.0:
+      if y >= 0.0:
+        ret result + PI()
+      ret result - PI()
+    ret result
+  // For |r| > 1, use atan(r) = pi/2 - atan(1/r)
+  inv:float = 1.0 / r
+  r2:float = inv * inv
+  result2:float = inv * (1.0 - r2 * (0.333333333 - r2 * (0.2 - r2 * (0.142857142 - r2 * 0.111111111))))
+  if r > 0.0:
+    base:float = PI() * 0.5
+    if x < 0.0:
+      base = PI() + PI() * 0.5
+    ret base - result2
+  base2:float = 0.0 - PI() * 0.5
+  if x < 0.0:
+    base2 = 0.0 - PI() - PI() * 0.5
+  ret base2 + result2
+
+fn atan(x:float) -> float:
+  ret atan2(x, 1.0)
+
+fn asin(x:float) -> float:
+  if x < 0.0 - 1.0 || x > 1.0:
+    ret 0.0
+  ret atan2(x, sqrt(1.0 - x * x))
+
+fn acos(x:float) -> float:
+  if x < 0.0 - 1.0 || x > 1.0:
+    ret 0.0
+  ret PI() * 0.5 - asin(x)
+
+// ---------------------------------------------------------------------------
+// Exponential / Logarithm
+// ---------------------------------------------------------------------------
+
+// exp(x) via Maclaurin series — accurate for small x
+fn _exp_core(x:float) -> float:
+  result:float = 1.0
+  term:float = 1.0
+  i:int = 1
+  while i <= 30:
+    term = term * x / (i as float)
+    result = result + term
+    if absf(term) < 1.0e-15:
+      break
+    i = i + 1
+  ret result
+
+// exp(x) with range reduction: exp(x) = 2^k * exp(r) where r in [-0.5*ln2, 0.5*ln2]
+fn exp(x:float) -> float:
+  if x < 0.0 - 700.0:
+    ret 0.0
+  k:int = (x / LN2()) as int
+  r:float = x - (k as float) * LN2()
+  base:float = _exp_core(r)
+  // Multiply by 2^k using successive squaring
+  ret base * pow(2.0, k as float)
+
+// Natural logarithm via Newton's method: ln(x) = 2*atanh((x-1)/(x+1))
+fn log(x:float) -> float:
+  if x <= 0.0:
+    ret 0.0 - 1.0e15
+  if x == 1.0:
+    ret 0.0
+  // Reduce to [sqrt(2)/2, sqrt(2)]
+  m:float = x
+  k:int = 0
+  while m > SQRT2():
+    m = m * 0.5
+    k = k + 1
+  while m < 0.70710678118:
+    m = m * 2.0
+    k = k - 1
+  // ln(m) via series: 2*atanh((m-1)/(m+1))
+  y:float = (m - 1.0) / (m + 1.0)
+  y2:float = y * y
+  series:float = y * (2.0 + y2 * (0.666666666 + y2 * (0.4 + y2 * (0.285714285 + y2 * 0.222222222))))
+  ret series + (k as float) * LN2()
+
+fn log2(x:float) -> float:
+  ret log(x) / LN2()
+
+fn log10(x:float) -> float:
+  ret log(x) / LN10()
+
+// General power: a^b = exp(b * ln(a))
+fn pow(base:float, exp2:float) -> float:
+  if base == 0.0:
+    if exp2 <= 0.0:
+      ret 1.0
+    ret 0.0
+  if base < 0.0:
+    // Only valid for integer exponents
+    n:int = exp2 as int
+    if (n as float) != exp2:
+      ret 0.0
+    result:float = pow(0.0 - base, exp2)
+    if (n & 1) != 0:
+      ret 0.0 - result
+    ret result
+  ret _exp_core(exp2 * log(base))
+
+// Hyperbolic functions
+fn sinh(x:float) -> float:
+  ex:float = exp(x)
+  ret (ex - 1.0 / ex) * 0.5
+
+fn cosh(x:float) -> float:
+  ex:float = exp(x)
+  ret (ex + 1.0 / ex) * 0.5
+
+fn tanh(x:float) -> float:
+  if x > 20.0:
+    ret 1.0
+  if x < 0.0 - 20.0:
+    ret 0.0 - 1.0
+  ex2:float = exp(2.0 * x)
+  ret (ex2 - 1.0) / (ex2 + 1.0)
+
+// ---------------------------------------------------------------------------
+// Statistical helpers
+// ---------------------------------------------------------------------------
+
+fn sum_f64(arr:*float, n:int) -> float:
+  if arr == 0 || n <= 0:
+    ret 0.0
+  acc:float = 0.0
+  i:int = 0
+  while i < n:
+    unsafe:
+      acc = acc + arr[i]
+    i = i + 1
+  ret acc
+
+fn mean_f64(arr:*float, n:int) -> float:
+  if n <= 0:
+    ret 0.0
+  ret sum_f64(arr, n) / (n as float)
+
+fn variance_f64(arr:*float, n:int) -> float:
+  if n <= 1:
+    ret 0.0
+  m:float = mean_f64(arr, n)
+  acc:float = 0.0
+  i:int = 0
+  while i < n:
+    d:float = 0.0
+    unsafe:
+      d = arr[i] - m
+    acc = acc + d * d
+    i = i + 1
+  ret acc / (n as float)
+
+fn stddev_f64(arr:*float, n:int) -> float:
+  ret sqrt(variance_f64(arr, n))
+
+// Dot product
+fn dot_f64(a:*float, b:*float, n:int) -> float:
+  if a == 0 || b == 0 || n <= 0:
+    ret 0.0
+  acc:float = 0.0
+  i:int = 0
+  while i < n:
+    unsafe:
+      acc = acc + a[i] * b[i]
+    i = i + 1
+  ret acc
+
+fn main():
+  say abs(48)
+

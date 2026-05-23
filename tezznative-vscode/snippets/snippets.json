@@ -1,0 +1,75 @@
+{
+  "Function Definition": {
+    "prefix": "fn",
+    "body": [
+      "fn ${1:name}(${2:params}) -> ${3:void}:",
+      "\t$0"
+    ],
+    "description": "Define a TezzNative function"
+  },
+  "Struct Definition": {
+    "prefix": "struct",
+    "body": [
+      "struct ${1:Name}:",
+      "\t${2:field}:${3:type}",
+      "\t$0"
+    ],
+    "description": "Define a TezzNative struct"
+  },
+  "If Statement": {
+    "prefix": "if",
+    "body": [
+      "if ${1:condition}:",
+      "\t$0"
+    ],
+    "description": "Conditional if block"
+  },
+  "While Loop": {
+    "prefix": "while",
+    "body": [
+      "while ${1:condition}:",
+      "\t$0"
+    ],
+    "description": "While loop block"
+  },
+  "TezzServe WebSocket Setup": {
+    "prefix": "serve_ws",
+    "body": [
+      "tezzserve.serve_ws_upgrade(srv, \"${1:/ws}\", fn(sock:*Socket, req:*Request) -> int:",
+      "\tunsafe:",
+      "\t\tsay \"WebSocket client connected!\"",
+      "\t\t$0",
+      "\tret 0",
+      ")"
+    ],
+    "description": "Register a TezzServe WebSocket upgrade endpoint"
+  },
+  "TezzDBQL Parameterized Query": {
+    "prefix": "db_query",
+    "body": [
+      "cur:*DBCursor = tezzdbql.db_query(db, \"SELECT * FROM ${1:users} WHERE ${2:age} = ?\", &params[0], ${3:1})"
+    ],
+    "description": "Execute a parameterized query in TezzDBQL"
+  },
+  "Text-to-Speech playback": {
+    "prefix": "tts",
+    "body": [
+      "eng:*TtsEngine = tts.tts_new()",
+      "tts.tts_speak(eng, \"${1:Hello, this is TezzNative systems language!}\")",
+      "tts.tts_free(eng)"
+    ],
+    "description": "Instantiate TTS engine and speak text"
+  },
+  "Speech-to-Text transcription": {
+    "prefix": "stt",
+    "body": [
+      "eng:*SttEngine = stt.stt_new()",
+      "stt.stt_load_model(eng, \"${1:whisper-tiny.tnw}\")",
+      "text:str = stt.stt_from_file(eng, \"${2:audio.wav}\")",
+      "say \"Transcript: \", text",
+      "free(text)",
+      "stt.stt_free(eng)"
+    ],
+    "description": "Transcribe audio file using Whisper-style model"
+  }
+}

@@ -1,0 +1,158 @@
+// tezzsetup module: production installer/uninstaller core logic for TezzNative.
+//
+// This module intentionally keeps the operational logic separate from GUI code,
+// so we can validate install/uninstall behavior in headless CI and reuse it
+// from Tk-style GUI frontends.
+
+import "io"
+
+let TEZZSETUP_DEFAULT_INSTALL_PATH:str = "build/tezznative_sdk"
+let TEZZSETUP_DEFAULT_RECEIPT_PATH:str = "build/tezznative_install_receipt.tnx"
+let TEZZSETUP_DEFAULT_REMOVED_PATH:str = "build/tezznative_install_receipt.removed.tnx"
+
+fn default_install_path() -> str:
+  ret TEZZSETUP_DEFAULT_INSTALL_PATH
+
+fn default_receipt_path() -> str:
+  ret TEZZSETUP_DEFAULT_RECEIPT_PATH
+
+fn default_removed_path() -> str:
+  ret TEZZSETUP_DEFAULT_REMOVED_PATH
+
+fn _pick(v:str, fallback:str) -> str:
+  if v == 0 || v[0] == 0 as char:
+    ret fallback
+  ret v
+
+fn _quote_arg(s:str) -> str:
+  if s == 0:
+    s = ""
+  n:int = len(s)
+  out:*char = malloc(n + 3)
+  if out == 0:
+    ret 0 as str
+  out[0] = 34 as char
+  i:int = 0
+  o:int = 1
+  while i < n:
+    c:int = (s[i] as int) & 255
+    if c == 34:
+      out[o] = 39 as char
+    else if c == 10 || c == 13:
+      out[o] = 32 as char
+    else:
+      out[o] = s[i]
+    i = i + 1
+    o = o + 1
+  out[o] = 34 as char
+  out[o + 1] = 0 as char
+  ret out as str
+
+fn _join2(a:str, b:str) -> str:
+  if a == 0:
+    a = ""
+  if b == 0:
+    b = ""
+  na:int = len(a)
+  nb:int = len(b)
+  out:*char = malloc(na + nb + 1)
+  if out == 0:
+    ret 0 as str
+  if na > 0:
+    unsafe:
+      memcpy(out, a as *char, na)
+  if nb > 0:
+    unsafe:
+      memcpy(out + na, b as *char, nb)
+  out[na + nb] = 0 as char
+  ret out as str
+
+fn _join3(a:str, b:str, c:str) -> str:
+  t0:str = _join2(a, b)
+  if t0 == 0:
+    ret 0 as str
+  out:str = _join2(t0, c)
+  free(t0)
+  ret out
+
+fn ensure_dir(path:str) -> int:
+  if path == 0 || path[0] == 0 as char:
+    ret 0 - 1
+  q:str = _quote_arg(path)
+  if q == 0:
+    ret 0 - 2
+
+  // POSIX first.
+  c0:str = _join2("mkdir -p ", q)
+  rc:int = 0 - 1
+  if c0 != 0:
+    rc = proc_run(c0)
+    free(c0)
+  if rc == 0:
+    free(q)
+    ret 0
+
+  // Windows fallback.
+  c1:str = _join3("mkdir ", q, " >nul 2>nul")
+  free(q)
+  if c1 == 0:
+    ret 0 - 2
+  rc = proc_run(c1)
+  free(c1)
+  if rc == 0:
+    ret 0
+  ret 0 - 1
+
+fn install(install_path:str, receipt_path:str) -> int:
+  install_path = _pick(install_path, TEZZSETUP_DEFAULT_INSTALL_PATH)
+  receipt_path = _pick(receipt_path, TEZZSETUP_DEFAULT_RECEIPT_PATH)
+  d:str = io.path_dir_p(receipt_path)
+  if d != 0 && d[0] != 0 as char:
+    ensure_dir(d)
+  if d != 0:
+    free(d)
+  ret io.write_all(receipt_path, install_path)
+
+// uninstall() return contract:
+//   0: receipt moved to removed path
+//   1: fallback clear of receipt succeeded
+//  <0: failure
+fn uninstall(receipt_path:str, removed_path:str) -> int:
+  receipt_path = _pick(receipt_path, TEZZSETUP_DEFAULT_RECEIPT_PATH)
+  removed_path = _pick(removed_path, TEZZSETUP_DEFAULT_REMOVED_PATH)
+
+  d:str = io.path_dir_p(removed_path)
+  if d != 0 && d[0] != 0 as char:
+    ensure_dir(d)
+  if d != 0:
+    free(d)
+
+  rc_mv:int = io.move_file(receipt_path, removed_path)
+  if rc_mv == 0:
+    ret 0
+  rc_wr:int = io.write_all(receipt_path, "")
+  if rc_wr >= 0:
+    ret 1
+  ret 0 - 1
+
+fn install_status(rc:int) -> str:
+  if rc >= 0:
+    ret "Install complete"
+  ret "Install failed"
+
+fn uninstall_status(rc:int) -> str:
+  if rc == 0:
+    ret "Uninstall complete: receipt moved"
+  if rc == 1:
+    ret "Uninstall complete: receipt cleared"
+  ret "Uninstall failed"
+
+fn speak_install_complete(lang:str) -> int:
+  if lang != 0:
+    lang = lang
+  ret 0
+
+fn speak_uninstall_complete(lang:str) -> int:
+  if lang != 0:
+    lang = lang
+  ret 0
