@@ -8,6 +8,10 @@
   "engines": {
     "vscode": "^1.75.0"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TezzCorp/TezzNative.git"
+  },
   "categories": [
     "Programming Languages",
     "Snippets",
