@@ -1,0 +1,13 @@
+fn sum_to(n:int) -> int:
+  total:int = 0
+  i:int = 0
+  while i <= n:
+    total = total + i
+    i = i + 1
+  ret total
+
+fn main() -> int:
+  value:int = sum_to(5)
+  if value == 15:
+    ret 0
+  ret 1

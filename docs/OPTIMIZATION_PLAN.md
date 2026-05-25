@@ -85,6 +85,8 @@ Exit gate:
 
 ## Milestone 1: Conformance And Correctness Harness
 
+Status: started.
+
 Goal: make compiler correctness measurable before deep backend work.
 
 Build these test groups:
@@ -113,8 +115,15 @@ Immediate tasks:
 1. Create `tests/conformance/parser`.
 2. Create `tests/conformance/typecheck`.
 3. Create `tests/conformance/diagnostics`.
-4. Add a small test runner command that returns non-zero on failure.
+4. Add a small test runner command that returns non-zero on failure. Done:
+   `tests/conformance/run.ps1`.
 5. Add CI jobs for stable-core checks.
+
+Started:
+
+- Added the public `tests/conformance` corpus with stable-core valid and invalid
+  cases for arithmetic, control flow, structs, type mismatches, and unknown
+  names.
 
 ## Milestone 2: Native Backend Reliability
 

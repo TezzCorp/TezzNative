@@ -11,6 +11,9 @@
 !lib/**
 !docs/
 !docs/*.md
+!tests/
+!tests/conformance/
+!tests/conformance/**
 !tezznative-vscode/
 !tezznative-vscode/**
 

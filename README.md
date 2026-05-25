@@ -107,6 +107,13 @@ The compiler and wrapper tooling are designed around a simple workflow:
 The VS Code extension provides syntax highlighting, snippets, and editor
 integration for TezzNative files.
 
+The first public stable-core conformance corpus is available in
+`tests/conformance/`. Run it with:
+
+```powershell
+.\tests\conformance\run.ps1
+```
+
 ## Optimization Roadmap
 
 The current priority is trust over feature count:

@@ -1,0 +1,11 @@
+struct Pair:
+  left:int
+  right:int
+
+fn main() -> int:
+  p:Pair
+  p.left = 3
+  p.right = 7
+  if p.left + p.right == 10:
+    ret 0
+  ret 1

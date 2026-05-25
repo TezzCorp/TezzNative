@@ -1,0 +1,8 @@
+fn add(a:int, b:int) -> int:
+  ret a + b
+
+fn main() -> int:
+  x:int = add(4, 5)
+  if x != 9:
+    ret 1
+  ret 0
