@@ -1,18 +1,9 @@
-// gpu module: GPU compute abstraction for TezzNative.
+// gpu module: experimental GPU compute abstraction for TezzNative.
 //
-// Provides a unified interface for GPU-accelerated matrix math
-// targeting both NVIDIA (CUDA) and AMD/Intel (Vulkan Compute).
-//
-// Architecture:
-//   - All heavy lifting is done by the native runtime (tnrt.c).
-//   - The .tn layer exposes a clean, portable API.
-//   - If no GPU is present, all ops automatically fall back to
-//     the SIMD-accelerated CPU path in tensor.tn.
-//
-// Use cases:
-//   - Offloading LLM matrix multiplications to GPU VRAM.
-//   - Running CUDA kernels from TezzNative programs.
-//   - Vulkan Compute for cross-vendor GPU math.
+// This module exposes runtime hooks for GPU-backed buffers and kernels.
+// Real acceleration depends on the runtime build and the available backend.
+// On builds without a GPU backend, runtime hooks may report unavailable or
+// route callers through CPU fallback paths.
 
 import "io"
 

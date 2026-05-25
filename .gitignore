@@ -9,6 +9,8 @@
 # Allow directories
 !lib/
 !lib/**
+!docs/
+!docs/*.md
 !tezznative-vscode/
 !tezznative-vscode/**
 

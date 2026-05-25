@@ -1,179 +1,129 @@
-# 🌌 TezzNative 2.0 — Production Systems Programming Language
+# TezzNative
 
-TezzNative is a next-generation, high-performance, developer-friendly systems programming language designed for the year 2026 and beyond. It combines the speed and control of C/C++ with modern syntax shortcuts, strict safety guarantees, embedded database engines, native graphics compositors, neural networking, real-time voice, and bare-metal HAL controllers.
+TezzNative is a Python-readable, C-adjacent native programming language. It is
+designed for developers who want simple syntax, static typing, native binaries,
+manual low-level control when needed, and a bundled standard library.
 
-This is the public distribution repository of TezzNative. It contains the official **TezzNative Standard Library (`lib/`)**, the self-contained Windows setup installer, and the official **VS Code Editor Support Extension (`tezznative-vscode`)**.
+This repository is the public TezzNative distribution surface. It contains:
 
----
+- The TezzNative standard library in `lib/`
+- The package metadata in `tezz.mod`, `tezz.lock`, and `version.json`
+- The official VS Code language extension in `tezznative-vscode/`
+- Public project documentation
 
-## 🚀 Key Highlights
+Current language metadata: **TezzNative 1.1.0**, release channel, API `v1`.
 
-*   ⚡ **Zero-Overhead Compilation & JIT**: LOWERED directly to optimized machine code (x86_64 and arm64). Supports instant JIT execution via `tezz run`.
-*   🚀 **GB/TB/PB Scale Big I/O**: Zero-copy memory-mapped file streams, asynchronous IOCP (Windows) and `io_uring` (Linux) backends.
-*   📊 **TezzDB Native B+ Tree Database**: Page-based embedded database with Write-Ahead Logging (WAL) for ACID transactions, compound 64-bit indices, and a built-in SQL-like Query Language (`TezzDBQL`).
-*   🎨 **Pixel-Native Compositor & GUI Toolkit**: Immediate-mode windows, focusing loops, alpha blended transparency compositing, custom widgets, and SIMD blends.
-*   🧠 **Transformer Neural Network Stack**: sinuses Prosodies, attention loops (`nn.tn`), BPE Tokenizer maps (`tokenizer.tn`), and slab-allocated LLM sampler inference steps (`llm.tn`).
-*   🔊 **Real-time Voice Synthesis & Capture**: Multi-formant additive Text-to-Speech (TTS) synthesizer and neural Whisper-style Speech-to-Text (STT) transcriber.
-*   🔌 **Embedded Bare-Metal HAL**: Full digital/analog GPIO, PWM, I2C, SPI, and UART drivers for AVR (Arduino Uno) and ARM Cortex-M (Raspberry Pi bare-metal).
+## Project Goal
 
----
+TezzNative is not trying to clone Python or C. The strongest target is:
 
-## 🛠 VS Code Editor Support Extension
+> Python-like readability with C-like native deployment.
 
-The official **`tezznative-vscode`** extension is bundled directly with the release and provides:
-1.  ✨ **Syntax Highlighting**: Complete TextMate grammar rules for all variables, strings, string interpolations (`f"..."`), comments, keywords, control flows, and structural types.
-2.  📝 **Smart Code Snippets**: Quick autocomplete templates for standard definitions (`fn`, `struct`), WebSocket servers, parameterized SQL queries, GUI buttons, and audio loops.
-3.  📡 **Language Server Protocol (LSP)**: Integrates automatically with the compiler's built-in LSP engine (`tezzc lsp`) to provide real-time syntax checking, hover tooltips, and completions.
+The best early use cases are CLI tools, automation scripts, native utilities,
+small services, embedded runtime experiments, and C interop code where Python is
+too slow or C is too noisy.
 
-To install, simply copy or link the `tezznative-vscode` directory to your `.vscode/extensions/` folder.
+## Status
 
----
+TezzNative is active and ambitious, but the stable core is intentionally smaller
+than the full repository surface.
 
-## 📖 Syntax & Language Reference
+| Area | Status | Notes |
+| --- | --- | --- |
+| Core syntax | Stable | Functions, variables, control flow, structs, arrays, imports |
+| Static type checking | Stable/Beta | Covers common errors; diagnostics are still improving |
+| Native executable flow | Beta | Strongest on x86_64 Windows/Linux paths |
+| Bytecode run flow | Stable/Beta | Useful for development and compatibility |
+| C ABI / extern calls | Beta | Header/ABI tooling exists; more layout tests are needed |
+| Standard IO/string/math modules | Stable/Beta | Good first target for production hardening |
+| Networking/TLS/GUI/DB | Beta | Useful, but needs platform matrix testing |
+| GPU/NPU/LLM/kernel modules | Experimental | API surface exists; backend support depends on runtime build |
 
-### 1. Variables and Type Inference
-Type declarations are strict but support modern syntax:
-```python
-let x:int = 42
-let msg:str = "Hello"
-let pi:float = 3.14159
-```
+See `docs/STABILITY.md` for the full stability map.
 
-### 2. Control Flow & Pattern Matching
-```python
-// Standard ranges and loops
-for x in collection:
-  say "Item: ", x
+## Quick Example
 
-// Advanced Pattern Matching
-match command {
-  1 => say "Start"
-  2 => say "Stop"
-  _ => say "Unknown"
-}
-```
+```tn
+import "std"
 
-### 3. Error Handling & Result Propagation
-Use `try-catch` structures with the `?` operator for clean, memory-safe error propagation:
-```python
-fn read_config(path:str) -> Result[str]:
-  f:*BFile = bigfile_open(path, "r")?
-  // ... read logic ...
-  ret Ok(content)
-```
-
----
-
-## 📦 Standard Library Subsystem References
-
-### 1. TezzServe Web API & WebSockets (`lib/tezzserve.tn`)
-Create highly parallel HTTP/2 web APIs with WebSocket upgrades, CORS middlewares, and static directory servers:
-```python
-import "net"
-import "tezzserve"
+fn fib(n:int) -> int:
+  if n <= 1:
+    ret n
+  ret fib(n - 1) + fib(n - 2)
 
 fn main() -> int:
-  unsafe:
-    srv:*HttpServer = tezzserve.server_new(8080)
-    
-    // Register WebSocket Route
-    tezzserve.serve_ws_upgrade(srv, "/chat", fn(sock:*Socket, req:*Request) -> int:
-      unsafe:
-        say "Client connected to WebSocket!"
-        tezzserve.serve_json(sock, 200, "{\"status\":\"connected\"}")
-      ret 0
-    )
-    
-    tezzserve.server_listen(srv)
-    ret 0
+  say "fib(10) = ", fib(10)
+  ret 0
 ```
 
-### 2. TezzDBQL Parameterized Database Queries (`lib/tezzdbql.tn`)
-Interact with the embedded B+ Tree database safely using parameterized SQL-like queries:
-```python
-import "tezzdb"
-import "tezzdbql"
+Typical commands:
 
-fn main() -> int:
-  unsafe:
-    db:*DB = tezzdb.db_open("records.db")
-    
-    // Parameterized INSERT
-    params:[str;2]
-    params[0] = "Alice"
-    params[1] = "Developer"
-    tezzdbql.db_exec2(db, "INSERT INTO users (name, role) VALUES (?, ?)", &params[0])
-    
-    // Index-aware SELECT Cursor
-    cur:*DBCursor = tezzdbql.db_query(db, "SELECT * FROM users WHERE role = ?", &params[1], 1)
-    while tezzdbql.cursor_next(cur) != 0:
-      name:str = tezzdbql.cursor_field_str(cur, "name")
-      say "User: ", name
-      free(name)
-      
-    tezzdbql.cursor_free(cur)
-    tezzdb.db_close(db)
-    ret 0
+```bash
+tezzc check hello.tn
+tezzc run hello.tn
+tezzc buildexe hello.tn hello.exe
 ```
 
-### 3. Neural LLM Inference & Sampling (`lib/llm.tn`)
-Run local, optimized transformer models natively using struct-free memory slabs and advanced temperature/nucleus samplers:
-```python
-import "llm"
-import "tokenizer"
+## Language Snapshot
 
-fn main() -> int:
-  unsafe:
-    // Load local LLM model weights and BPE tokenizer
-    model:*float = llm.llm_load("tezz_tiny.tnw")
-    tok:*Tokenizer = tokenizer.tokenizer_load("vocab.json", "merges.txt")
-    
-    logits:*float = malloc(1000 * 8) as *float
-    llm.llm_forward_step(model, 5, 0, logits) // forward pass on token 5 at step 0
-    
-    // Temperature + Top-K + Top-P (Nucleus) sampling
-    next_token:int = llm.llm_sample(logits, 1000, 0.8, 50, 0.9)
-    say "Sampled Token: ", next_token
-    
-    free(logits as *char)
-    llm.llm_free(model)
-    tokenizer.tokenizer_free(tok)
-    ret 0
-```
+TezzNative currently supports:
 
-### 4. Formant TTS Audio Playback (`lib/tts.tn`)
-Generate real-time speech directly from text and play it synchronously through local speakers:
-```python
-import "tts"
+- Indentation-based blocks
+- `fn`, `let`, `struct`, `enum`, `typedef`, `extern`, and `static`
+- `if`, `else`, `while`, C-style `for`, `switch`, `break`, `continue`, `ret`
+- Primitive types such as `int`, `float`, `char`, `str`, `void`
+- Pointers, arrays, casts, indexing, field access, `sizeof`, and `alignof`
+- `unsafe` blocks for pointer and low-level memory operations
+- C ABI-oriented attributes and extern declarations
+- A bundled module system and standard library
 
-fn main() -> int:
-  unsafe:
-    eng:*TtsEngine = tts.tts_new()
-    tts.tts_set_voice(eng, "en-female")
-    
-    // Play speech directly via the OS Wave/MCI audio API
-    tts.tts_speak(eng, "Hello! Welcome to the premium TezzNative SYSTEMS runtime.")
-    
-    tts.tts_free(eng)
-    ret 0
-```
+## Standard Library
 
----
+The public `lib/` directory includes modules for:
 
-## 🛠 Installation & Quickstart
+- Core utilities: `std`, `io`, `str`, `math`, `vec`, `arena`, `time`
+- Systems work: `sys`, `mmap`, `os`, `kernel`, `arduino`, `raspi`
+- Networking: `net`, `tls`, `tezzserve`, `tezzapi`
+- UI/application work: `gui`, `gui_win`, `tzgui`, `tzui`, `tnui`, `tezzui`
+- Data and AI experiments: `tezzdb`, `tensor`, `nn`, `llm`, `tokenizer`, `tts`, `stt`
+- Acceleration surfaces: `simd`, `intrin`, `gpu`, `npu`
 
-1.  **Download the SDK Installer**: Download `TezzNativeSetup.exe` from our latest GitHub Releases page.
-2.  **Execute the Installer**: Run `TezzNativeSetup.exe`. This installs the compiler `tezzc.exe`, the command CLI wrapper `tezz.exe`, and embeds all 50 standard library modules directly.
-3.  **Compile & Execute**:
-    ```bash
-    // Run direct JIT:
-    tezz run my_script.tn
-    
-    // Build optimized release binary:
-    tezz build my_program.tn
-    ```
+Not every module has the same maturity level. Stable applications should start
+with the core modules and opt into experimental modules deliberately.
 
----
+## Tooling
 
-## 💎 Corporate Branding & Support
-TezzNative is a production-grade systems language proudly engineered and sponsored by **TezzCorp**. All release channels and IDE interfaces are stamped with the official **TezzCorp logo**.
+The compiler and wrapper tooling are designed around a simple workflow:
+
+- `check`: parse and type-check a program
+- `run`: execute through the supported runtime path
+- `buildexe`: build a native executable where supported
+- `fmt`: format source
+- `lint`: run static lint rules
+- `cheader`, `abidump`, `abiverify`: inspect and verify C ABI surfaces
+
+The VS Code extension provides syntax highlighting, snippets, and editor
+integration for TezzNative files.
+
+## Optimization Roadmap
+
+The current priority is trust over feature count:
+
+1. Stabilize and document the core language subset.
+2. Split stable, beta, and experimental standard library surfaces.
+3. Expand compiler, ABI, and runtime conformance tests.
+4. Harden x86_64 native builds before widening target claims.
+5. Improve diagnostics, package metadata, examples, and benchmarks.
+
+See `docs/OPTIMIZATION_PLAN.md` for the working roadmap.
+
+## Repository Notes
+
+The public repository intentionally tracks a clean distribution subset. Full
+compiler sources, generated binaries, installers, local deployment scripts, and
+site deployment data may exist in local development directories but are not part
+of this public Git surface unless explicitly added.
+
+## License
+
+See `LICENSE.txt`.

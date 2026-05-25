@@ -1,20 +1,9 @@
-// npu module: Neural Processing Unit abstraction for TezzNative.
+// npu module: experimental neural accelerator abstraction for TezzNative.
 //
-// Provides a unified, high-level API for hardware-accelerated AI inference
-// across ALL modern NPU/neural-acceleration targets:
-//
-//   - Qualcomm Hexagon DSP (Snapdragon HTP)
-//   - Apple Neural Engine (ANE / CoreML)
-//   - Intel NPU (OpenVINO)
-//   - AMD XDNA (RDNA AI Accelerator)
-//   - Microsoft NPU (Windows ML / DirectML)
-//   - ONNX Runtime (universal fallback - wraps any of the above)
-//   - CPU SIMD fallback (always available via simd.tn)
-//
-// Design principle:
-//   Write ONCE in TezzNative. The npu module dispatches to the best
-//   available hardware at runtime. If no dedicated NPU exists, falls
-//   back to GPU (via gpu.tn) then to SIMD CPU (via simd.tn).
+// This module exposes runtime hooks for ONNX/DirectML/CoreML/OpenVINO-style
+// acceleration paths where the runtime was built with those backends.
+// Callers must expect CPU/GPU fallback or "backend unavailable" results on
+// platforms without a configured NPU runtime.
 
 import "io"
 import "gpu"

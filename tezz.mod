@@ -31,7 +31,6 @@ dep.tnui = 0.1
 dep.tezzsetup = 0.1
 dep.wm = 0.1
 dep.tsm = 0.1
-dep.tezzui = 0.1
 dep.tezzapi = 0.1
 dep.tezzserve = 0.1
 dep.tezzdb = 0.1
