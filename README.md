@@ -40,6 +40,8 @@ than the full repository surface.
 | GPU/NPU/LLM/kernel modules | Experimental | API surface exists; backend support depends on runtime build |
 
 See `docs/STABILITY.md` for the full stability map.
+See `docs/PLATFORM_SUPPORT.md` for target support and
+`docs/STDLIB_INVENTORY.md` for module maturity.
 
 ## Quick Example
 

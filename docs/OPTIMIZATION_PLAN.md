@@ -74,6 +74,8 @@ Delivered:
 - Added this optimization roadmap.
 - Marked GPU and NPU modules as experimental surfaces.
 - Corrected public metadata and duplicated manifest entries.
+- Added the initial platform support matrix.
+- Added the initial standard library maturity inventory.
 
 Exit gate:
 
