@@ -114,6 +114,10 @@ The first public stable-core conformance corpus is available in
 .\tests\conformance\run.ps1
 ```
 
+Invalid conformance tests may also have diagnostic snippets under
+`tests/conformance/diagnostics/`. GitHub Actions runs the same stable-core
+corpus against the published SDK package.
+
 ## Optimization Roadmap
 
 The current priority is trust over feature count:

@@ -1,0 +1,31 @@
+name: conformance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  stable-core:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download TezzNative SDK
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://tn.tezzcorp.com/api/download_request.php?artifact=windows-sdk&source=github-actions" -OutFile tezznative-sdk.zip
+          Expand-Archive tezznative-sdk.zip -DestinationPath tezznative-sdk -Force
+          $compiler = Get-ChildItem tezznative-sdk -Recurse -File |
+            Where-Object { $_.Name -in @("tezzc.exe", "tezzc-windows-x64.exe") } |
+            Select-Object -First 1
+          if (-not $compiler) {
+            throw "tezzc compiler not found in SDK archive"
+          }
+          "TEZZC=$($compiler.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Run stable-core conformance
+        shell: pwsh
+        run: |
+          .\tests\conformance\run.ps1 -Tezzc "$env:TEZZC"

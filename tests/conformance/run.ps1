@@ -17,6 +17,7 @@ if ([string]::IsNullOrWhiteSpace($Tezzc)) {
 
 $validDir = Join-Path $PSScriptRoot 'valid'
 $invalidDir = Join-Path $PSScriptRoot 'invalid'
+$diagnosticsDir = Join-Path $PSScriptRoot 'diagnostics'
 $failed = 0
 
 function Invoke-TezzCheck {
@@ -66,7 +67,21 @@ foreach ($file in Get-ChildItem -LiteralPath $validDir -Filter '*.tn' | Sort-Obj
 foreach ($file in Get-ChildItem -LiteralPath $invalidDir -Filter '*.tn' | Sort-Object Name) {
   $result = Invoke-TezzCheck -Path $file.FullName
   if ($result.ExitCode -ne 0) {
-    Write-Host "INVALID_OK $($file.Name)"
+    $diagPath = Join-Path $diagnosticsDir ($file.BaseName + '.diag.txt')
+    if (Test-Path -LiteralPath $diagPath) {
+      $expected = (Get-Content -LiteralPath $diagPath -Raw).Trim()
+      $actual = ($result.Output | Out-String).Trim()
+      if ($actual -notlike "*$expected*") {
+        Write-Host "FAIL invalid/$($file.Name) diagnostic mismatch"
+        Write-Host "  expected snippet: $expected"
+        Write-TestOutput -Output $result.Output
+        $failed++
+        continue
+      }
+      Write-Host "INVALID_OK $($file.Name) diagnostic=matched"
+    } else {
+      Write-Host "INVALID_OK $($file.Name)"
+    }
     if ($VerboseOutput) {
       Write-TestOutput -Output $result.Output
     }

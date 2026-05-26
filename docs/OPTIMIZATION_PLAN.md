@@ -124,6 +124,7 @@ Started:
 - Added the public `tests/conformance` corpus with stable-core valid and invalid
   cases for arithmetic, control flow, structs, type mismatches, and unknown
   names.
+- Added diagnostic snippet checks for the first invalid conformance cases.
 
 ## Milestone 2: Native Backend Reliability
 

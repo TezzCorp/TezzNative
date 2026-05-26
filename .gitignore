@@ -11,6 +11,9 @@
 !lib/**
 !docs/
 !docs/*.md
+!.github/
+!.github/workflows/
+!.github/workflows/conformance.yml
 !tests/
 !tests/conformance/
 !tests/conformance/**
