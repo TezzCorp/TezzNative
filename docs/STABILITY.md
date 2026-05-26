@@ -39,7 +39,8 @@ These surfaces are useful today but need more conformance tests:
 - Borrow/mutability diagnostics
 - `fmt` and `lint`
 - `io`, `str`, `math`, `vec`, `arena`, `time`; imports plus selected native
-  executable smoke are gated, full function-level contracts are still hardening
+  executable smoke for file IO, portable paths, string transforms, vectors, and
+  arenas are gated, full function-level contracts are still hardening
 - `net`, `tls`, `tezzserve`, `tezzapi`
 - `tezzdb` and `tezzdbql`
 - GUI modules on supported host platforms
@@ -72,7 +73,8 @@ risk. They should not be treated as guaranteed production APIs.
 - Continue expanding ABI layout tests beyond the starter structs, arrays,
   pointers, and function signatures.
 - Add native executable stress tests for Windows and Linux x86_64 beyond the
-  current hello, loop/math, string, struct, file IO, and portable path smoke.
+  current hello, loop/math, string, struct, file IO, portable path, vector, and
+  arena smoke.
 - Add module-level stdlib checks for stable and beta modules.
 - Add docs for every stable public function.
 - Publish benchmark and platform support matrices.

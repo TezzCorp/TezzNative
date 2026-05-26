@@ -1,0 +1,78 @@
+import "str"
+
+fn require_eq(actual:str, expected:str, code:int) -> int:
+  if actual == 0:
+    ret code
+  same:int = 0
+  unsafe:
+    same = strcmp(actual, expected)
+  if same != 0:
+    ret code
+  ret 0
+
+fn main() -> int:
+  result:int = 0
+
+  trimmed:str = str.str_trim("  TezzNative  ")
+  result = require_eq(trimmed, "TezzNative", 1)
+  unsafe:
+    if trimmed != 0:
+      free(trimmed)
+  if result != 0:
+    ret result
+
+  upper:str = str.str_upper("TezzNative")
+  result = require_eq(upper, "TEZZNATIVE", 2)
+  unsafe:
+    if upper != 0:
+      free(upper)
+  if result != 0:
+    ret result
+
+  lower:str = str.str_lower("TezzNative")
+  result = require_eq(lower, "tezznative", 3)
+  unsafe:
+    if lower != 0:
+      free(lower)
+  if result != 0:
+    ret result
+
+  sliced:str = str.str_slice("automation", 4, 8)
+  result = require_eq(sliced, "mati", 4)
+  unsafe:
+    if sliced != 0:
+      free(sliced)
+  if result != 0:
+    ret result
+
+  replaced:str = str.str_replace("native native", "native", "tool")
+  result = require_eq(replaced, "tool tool", 5)
+  unsafe:
+    if replaced != 0:
+      free(replaced)
+  if result != 0:
+    ret result
+
+  repeated:str = str.str_repeat("tn", 3)
+  result = require_eq(repeated, "tntntn", 6)
+  unsafe:
+    if repeated != 0:
+      free(repeated)
+  if result != 0:
+    ret result
+
+  padded:str = str.str_pad_int(42, 5)
+  result = require_eq(padded, "00042", 7)
+  unsafe:
+    if padded != 0:
+      free(padded)
+  if result != 0:
+    ret result
+
+  if str.str_to_int(" -123xyz") != 0 - 123:
+    ret 8
+  if str.hex_to_int("0x2A") != 42:
+    ret 9
+
+  say "string-transforms"
+  ret 0

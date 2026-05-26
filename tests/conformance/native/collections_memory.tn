@@ -1,0 +1,85 @@
+import "arena"
+import "vec"
+
+fn require_eq(actual:str, expected:str, code:int) -> int:
+  if actual == 0:
+    ret code
+  same:int = 0
+  unsafe:
+    same = strcmp(actual, expected)
+  if same != 0:
+    ret code
+  ret 0
+
+fn main() -> int:
+  v:*Vec = vec.ivec_new()
+  if v == 0:
+    ret 1
+  if vec.ivec_push(v, 10) != 0:
+    vec.vec_free(v)
+    ret 2
+  if vec.ivec_push(v, 20) != 0:
+    vec.vec_free(v)
+    ret 3
+  if vec.vec_len(v) != 2:
+    vec.vec_free(v)
+    ret 4
+  if vec.ivec_get(v, 0) != 10:
+    vec.vec_free(v)
+    ret 5
+  if vec.ivec_set(v, 1, 25) != 0:
+    vec.vec_free(v)
+    ret 6
+  if vec.ivec_get(v, 1) != 25:
+    vec.vec_free(v)
+    ret 7
+  popped:int = 0
+  pop_rc:int = 0
+  unsafe:
+    pop_rc = vec.ivec_pop(v, &popped)
+  if pop_rc != 0:
+    vec.vec_free(v)
+    ret 8
+  if popped != 25:
+    vec.vec_free(v)
+    ret 9
+  vec.vec_free(v)
+
+  a:*Arena = arena.arena_new(128)
+  if a == 0:
+    ret 10
+  first:*char = arena.arena_alloc(a, 16)
+  second:*char = arena.arena_alloc_aligned(a, 8, 16)
+  if first == 0 || second == 0:
+    arena.arena_free(a)
+    ret 11
+  unsafe:
+    first[0] = 65 as char
+    first[1] = 0 as char
+  first_text:str
+  unsafe:
+    first_text = first as str
+  if require_eq(first_text, "A", 12) != 0:
+    arena.arena_free(a)
+    ret 12
+  if arena.arena_used(a) <= 0:
+    arena.arena_free(a)
+    ret 13
+  mark:int = arena.arena_mark(a)
+  tmp:str = arena.arena_strdup(a, "arena-ok")
+  if require_eq(tmp, "arena-ok", 14) != 0:
+    arena.arena_free(a)
+    ret 14
+  if arena.arena_release(a, mark) != 0:
+    arena.arena_free(a)
+    ret 15
+  if arena.arena_reset(a) != 0:
+    arena.arena_free(a)
+    ret 16
+  if arena.arena_used(a) != 0:
+    arena.arena_free(a)
+    ret 17
+  arena.arena_free(a)
+
+  say "collections-memory"
+  ret 0

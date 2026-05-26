@@ -23,7 +23,7 @@ fn _str_copy(dst:*char, src:str, n:int) -> int:
   if dst == 0 || src == 0 || n <= 0:
     ret 0
   unsafe:
-    memcpy(dst, src, n)
+    memcpy(dst, src as *char, n)
   ret n
 
 // ---------------------------------------------------------------------------
@@ -78,7 +78,7 @@ fn str_cat(a:str, b:str) -> str:
     _str_copy(p, a, na)
   if nb > 0:
     unsafe:
-      memcpy(p + na, b, nb)
+      memcpy(p + na, b as *char, nb)
   ret p as str
 
 // Concatenate three strings (caller frees result)
@@ -92,15 +92,15 @@ fn str_cat3(a:str, b:str, c:str) -> str:
   off:int = 0
   if na > 0:
     unsafe:
-      memcpy(p, a, na)
+      memcpy(p, a as *char, na)
     off = na
   if nb > 0:
     unsafe:
-      memcpy(p + off, b, nb)
+      memcpy(p + off, b as *char, nb)
     off = off + nb
   if nc > 0:
     unsafe:
-      memcpy(p + off, c, nc)
+      memcpy(p + off, c as *char, nc)
   ret p as str
 
 // ---------------------------------------------------------------------------
@@ -190,7 +190,7 @@ fn str_slice(s:str, start:int, end2:int) -> str:
     ret 0 as str
   if sz > 0:
     unsafe:
-      memcpy(p, s + start, sz)
+      memcpy(p, (s as *char) + start, sz)
   ret p as str
 
 // Return left n characters — caller frees
@@ -304,33 +304,92 @@ fn str_lower(s:str) -> str:
 
 // Replace first occurrence of from with to — caller frees
 fn str_replace_first(s:str, from2:str, to2:str) -> str:
-  idx:int = str_find(s, from2)
+  source:str = s
+  needle:str = from2
+  replacement:str = to2
+  idx:int = str_find(source, needle)
   if idx < 0:
-    ret str_dup(s)
-  nfrom:int = _str_len(from2)
-  left:str = str_slice(s, 0, idx)
-  right:str = str_slice(s, idx + nfrom, _str_len(s))
-  mid:str = str_cat3(left, to2, right)
-  free(left)
-  free(right)
-  ret mid
+    ret str_dup(source)
+  nfrom:int = _str_len(needle)
+  source_len:int = _str_len(source)
+  nrepl:int = _str_len(replacement)
+  out:*char = _str_alloc(source_len - nfrom + nrepl)
+  if out == 0:
+    ret 0 as str
+  pos:int = 0
+  unsafe:
+    if idx > 0:
+      memcpy(out, source as *char, idx)
+      pos = idx
+    if nrepl > 0:
+      memcpy(out + pos, replacement as *char, nrepl)
+      pos = pos + nrepl
+    tail_start:int = idx + nfrom
+    tail_len:int = source_len - tail_start
+    if tail_len > 0:
+      memcpy(out + pos, (source as *char) + tail_start, tail_len)
+  ret out as str
 
 // Replace all occurrences of from with to — caller frees
 fn str_replace(s:str, from2:str, to2:str) -> str:
-  if s == 0 || from2 == 0:
-    ret str_dup(s)
-  nfrom:int = _str_len(from2)
+  source:str = s
+  needle:str = from2
+  replacement:str = to2
+  if source == 0 || needle == 0:
+    ret str_dup(source)
+  nfrom:int = _str_len(needle)
   if nfrom == 0:
-    ret str_dup(s)
-  result:str = str_dup(s)
-  while 1 != 0:
-    idx:int = str_find(result, from2)
-    if idx < 0:
-      break
-    next:str = str_replace_first(result, from2, to2)
-    free(result)
-    result = next
-  ret result
+    ret str_dup(source)
+  source_len:int = _str_len(source)
+  nrepl:int = _str_len(replacement)
+  count:int = 0
+  i:int = 0
+  last_start:int = source_len - nfrom
+  while i <= last_start:
+    matched:int = 1
+    j:int = 0
+    while j < nfrom:
+      unsafe:
+        if (source as *char)[i + j] != (needle as *char)[j]:
+          matched = 0
+          break
+      j = j + 1
+    if matched != 0:
+      count = count + 1
+      i = i + nfrom
+    else:
+      i = i + 1
+  if count == 0:
+    ret str_dup(source)
+  out_len:int = source_len + count * (nrepl - nfrom)
+  out:*char = _str_alloc(out_len)
+  if out == 0:
+    ret 0 as str
+  i = 0
+  o:int = 0
+  while i < source_len:
+    matched2:int = 0
+    if i <= last_start:
+      matched2 = 1
+      j2:int = 0
+      while j2 < nfrom:
+        unsafe:
+          if (source as *char)[i + j2] != (needle as *char)[j2]:
+            matched2 = 0
+            break
+        j2 = j2 + 1
+    if matched2 != 0:
+      unsafe:
+        if nrepl > 0:
+          memcpy(out + o, replacement as *char, nrepl)
+      o = o + nrepl
+      i = i + nfrom
+    else:
+      unsafe:
+        out[o] = (source as *char)[i]
+      o = o + 1
+      i = i + 1
+  ret out as str
 
 // Repeat s n times — caller frees
 fn str_repeat(s:str, n:int) -> str:
@@ -344,7 +403,7 @@ fn str_repeat(s:str, n:int) -> str:
   i:int = 0
   while i < n:
     unsafe:
-      memcpy(p + i * slen, s, slen)
+      memcpy(p + i * slen, s as *char, slen)
     i = i + 1
   ret p as str
 
@@ -392,7 +451,10 @@ fn str_count(s:str, sub:str) -> int:
   pos:int = 0
   ns:int = _str_len(s)
   while pos <= ns - nsub:
-    idx:int = str_find(s + pos, sub)
+    tail:str
+    unsafe:
+      tail = ((s as *char) + pos) as str
+    idx:int = str_find(tail, sub)
     if idx < 0:
       break
     count = count + 1
@@ -591,23 +653,47 @@ fn hex_to_int(s:str) -> int:
 
 // Zero-pad integer to min_width digits — caller frees
 fn str_pad_int(n:int, min_width:int) -> str:
-  s:str = int_to_str(n)
-  slen:int = _str_len(s)
-  if slen >= min_width:
-    ret s
-  pad:int = min_width - slen
-  p:*char = _str_alloc(min_width)
+  neg:int = 0
+  v:int = n
+  if v < 0:
+    neg = 1
+    v = 0 - v
+  tmp:[char;24]
+  digits:int = 0
+  if v == 0:
+    unsafe:
+      tmp[0] = 48 as char
+    digits = 1
+  while v > 0:
+    unsafe:
+      tmp[digits] = (48 + v % 10) as char
+    v = v / 10
+    digits = digits + 1
+  natural:int = digits + neg
+  total:int = min_width
+  if total < natural:
+    total = natural
+  p:*char = _str_alloc(total)
   if p == 0:
-    free(s)
     ret 0 as str
+  pos:int = 0
+  if neg != 0:
+    unsafe:
+      p[0] = 45 as char
+    pos = 1
+  pad:int = total - natural
   i:int = 0
   while i < pad:
     unsafe:
-      p[i] = 48 as char
+      p[pos + i] = 48 as char
     i = i + 1
-  unsafe:
-    memcpy(p + pad, s, slen)
-  free(s)
+  pos = pos + pad
+  j:int = digits - 1
+  while j >= 0:
+    unsafe:
+      p[pos] = tmp[j]
+    pos = pos + 1
+    j = j - 1
   ret p as str
 
 // Right-pad string with spaces to width — caller frees
@@ -620,7 +706,7 @@ fn str_pad_right(s:str, width:int) -> str:
     ret 0 as str
   if slen > 0:
     unsafe:
-      memcpy(p, s, slen)
+      memcpy(p, s as *char, slen)
   i:int = slen
   while i < width:
     unsafe:
@@ -644,7 +730,7 @@ fn str_pad_left(s:str, width:int) -> str:
     i = i + 1
   if slen > 0:
     unsafe:
-      memcpy(p + pad, s, slen)
+      memcpy(p + pad, s as *char, slen)
   ret p as str
 
 // ---------------------------------------------------------------------------

@@ -19,11 +19,11 @@ trust in the stable core.
 | --- | --- | --- |
 | `std` | Common prelude and helpers | Keep imports predictable; consider separating experimental imports later. |
 | `io` | Files, paths, streams, basic OS IO | File read/write and portable path helpers are native-smoke gated; add directory listing and OS-backed path tests next. |
-| `str` | String helpers | Native search/prefix/suffix smoke is gated; add trim, conversion, and formatting tests. |
+| `str` | String helpers | Native search/prefix/suffix plus trim/case/slice/replace/repeat/pad/parse smoke is gated; add broader edge-case tests. |
 | `math` | Numeric helpers | Add deterministic numeric tests and edge cases. |
 | `time` | Time and sleep helpers | Add platform behavior notes. |
-| `vec` | Dynamic vector utilities | Add allocation, push, get, and free tests. |
-| `arena` | Arena allocation helpers | Add allocation and reset tests. |
+| `vec` | Dynamic vector utilities | Native integer vector push/get/set/pop/free smoke is gated; add generic insert/remove/find tests. |
+| `arena` | Arena allocation helpers | Native allocation/alignment/strdup/mark/release/reset smoke is gated; add wrapped-buffer tests. |
 
 ## Beta Modules
 
@@ -74,7 +74,7 @@ A module can move toward Stable Candidate only when:
 ## Immediate Improvements
 
 1. Add deeper module smoke tests for `io`, `str`, `math`, `time`, `vec`, and
-   `arena`; first native `io`/`str` coverage is now gated.
+   `arena`; first native `io`/`str`/`vec`/`arena` coverage is now gated.
 2. Document fallback behavior for `gpu`, `npu`, `tls`, and GUI modules.
 3. Reduce default prelude risk by separating stable and experimental imports.
 4. Add examples for the stable candidate modules.

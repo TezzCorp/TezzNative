@@ -31,7 +31,7 @@ changes.
 | --- | --- | --- | --- | --- |
 | Core language | Primary | Primary | Planned | Stable-core conformance runs on Windows and Linux SDKs. |
 | Bytecode run | Primary | Preview | Planned | Compatibility path while native backend matures. |
-| Native executable | Primary/Beta | Primary/Beta | Planned | Hello, loop/math, string, struct-array, file IO, and portable path executable smoke tests pass on Windows and Linux x64. |
+| Native executable | Primary/Beta | Primary/Beta | Planned | Hello, loop/math, string, string-transform, struct-array, file IO, portable path, vector, and arena executable smoke tests pass on Windows and Linux x64. |
 | IO/path/process | Beta | Preview | Planned | File read/write and portable path helpers have native smoke coverage; OS-backed path/process behavior still needs platform-specific tests. |
 | Networking | Beta | Preview | Planned | Socket and HTTP tests should be added. |
 | TLS | Beta | Preview | Planned | Linux builds without OpenSSL development headers expose unsupported TLS stubs until linked with a TLS backend. |
@@ -55,7 +55,7 @@ A target should not move to Primary until:
 
 1. Add CI jobs for Windows x64 and Linux x64.
 2. Add OS-backed path/process smoke tests after the current hello, math/loops,
-   strings, structs, file IO, and portable path gate.
+   strings, structs, file IO, portable path, vector, and arena gate.
 3. Publish exact binary names, hashes, and sizes for every download.
 4. Add target-specific notes to docs and download pages.
 5. Fail unsupported targets clearly instead of silently falling back.

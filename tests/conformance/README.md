@@ -42,8 +42,9 @@ The runner checks diagnostic snippets when `diagnostics/<test-name>.diag.txt`
 exists. The next step is to expand these snippets into full normalized
 snapshots.
 
-Native smoke tests cover executable hello output, loops/math, strings,
-struct-array field access, file IO, and portable path helpers:
+Native smoke tests cover executable hello output, loops/math, strings and
+string transforms, struct-array field access, file IO, portable path helpers,
+vectors, and arenas:
 
 ```powershell
 .\tests\conformance\run-native-smoke.ps1
