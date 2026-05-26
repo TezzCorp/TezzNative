@@ -127,7 +127,18 @@ try {
       '_Static_assert(sizeof(AbiBuffer) == 16, "ABI size mismatch for AbiBuffer");',
       'typedef struct AbiPacket {',
       'uint8_t bytes[8];',
-      '_Static_assert(sizeof(AbiPacket) == 16, "ABI size mismatch for AbiPacket");'
+      '_Static_assert(sizeof(AbiPacket) == 16, "ABI size mismatch for AbiPacket");',
+      'typedef struct AbiNumbers {',
+      'uint8_t flag;',
+      'int64_t count;',
+      'double ratio;',
+      '_Static_assert(sizeof(AbiNumbers) == 24, "ABI size mismatch for AbiNumbers");',
+      '_Static_assert(_Alignof(AbiNumbers) == 8, "ABI align mismatch for AbiNumbers");',
+      'typedef struct AbiTable {',
+      'int64_t values[3];',
+      'AbiPair head;',
+      '_Static_assert(sizeof(AbiTable) == 40, "ABI size mismatch for AbiTable");',
+      '_Static_assert(_Alignof(AbiTable) == 8, "ABI align mismatch for AbiTable");'
     )
 
     foreach ($snippet in $headerSnippets) {
@@ -140,12 +151,23 @@ try {
       '"name":"AbiPair","size":16,"align":8',
       '"name":"AbiBuffer","size":16,"align":8',
       '"name":"AbiPacket","size":16,"align":8',
+      '"name":"AbiNumbers","size":24,"align":8',
+      '"name":"flag","off":0,"size":1,"align":1,"type":"u8"',
+      '"name":"count","off":0,"size":8,"align":8,"type":"i64"',
+      '"name":"ratio","off":0,"size":8,"align":8,"type":"f64"',
+      '"name":"AbiTable","size":40,"align":8',
+      '"name":"values","off":0,"size":24,"align":8,"type":"array","elem":"i64","len":3',
+      '"name":"head","off":0,"size":16,"align":8,"type":"struct","name":"AbiPair"',
       '"name":"abi_pair_sum","extern":true,"ret":"i64"',
       '"params":["ptr","elem":"struct","name":"AbiPair","i64"]',
       '"name":"abi_buffer_len","extern":true,"ret":"i64"',
       '"params":["struct","name":"AbiBuffer"]',
       '"name":"abi_packet_send","extern":true,"ret":"void"',
-      '"params":["ptr","elem":"struct","name":"AbiPacket"]'
+      '"params":["ptr","elem":"struct","name":"AbiPacket"]',
+      '"name":"abi_numbers_scale","extern":true,"ret":"i64"',
+      '"params":["struct","name":"AbiNumbers","ptr","elem":"struct","name":"AbiNumbers"]',
+      '"name":"abi_table_first","extern":true,"ret":"i64"',
+      '"params":["ptr","elem":"struct","name":"AbiTable"]'
     )
 
     foreach ($snippet in $abiSnippets) {

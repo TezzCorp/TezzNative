@@ -13,6 +13,10 @@ easy to diagnose.
 - `native/` contains native-backend smoke programs.
 - `abi/` contains starter C ABI layout and signature fixtures.
 
+The stable-core corpus currently covers arithmetic/control flow, structs,
+fixed arrays, indexing, `sizeof`/`alignof`, unsafe pointer operations, common
+type errors, unknown names/fields, wrong call arity, and unsafe diagnostics.
+
 ## Runner
 
 From a development checkout:
@@ -38,7 +42,8 @@ The runner checks diagnostic snippets when `diagnostics/<test-name>.diag.txt`
 exists. The next step is to expand these snippets into full normalized
 snapshots.
 
-Native smoke tests:
+Native smoke tests cover executable hello output, loops/math, strings,
+struct-array field access, file IO, and portable path helpers:
 
 ```powershell
 .\tests\conformance\run-native-smoke.ps1
@@ -63,6 +68,7 @@ bash tests/conformance/run-abi.sh ./TezzNative-language/bin/tezzc-linux-x64
 ```
 
 The ABI runner checks generated C header layout assertions, `abidump`, and
-`abiverify`. CI may pass `-SkipVerify` until hosted-runner `abiverify` behavior
-is hardened. The runner uses targeted dump snippets until the full `abidump`
-output is strict JSON.
+`abiverify` for pointer fields, fixed arrays, nested structs, scalar mixes, and
+extern signatures. CI may pass `-SkipVerify` until hosted-runner `abiverify`
+behavior is hardened. The runner uses targeted dump snippets until the full
+`abidump` output is strict JSON.

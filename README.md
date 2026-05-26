@@ -30,12 +30,12 @@ than the full repository surface.
 
 | Area | Status | Notes |
 | --- | --- | --- |
-| Core syntax | Stable | Functions, variables, control flow, structs, arrays, imports |
-| Static type checking | Stable/Beta | Covers common errors; diagnostics are still improving |
-| Native executable flow | Beta | Strongest on x86_64 Windows/Linux paths |
+| Core syntax | Stable (gated) | Functions, variables, control flow, structs, arrays, imports, `sizeof`/`alignof`, and unsafe pointer blocks |
+| Static type checking | Stable/Beta (gated core) | Type mismatch, unknown name/field, arity, and unsafe diagnostics are snippet checked; richer help is still improving |
+| Native executable flow | Beta (gated x64) | Windows/Linux SDKs build and run hello, loops/math, strings, structs, file IO, and portable path smoke |
 | Bytecode run flow | Stable/Beta | Useful for development and compatibility |
-| C ABI / extern calls | Beta | Header/ABI tooling exists; more layout tests are needed |
-| Standard IO/string/math modules | Stable/Beta | Good first target for production hardening |
+| C ABI / extern calls | Beta (gated starter) | Header/ABI dump checks cover pointers, arrays, nested structs, scalar mixes, and extern signatures |
+| Standard IO/string/math modules | Stable/Beta (smoke gated) | Core imports plus native string, file IO, and portable path smoke; full stdlib behavior is still hardening |
 | Networking/TLS/GUI/DB | Beta | Useful, but needs platform matrix testing |
 | GPU/NPU/LLM/kernel modules | Experimental | API surface exists; backend support depends on runtime build |
 
@@ -127,7 +127,7 @@ corpus, including stable stdlib import smoke tests, against the published
 Windows and Linux SDK packages.
 
 The native backend smoke lane builds and runs small executable programs for
-hello output, loops/math, strings, structs, and file IO:
+hello output, loops/math, strings, structs, file IO, and portable path helpers:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tests\conformance\run-native-smoke.ps1

@@ -1,0 +1,48 @@
+import "io"
+
+fn require_eq(actual:str, expected:str, code:int) -> int:
+  if actual == 0:
+    ret code
+  same:int = 0
+  unsafe:
+    same = strcmp(actual, expected)
+  if same != 0:
+    ret code
+  ret 0
+
+fn main() -> int:
+  result:int = 0
+
+  joined:str = io.path_join_p("tools/tezz", "/native.tn")
+  result = require_eq(joined, "tools/tezz/native.tn", 1)
+  unsafe:
+    if joined != 0:
+      free(joined)
+  if result != 0:
+    ret result
+
+  base:str = io.path_base_p("tools/tezz/native.tn")
+  result = require_eq(base, "native.tn", 2)
+  unsafe:
+    if base != 0:
+      free(base)
+  if result != 0:
+    ret result
+
+  dir:str = io.path_dir_p("tools/tezz/native.tn")
+  result = require_eq(dir, "tools/tezz", 3)
+  unsafe:
+    if dir != 0:
+      free(dir)
+  if result != 0:
+    ret result
+
+  norm:str = io.path_norm_p("tools//tezz/./runtime/../native.tn")
+  result = require_eq(norm, "tools/tezz/native.tn", 4)
+  unsafe:
+    if norm != 0:
+      free(norm)
+  if result != 0:
+    ret result
+  say "path-native"
+  ret 0

@@ -25,15 +25,21 @@ These features are the first compatibility target:
 - Module imports from the local project and standard library
 - `tezzc check`, `tezzc run`, and bytecode-backed development workflows
 
+The stable-core conformance gate now includes fixed arrays/indexing,
+`sizeof`/`alignof`, struct-field diagnostics, function-arity diagnostics, and
+unsafe pointer/address-of coverage.
+
 ## Beta Surfaces
 
 These surfaces are useful today but need more conformance tests:
 
 - Native executable generation
-- C ABI interop, `extern fn`, C header generation, ABI dump/verify
+- C ABI interop, `extern fn`, C header generation, ABI dump/verify with starter
+  layout coverage for scalar mixes, arrays, pointers, and nested structs
 - Borrow/mutability diagnostics
 - `fmt` and `lint`
-- `io`, `str`, `math`, `vec`, `arena`, `time`
+- `io`, `str`, `math`, `vec`, `arena`, `time`; imports plus selected native
+  executable smoke are gated, full function-level contracts are still hardening
 - `net`, `tls`, `tezzserve`, `tezzapi`
 - `tezzdb` and `tezzdbql`
 - GUI modules on supported host platforms
@@ -63,8 +69,10 @@ risk. They should not be treated as guaranteed production APIs.
 ## Near-Term Hardening Checklist
 
 - Add parser and type-checker snapshot tests.
-- Add ABI layout tests for structs, arrays, pointers, and function signatures.
-- Add native executable smoke tests for Windows and Linux x86_64.
+- Continue expanding ABI layout tests beyond the starter structs, arrays,
+  pointers, and function signatures.
+- Add native executable stress tests for Windows and Linux x86_64 beyond the
+  current hello, loop/math, string, struct, file IO, and portable path smoke.
 - Add module-level stdlib checks for stable and beta modules.
 - Add docs for every stable public function.
 - Publish benchmark and platform support matrices.

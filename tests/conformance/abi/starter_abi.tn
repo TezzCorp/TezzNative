@@ -10,10 +10,21 @@ struct AbiPacket:
   tag:int
   bytes:[char;8]
 
+struct AbiNumbers:
+  flag:char
+  count:int
+  ratio:float
+
+struct AbiTable:
+  values:[int;3]
+  head:AbiPair
+
 @abi("c")
 extern fn abi_pair_sum(p:*AbiPair, factor:int) -> int
 extern fn abi_buffer_len(buf:AbiBuffer) -> int
 extern fn abi_packet_send(pkt:*AbiPacket) -> void
+extern fn abi_numbers_scale(n:AbiNumbers, out:*AbiNumbers) -> int
+extern fn abi_table_first(t:*AbiTable) -> int
 
 fn main() -> int:
   ret 0

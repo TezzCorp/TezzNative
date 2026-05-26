@@ -1,0 +1,4 @@
+fn main() -> int:
+  x:int = 1
+  p:*int = &x
+  ret p[0]

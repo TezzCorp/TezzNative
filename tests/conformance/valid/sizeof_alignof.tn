@@ -1,0 +1,12 @@
+struct Wide:
+  left:int
+  right:int
+
+fn main() -> int:
+  if sizeof(Wide) != 16:
+    ret 1
+  if alignof(Wide) != 8:
+    ret 2
+  if sizeof([int;3]) != 24:
+    ret 3
+  ret 0

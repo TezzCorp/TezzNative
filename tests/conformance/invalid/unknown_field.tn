@@ -1,0 +1,6 @@
+struct Pair:
+  left:int
+
+fn main() -> int:
+  p:Pair
+  ret p.right

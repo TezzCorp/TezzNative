@@ -128,6 +128,10 @@ Started:
 - Added Windows and POSIX conformance runners.
 - Added a stable stdlib import smoke fixture for `std`, `io`, `str`, `math`,
   `time`, `vec`, and `arena`.
+- Expanded valid stable-core coverage for fixed arrays, indexing,
+  `sizeof`/`alignof`, and unsafe pointer/address-of workflows.
+- Expanded invalid and diagnostic-snippet coverage for unsafe address-of,
+  unknown struct fields, and wrong function arity.
 
 ## Milestone 2: Native Backend Reliability
 
@@ -179,13 +183,19 @@ Started:
 - Added the POSIX native smoke runner:
   `tests/conformance/run-native-smoke.sh`.
 - Added native executable smoke cases for hello output, loop/math lowering,
-  string utilities, file read/write, and struct array field access.
+  string utilities, file read/write, portable path helpers, and struct array
+  field access.
 - Promoted native smoke from advisory syntax coverage to hosted Windows and
   Linux execution gates.
 - Fixed the shared x64 register allocation surface so Linux ELF output no
   longer keeps live values in `RDI`/`RSI` across calls.
+- Hardened `io.path_join_p` to use a single allocation/copy path and tightened
+  `io.path_norm_p` pointer guards so portable path helpers pass native smoke on
+  Windows and Linux x64.
 
 ## Milestone 3: Standard Library Hardening
+
+Status: started.
 
 Goal: make the stable standard library small, documented, and testable.
 
@@ -242,6 +252,15 @@ Near-term stdlib optimization:
 4. Add platform notes for networking, TLS, GUI, GPU, and NPU.
 5. Split large prelude behavior into `std` and a future `std.full` or
    `std.experimental` path if needed.
+
+Started:
+
+- Added native executable smoke for `str` helpers, file read/write through C
+  runtime IO, and portable `io` path helpers.
+- Reworked `io.path_join_p` to avoid intermediate ownership ambiguity and
+  reduce allocations.
+- Reworked `io.path_norm_p` guarded pointer reads so native code never touches
+  a buffer before its bounds condition has passed.
 
 ## Milestone 4: Developer Experience
 
@@ -366,9 +385,12 @@ Started:
 - Added `tests/conformance/run-abi.ps1`.
 - Added `tests/conformance/run-abi.sh`.
 - Added starter ABI fixtures for struct layout, pointer fields, fixed arrays,
-  and extern C signatures.
+  nested structs, mixed scalar fields, and extern C signatures.
 - Added ABI conformance to GitHub Actions through `cheader` and `abidump`, with
   full local `abiverify` available from the same runner.
+- Expanded ABI runner assertions on Windows and POSIX so header and dump checks
+  cover alignment assertions, array fields, nested struct fields, by-value
+  struct parameters, and pointer parameters.
 - Captured tooling gaps: full `abidump` output still needs strict JSON for
   structured snapshot testing, and hosted-runner `abiverify` needs hardening
   before it becomes a required CI gate.
@@ -474,10 +496,12 @@ A change is done when:
 4. Add diagnostic snapshots for common mistakes.
 5. Add a stable stdlib module inventory. Done for the initial public inventory;
    smoke coverage started with `tests/conformance/stdlib/stable_modules.tn`.
-6. Add native smoke tests for hello, math, strings, loops, structs, and file IO.
-   Done for the initial gate: all are now execution-gated on Windows and Linux.
+6. Add native smoke tests for hello, math, strings, loops, structs, file IO, and
+   portable path helpers. Done for the initial gate: all are now
+   execution-gated on Windows and Linux.
 7. Add an ABI layout test document and starter cases. Started with
-   `tests/conformance/run-abi.ps1` and `tests/conformance/abi/starter_abi.tn`.
+   `tests/conformance/run-abi.ps1`, `tests/conformance/run-abi.sh`, and
+   `tests/conformance/abi/starter_abi.tn`.
 8. Add a platform support matrix.
 9. Add a benchmark harness skeleton. Done: `benchmarks/run.ps1` with TezzNative,
    Python, and C starter fixtures.

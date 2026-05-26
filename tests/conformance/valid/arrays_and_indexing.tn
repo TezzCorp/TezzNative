@@ -1,0 +1,16 @@
+fn main() -> int:
+  values:[int;4]
+  values[0] = 3
+  values[1] = 5
+  values[2] = 7
+  values[3] = 11
+
+  i:int = 0
+  total:int = 0
+  while i < 4:
+    total = total + values[i]
+    i = i + 1
+
+  if total != 26:
+    ret 1
+  ret 0
