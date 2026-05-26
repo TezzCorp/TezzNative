@@ -1,0 +1,10 @@
+import "std"
+import "io"
+import "str"
+import "math"
+import "time"
+import "vec"
+import "arena"
+
+fn main() -> int:
+  ret 0

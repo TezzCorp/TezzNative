@@ -18,6 +18,7 @@ if ([string]::IsNullOrWhiteSpace($Tezzc)) {
 $validDir = Join-Path $PSScriptRoot 'valid'
 $invalidDir = Join-Path $PSScriptRoot 'invalid'
 $diagnosticsDir = Join-Path $PSScriptRoot 'diagnostics'
+$stdlibDir = Join-Path $PSScriptRoot 'stdlib'
 $failed = 0
 
 function Invoke-TezzCheck {
@@ -62,6 +63,23 @@ foreach ($file in Get-ChildItem -LiteralPath $validDir -Filter '*.tn' | Sort-Obj
   Write-Host "FAIL valid/$($file.Name) exit=$($result.ExitCode)"
   Write-TestOutput -Output $result.Output
   $failed++
+}
+
+if (Test-Path -LiteralPath $stdlibDir) {
+  foreach ($file in Get-ChildItem -LiteralPath $stdlibDir -Filter '*.tn' | Sort-Object Name) {
+    $result = Invoke-TezzCheck -Path $file.FullName
+    if ($result.ExitCode -eq 0) {
+      Write-Host "OK stdlib/$($file.Name)"
+      if ($VerboseOutput) {
+        Write-TestOutput -Output $result.Output
+      }
+      continue
+    }
+
+    Write-Host "FAIL stdlib/$($file.Name) exit=$($result.ExitCode)"
+    Write-TestOutput -Output $result.Output
+    $failed++
+  }
 }
 
 foreach ($file in Get-ChildItem -LiteralPath $invalidDir -Filter '*.tn' | Sort-Object Name) {

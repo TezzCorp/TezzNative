@@ -18,7 +18,7 @@ changes.
 | Target | Status | Notes |
 | --- | --- | --- |
 | Windows x64 | Primary | Main packaged SDK and installer target. Native executable flow is the first production hardening target. |
-| Linux x64 | Preview | SDK archive exists. Native executable flow needs repeatable smoke tests before primary status. |
+| Linux x64 | Primary/Beta | Static SDK compiler archive exists. Stable-core, ABI, benchmark fixture checks, and native executable smoke pass under WSL and GitHub Actions. |
 | macOS x64 | Planned | Listed as a target in metadata, but needs packaged toolchain validation. |
 | Linux ARM64 | Planned | Listed as a target in metadata, but not a release gate yet. |
 | macOS ARM64 | Planned | Listed as a target in metadata, but not a release gate yet. |
@@ -29,12 +29,12 @@ changes.
 
 | Area | Windows x64 | Linux x64 | macOS | Notes |
 | --- | --- | --- | --- | --- |
-| Core language | Primary | Preview | Planned | Parser/type checker tests should be platform-independent. |
+| Core language | Primary | Primary | Planned | Stable-core conformance runs on Windows and Linux SDKs. |
 | Bytecode run | Primary | Preview | Planned | Compatibility path while native backend matures. |
-| Native executable | Primary/Beta | Preview/Beta | Planned | Requires native smoke tests per target. |
+| Native executable | Primary/Beta | Primary/Beta | Planned | Hello, loop/math, and struct-array executable smoke tests pass on Windows and Linux x64. |
 | IO/path/process | Beta | Preview | Planned | Needs platform-specific behavior tests. |
 | Networking | Beta | Preview | Planned | Socket and HTTP tests should be added. |
-| TLS | Beta | Preview | Planned | Must document runtime backend and certificate behavior. |
+| TLS | Beta | Preview | Planned | Linux builds without OpenSSL development headers expose unsupported TLS stubs until linked with a TLS backend. |
 | GUI | Beta | Experimental | Planned | Windows host modules are the clearest path today. |
 | TezzDB | Beta | Preview | Planned | Needs database consistency and WAL tests. |
 | GPU/NPU | Experimental | Experimental | Experimental | Backend availability must be reported explicitly. |
@@ -54,7 +54,8 @@ A target should not move to Primary until:
 ## Immediate Improvements
 
 1. Add CI jobs for Windows x64 and Linux x64.
-2. Add native smoke tests for hello, math, strings, loops, structs, and file IO.
+2. Add file IO and string-heavy native smoke tests after the current hello,
+   math/loops, and structs gate.
 3. Publish exact binary names, hashes, and sizes for every download.
 4. Add target-specific notes to docs and download pages.
 5. Fail unsupported targets clearly instead of silently falling back.

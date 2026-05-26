@@ -64,6 +64,7 @@ Typical commands:
 tezzc check hello.tn
 tezzc run hello.tn
 tezzc buildexe hello.tn hello.exe
+tezzc buildexe hello.tn ./hello --target linux
 ```
 
 ## Language Snapshot
@@ -114,9 +115,16 @@ The first public stable-core conformance corpus is available in
 .\tests\conformance\run.ps1
 ```
 
+On Linux or WSL:
+
+```bash
+bash tests/conformance/run.sh ./TezzNative-language/bin/tezzc-linux-x64
+```
+
 Invalid conformance tests may also have diagnostic snippets under
 `tests/conformance/diagnostics/`. GitHub Actions runs the same stable-core
-corpus against the published SDK package.
+corpus, including stable stdlib import smoke tests, against the published
+Windows and Linux SDK packages.
 
 The first native backend smoke lane builds and runs small executable programs:
 
@@ -125,8 +133,14 @@ powershell -ExecutionPolicy Bypass -File .\tests\conformance\run-native-smoke.ps
 ```
 
 CI currently runs the same lane in advisory `-CheckOnly` mode on the hosted
-Windows runner. Local runs can use the default execute mode, `-CheckIrOnly`, or
-`-BuildOnly` for deeper backend verification.
+Windows and Linux runners as an execution gate. Local runs can use the default
+execute mode, `-CheckIrOnly`, or `-BuildOnly` for deeper backend verification.
+
+On Linux or WSL:
+
+```bash
+bash tests/conformance/run-native-smoke.sh ./TezzNative-language/bin/tezzc-linux-x64
+```
 
 The first ABI starter lane checks C header layout assertions plus ABI dump and
 verify behavior:
@@ -137,6 +151,8 @@ powershell -ExecutionPolicy Bypass -File .\tests\conformance\run-abi.ps1
 
 CI uses `-SkipVerify` for this lane until hosted-runner `abiverify` behavior is
 hardened; local full verification is available with the default command above.
+Linux CI runs the POSIX ABI runner with full local `abiverify` against the
+published Linux SDK.
 
 The public benchmark skeleton records environment metadata, bytecode timing,
 native build timing, native run timing, exit codes, and binary size:
@@ -147,6 +163,12 @@ powershell -ExecutionPolicy Bypass -File .\benchmarks\run.ps1
 
 Use `-IncludeExternal` to run the Python and C comparison fixtures when those
 toolchains are available.
+
+On Linux or WSL:
+
+```bash
+bash benchmarks/run.sh ./TezzNative-language/bin/tezzc-linux-x64 --check-only
+```
 
 ## Optimization Roadmap
 

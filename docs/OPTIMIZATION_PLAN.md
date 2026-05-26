@@ -125,6 +125,9 @@ Started:
   cases for arithmetic, control flow, structs, type mismatches, and unknown
   names.
 - Added diagnostic snippet checks for the first invalid conformance cases.
+- Added Windows and POSIX conformance runners.
+- Added a stable stdlib import smoke fixture for `std`, `io`, `str`, `math`,
+  `time`, `vec`, and `arena`.
 
 ## Milestone 2: Native Backend Reliability
 
@@ -173,10 +176,14 @@ Started:
 
 - Added the first native smoke runner:
   `tests/conformance/run-native-smoke.ps1`.
+- Added the POSIX native smoke runner:
+  `tests/conformance/run-native-smoke.sh`.
 - Added native executable smoke cases for hello output, loop/math lowering, and
   struct array field access.
-- Added native-focused check coverage as an advisory Windows GitHub Actions
-  lane, with local IR, build, and execution smoke available from the same runner.
+- Promoted native smoke from advisory syntax coverage to hosted Windows and
+  Linux execution gates.
+- Fixed the shared x64 register allocation surface so Linux ELF output no
+  longer keeps live values in `RDI`/`RSI` across calls.
 
 ## Milestone 3: Standard Library Hardening
 
@@ -357,6 +364,7 @@ Success metric:
 Started:
 
 - Added `tests/conformance/run-abi.ps1`.
+- Added `tests/conformance/run-abi.sh`.
 - Added starter ABI fixtures for struct layout, pointer fields, fixed arrays,
   and extern C signatures.
 - Added ABI conformance to GitHub Actions through `cheader` and `abidump`, with
@@ -403,6 +411,7 @@ Benchmark rules:
 Started:
 
 - Added `benchmarks/run.ps1`.
+- Added `benchmarks/run.sh`.
 - Added source-visible TezzNative, Python, and C starter fixtures for a numeric
   loop benchmark.
 - The harness records OS, architecture, PowerShell version, command, exit code,
@@ -463,9 +472,10 @@ A change is done when:
 2. Add parser success/failure tests.
 3. Add type-checker success/failure tests.
 4. Add diagnostic snapshots for common mistakes.
-5. Add a stable stdlib module inventory.
+5. Add a stable stdlib module inventory. Done for the initial public inventory;
+   smoke coverage started with `tests/conformance/stdlib/stable_modules.tn`.
 6. Add native smoke tests for hello, math, strings, loops, and structs. Started:
-   hello, math/loops, and structs are now covered.
+   hello, math/loops, and structs are now execution-gated on Windows and Linux.
 7. Add an ABI layout test document and starter cases. Started with
    `tests/conformance/run-abi.ps1` and `tests/conformance/abi/starter_abi.tn`.
 8. Add a platform support matrix.

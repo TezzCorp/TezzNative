@@ -89,10 +89,82 @@ jobs:
           Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
           & .\benchmarks\run.ps1 -Tezzc "$env:TEZZC" -CheckOnly
 
-      - name: Run native syntax smoke
-        continue-on-error: true
+      - name: Run native smoke
         shell: powershell
         timeout-minutes: 5
         run: |
           Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
-          & .\tests\conformance\run-native-smoke.ps1 -Tezzc "$env:TEZZC" -CheckOnly
+          & .\tests\conformance\run-native-smoke.ps1 -Tezzc "$env:TEZZC"
+
+  linux-stable-core:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download TezzNative Linux SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk_urls=(
+            "https://tn.tezzcorp.com/api/download_request.php?artifact=linux-sdk&source=github-actions"
+            "https://tn.tezzcorp.com/download/tezznative-sdk-linux.tar.gz"
+          )
+          downloaded=0
+          for sdk_url in "${sdk_urls[@]}"; do
+            for attempt in 1 2 3 4; do
+              rm -f tezznative-sdk-linux.tar.gz
+              echo "Downloading Linux SDK attempt ${attempt} from ${sdk_url}"
+              if curl -fL --retry 2 --retry-delay 5 --connect-timeout 20 --max-time 180 \
+                -A "TezzNative-GitHub-Actions" \
+                -o tezznative-sdk-linux.tar.gz \
+                "${sdk_url}"; then
+                downloaded=1
+                break
+              fi
+              sleep $((5 * attempt))
+            done
+            if [[ "$downloaded" -eq 1 ]]; then
+              break
+            fi
+          done
+          if [[ "$downloaded" -ne 1 ]]; then
+            echo "Unable to download TezzNative Linux SDK from API or static fallback" >&2
+            exit 1
+          fi
+          if ! gzip -t tezznative-sdk-linux.tar.gz; then
+            echo "Downloaded Linux SDK is not a gzip archive" >&2
+            exit 1
+          fi
+          mkdir -p tezznative-sdk
+          tar -xzf tezznative-sdk-linux.tar.gz -C tezznative-sdk
+          find tezznative-sdk -type f -name 'tezzc*' -print
+          compiler="$(find tezznative-sdk -type f \( -name 'tezzc-linux-x64' -o -name 'tezzc' \) | sort | head -n 1)"
+          if [[ -z "$compiler" ]]; then
+            echo "tezzc compiler not found in Linux SDK archive" >&2
+            exit 1
+          fi
+          chmod +x "$compiler"
+          "$compiler" version || true
+          echo "TEZZC=$compiler" >> "$GITHUB_ENV"
+
+      - name: Run stable-core conformance
+        shell: bash
+        timeout-minutes: 5
+        run: bash tests/conformance/run.sh "$TEZZC"
+
+      - name: Run ABI conformance
+        shell: bash
+        timeout-minutes: 5
+        run: bash tests/conformance/run-abi.sh "$TEZZC"
+
+      - name: Check benchmark fixtures
+        shell: bash
+        timeout-minutes: 5
+        run: bash benchmarks/run.sh "$TEZZC" --check-only
+
+      - name: Run native smoke
+        shell: bash
+        timeout-minutes: 5
+        run: bash tests/conformance/run-native-smoke.sh "$TEZZC"

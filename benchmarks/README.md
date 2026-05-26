@@ -35,4 +35,10 @@ Include Python and C comparison fixtures when available:
 powershell -ExecutionPolicy Bypass -File .\benchmarks\run.ps1 -IncludeExternal
 ```
 
+On Linux or WSL, validate the TezzNative benchmark fixture with:
+
+```bash
+bash benchmarks/run.sh ./TezzNative-language/bin/tezzc-linux-x64 --check-only
+```
+
 Results are written to `benchmarks/results/latest.csv` by default.
