@@ -51,7 +51,7 @@ jobs:
         run: |
           pwsh -NoProfile -ExecutionPolicy Bypass -File .\tests\conformance\run.ps1 -Tezzc "$env:TEZZC"
 
-      - name: Run native smoke
+      - name: Run native IR smoke
         shell: pwsh
         run: |
-          pwsh -NoProfile -ExecutionPolicy Bypass -File .\tests\conformance\run-native-smoke.ps1 -Tezzc "$env:TEZZC" -BuildOnly
+          pwsh -NoProfile -ExecutionPolicy Bypass -File .\tests\conformance\run-native-smoke.ps1 -Tezzc "$env:TEZZC" -CheckIrOnly

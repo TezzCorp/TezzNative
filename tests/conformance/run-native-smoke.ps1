@@ -1,6 +1,7 @@
 param(
   [string]$Tezzc = "",
   [string]$Target = "",
+  [switch]$CheckIrOnly,
   [switch]$BuildOnly,
   [switch]$KeepArtifacts,
   [switch]$VerboseOutput
@@ -73,6 +74,22 @@ try {
       Write-Host "FAIL native/$($file.Name) check exit=$($check.ExitCode)"
       Write-TestOutput -Output $check.Output
       $failed++
+      continue
+    }
+
+    if ($CheckIrOnly) {
+      $ir = Invoke-Compiler -CompilerArgs @('ir', $file.FullName, '--repro')
+      if ($ir.ExitCode -ne 0) {
+        Write-Host "FAIL native/$($file.Name) ir exit=$($ir.ExitCode)"
+        Write-TestOutput -Output $ir.Output
+        $failed++
+        continue
+      }
+
+      Write-Host "NATIVE_IR_OK $($file.Name)"
+      if ($VerboseOutput) {
+        Write-TestOutput -Output $ir.Output
+      }
       continue
     }
 
