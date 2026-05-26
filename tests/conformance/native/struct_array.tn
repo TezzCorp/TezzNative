@@ -1,0 +1,9 @@
+struct Slot:
+  value:int
+
+fn main() -> int:
+  slots:[Slot;2]
+  slots[0].value = 3
+  slots[1].value = 4
+  say slots[0].value + slots[1].value
+  ret 0

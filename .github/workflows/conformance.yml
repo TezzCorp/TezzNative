@@ -15,17 +15,43 @@ jobs:
       - name: Download TezzNative SDK
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://tn.tezzcorp.com/api/download_request.php?artifact=windows-sdk&source=github-actions" -OutFile tezznative-sdk.zip
+          $ErrorActionPreference = "Stop"
+          $sdkUrl = "https://tn.tezzcorp.com/api/download_request.php?artifact=windows-sdk&source=github-actions"
+          Invoke-WebRequest -Uri $sdkUrl -MaximumRedirection 5 -OutFile tezznative-sdk.zip
+          $zipPath = (Resolve-Path -LiteralPath tezznative-sdk.zip).Path
+          $bytes = [System.IO.File]::ReadAllBytes($zipPath)
+          if ($bytes.Length -lt 4 -or $bytes[0] -ne 0x50 -or $bytes[1] -ne 0x4B) {
+            $previewLength = [Math]::Min(4, $bytes.Length)
+            $preview = if ($previewLength -gt 0) { $bytes[0..($previewLength - 1)] -join "," } else { "<empty>" }
+            throw "Downloaded SDK is not a ZIP archive. First bytes: $preview"
+          }
           Expand-Archive tezznative-sdk.zip -DestinationPath tezznative-sdk -Force
-          $compiler = Get-ChildItem tezznative-sdk -Recurse -File |
-            Where-Object { $_.Name -in @("tezzc.exe", "tezzc-windows-x64.exe") } |
+          $compilerEntries = Get-ChildItem tezznative-sdk -Recurse -File |
+            Where-Object { $_.Name -like "tezzc*" } |
+            Sort-Object FullName
+          $compilerEntries | ForEach-Object { Write-Host "SDK entry: $($_.FullName) ($($_.Length) bytes)" }
+          $compiler = $compilerEntries |
+            Where-Object { $_.Name -in @("tezzc-windows-x64.exe", "tezzc.exe") } |
+            Sort-Object @{ Expression = { if ($_.Name -eq "tezzc-windows-x64.exe") { 0 } else { 1 } } }, FullName |
             Select-Object -First 1
           if (-not $compiler) {
             throw "tezzc compiler not found in SDK archive"
+          }
+          $probe = Get-ChildItem tezznative-sdk -Recurse -File -Filter tls_connect_ex_probe.tn | Select-Object -First 1
+          if ($probe) {
+            & $compiler.FullName check $probe.FullName
+            if ($LASTEXITCODE -ne 0) {
+              throw "Downloaded SDK compiler failed bundled probe with exit $LASTEXITCODE"
+            }
           }
           "TEZZC=$($compiler.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Run stable-core conformance
         shell: pwsh
         run: |
-          .\tests\conformance\run.ps1 -Tezzc "$env:TEZZC"
+          pwsh -NoProfile -ExecutionPolicy Bypass -File .\tests\conformance\run.ps1 -Tezzc "$env:TEZZC"
+
+      - name: Run native smoke
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File .\tests\conformance\run-native-smoke.ps1 -Tezzc "$env:TEZZC"

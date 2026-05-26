@@ -128,6 +128,8 @@ Started:
 
 ## Milestone 2: Native Backend Reliability
 
+Status: started.
+
 Goal: make native builds dependable for a narrow target set before expanding.
 
 Primary targets:
@@ -166,6 +168,14 @@ Release gate:
 - Native executable output must be reproducible for stable examples.
 - Backend failures must produce clear errors instead of silent bad output.
 - Unsupported targets must fail explicitly.
+
+Started:
+
+- Added the first native smoke runner:
+  `tests/conformance/run-native-smoke.ps1`.
+- Added native executable smoke cases for hello output, loop/math lowering, and
+  struct array field access.
+- Added native smoke execution to the Windows GitHub Actions conformance lane.
 
 ## Milestone 3: Standard Library Hardening
 
@@ -428,7 +438,8 @@ A change is done when:
 3. Add type-checker success/failure tests.
 4. Add diagnostic snapshots for common mistakes.
 5. Add a stable stdlib module inventory.
-6. Add native smoke tests for hello, math, strings, loops, and structs.
+6. Add native smoke tests for hello, math, strings, loops, and structs. Started:
+   hello, math/loops, and structs are now covered.
 7. Add an ABI layout test document and starter cases.
 8. Add a platform support matrix.
 9. Add a benchmark harness skeleton.

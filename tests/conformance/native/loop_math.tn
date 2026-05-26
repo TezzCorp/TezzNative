@@ -1,0 +1,12 @@
+fn sum_squares(n:int) -> int:
+  total:int = 0
+  i:int = 1
+  while i <= n:
+    total = total + (i * i)
+    i = i + 1
+  ret total
+
+fn main() -> int:
+  if sum_squares(5) != 55:
+    ret 1
+  ret 0

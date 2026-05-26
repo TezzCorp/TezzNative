@@ -118,6 +118,12 @@ Invalid conformance tests may also have diagnostic snippets under
 `tests/conformance/diagnostics/`. GitHub Actions runs the same stable-core
 corpus against the published SDK package.
 
+The first native backend smoke lane builds and runs small executable programs:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tests\conformance\run-native-smoke.ps1
+```
+
 ## Optimization Roadmap
 
 The current priority is trust over feature count:
