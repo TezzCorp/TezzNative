@@ -1,6 +1,7 @@
 param(
   [string]$Tezzc = "",
   [string]$Target = "",
+  [switch]$CheckOnly,
   [switch]$CheckIrOnly,
   [switch]$BuildOnly,
   [switch]$KeepArtifacts,
@@ -74,6 +75,14 @@ try {
       Write-Host "FAIL native/$($file.Name) check exit=$($check.ExitCode)"
       Write-TestOutput -Output $check.Output
       $failed++
+      continue
+    }
+
+    if ($CheckOnly) {
+      Write-Host "NATIVE_CHECK_OK $($file.Name)"
+      if ($VerboseOutput) {
+        Write-TestOutput -Output $check.Output
+      }
       continue
     }
 
