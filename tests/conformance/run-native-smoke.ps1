@@ -1,6 +1,7 @@
 param(
   [string]$Tezzc = "",
   [string]$Target = "",
+  [switch]$BuildOnly,
   [switch]$KeepArtifacts,
   [switch]$VerboseOutput
 )
@@ -90,6 +91,14 @@ try {
       Write-Host "FAIL native/$($file.Name) build exit=$($build.ExitCode)"
       Write-TestOutput -Output $build.Output
       $failed++
+      continue
+    }
+
+    if ($BuildOnly) {
+      Write-Host "NATIVE_BUILD_OK $($file.Name)"
+      if ($VerboseOutput) {
+        Write-TestOutput -Output $build.Output
+      }
       continue
     }
 

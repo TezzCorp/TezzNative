@@ -124,6 +124,9 @@ The first native backend smoke lane builds and runs small executable programs:
 powershell -ExecutionPolicy Bypass -File .\tests\conformance\run-native-smoke.ps1
 ```
 
+CI currently uses the same lane in `-BuildOnly` mode to verify native
+`buildexe --verify` output on the hosted Windows runner.
+
 ## Optimization Roadmap
 
 The current priority is trust over feature count:

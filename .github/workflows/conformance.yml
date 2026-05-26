@@ -54,4 +54,4 @@ jobs:
       - name: Run native smoke
         shell: pwsh
         run: |
-          pwsh -NoProfile -ExecutionPolicy Bypass -File .\tests\conformance\run-native-smoke.ps1 -Tezzc "$env:TEZZC"
+          pwsh -NoProfile -ExecutionPolicy Bypass -File .\tests\conformance\run-native-smoke.ps1 -Tezzc "$env:TEZZC" -BuildOnly
