@@ -178,8 +178,8 @@ Started:
   `tests/conformance/run-native-smoke.ps1`.
 - Added the POSIX native smoke runner:
   `tests/conformance/run-native-smoke.sh`.
-- Added native executable smoke cases for hello output, loop/math lowering, and
-  struct array field access.
+- Added native executable smoke cases for hello output, loop/math lowering,
+  string utilities, file read/write, and struct array field access.
 - Promoted native smoke from advisory syntax coverage to hosted Windows and
   Linux execution gates.
 - Fixed the shared x64 register allocation surface so Linux ELF output no
@@ -474,8 +474,8 @@ A change is done when:
 4. Add diagnostic snapshots for common mistakes.
 5. Add a stable stdlib module inventory. Done for the initial public inventory;
    smoke coverage started with `tests/conformance/stdlib/stable_modules.tn`.
-6. Add native smoke tests for hello, math, strings, loops, and structs. Started:
-   hello, math/loops, and structs are now execution-gated on Windows and Linux.
+6. Add native smoke tests for hello, math, strings, loops, structs, and file IO.
+   Done for the initial gate: all are now execution-gated on Windows and Linux.
 7. Add an ABI layout test document and starter cases. Started with
    `tests/conformance/run-abi.ps1` and `tests/conformance/abi/starter_abi.tn`.
 8. Add a platform support matrix.

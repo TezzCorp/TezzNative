@@ -128,8 +128,13 @@ try {
       continue
     }
 
-    $runOutput = & $exePath 2>&1
-    $runExit = $LASTEXITCODE
+    Push-Location -LiteralPath $artifactRoot
+    try {
+      $runOutput = & $exePath 2>&1
+      $runExit = $LASTEXITCODE
+    } finally {
+      Pop-Location
+    }
     if ($runExit -ne 0) {
       Write-Host "FAIL native/$($file.Name) run exit=$runExit"
       Write-TestOutput -Output $runOutput

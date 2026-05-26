@@ -1,0 +1,47 @@
+fn main() -> int:
+  path:str = "tn_native_io_smoke.txt"
+  data:str = "file-io-native"
+  want:int = len(data)
+
+  h:*char = fopen(path, "wb")
+  if h == 0:
+    ret 1
+  wrote:int = fwrite(data, 1, want, h)
+  if wrote != want:
+    fclose(h)
+    ret 2
+  if fclose(h) != 0:
+    ret 3
+
+  h = fopen(path, "rb")
+  if h == 0:
+    ret 4
+  buf:*char
+  unsafe:
+    buf = 0 as *char
+    buf = malloc(want + 1)
+  if buf == 0:
+    fclose(h)
+    ret 5
+  got:int = fread(buf, 1, want, h)
+  if fclose(h) != 0:
+    unsafe:
+      free(buf)
+    ret 6
+  if got != want:
+    unsafe:
+      free(buf)
+    ret 7
+  unsafe:
+    buf[got] = 0 as char
+  same:int = 0
+  unsafe:
+    same = strcmp(buf as str, data)
+  if same != 0:
+    unsafe:
+      free(buf)
+    ret 8
+  unsafe:
+    free(buf)
+  say "file-io-native"
+  ret 0

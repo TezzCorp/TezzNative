@@ -126,15 +126,16 @@ Invalid conformance tests may also have diagnostic snippets under
 corpus, including stable stdlib import smoke tests, against the published
 Windows and Linux SDK packages.
 
-The first native backend smoke lane builds and runs small executable programs:
+The native backend smoke lane builds and runs small executable programs for
+hello output, loops/math, strings, structs, and file IO:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tests\conformance\run-native-smoke.ps1
 ```
 
-CI currently runs the same lane in advisory `-CheckOnly` mode on the hosted
-Windows and Linux runners as an execution gate. Local runs can use the default
-execute mode, `-CheckIrOnly`, or `-BuildOnly` for deeper backend verification.
+CI runs the same lane as a hosted Windows and Linux execution gate. Local runs
+can use the default execute mode, `-CheckIrOnly`, or `-BuildOnly` for deeper
+backend verification.
 
 On Linux or WSL:
 

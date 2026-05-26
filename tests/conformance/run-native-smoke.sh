@@ -85,7 +85,7 @@ for file in "$SMOKE_DIR"/*.tn; do
     continue
   fi
 
-  run_output="$("$exe" 2>&1)"
+  run_output="$(cd "$ARTIFACT_DIR" && "$exe" 2>&1)"
   rc=$?
   if [[ "$rc" -ne 0 ]]; then
     echo "FAIL native/$name run exit=$rc"
