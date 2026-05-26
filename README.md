@@ -135,6 +135,9 @@ verify behavior:
 powershell -ExecutionPolicy Bypass -File .\tests\conformance\run-abi.ps1
 ```
 
+CI uses `-SkipVerify` for this lane until hosted-runner `abiverify` behavior is
+hardened; local full verification is available with the default command above.
+
 The public benchmark skeleton records environment metadata, bytecode timing,
 native build timing, native run timing, exit codes, and binary size:
 

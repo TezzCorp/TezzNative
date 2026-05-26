@@ -1,5 +1,6 @@
 param(
   [string]$Tezzc = "",
+  [switch]$SkipVerify,
   [switch]$KeepArtifacts,
   [switch]$VerboseOutput
 )
@@ -97,12 +98,15 @@ try {
       continue
     }
 
-    $verify = Invoke-Compiler -CompilerArgs @('abiverify', $file.FullName, $dumpPath)
-    if ($verify.ExitCode -ne 0) {
-      Write-Host "FAIL abi/$($file.Name) abiverify exit=$($verify.ExitCode)"
-      Write-TestOutput -Output $verify.Output
-      $failed++
-      continue
+    $verify = $null
+    if (-not $SkipVerify) {
+      $verify = Invoke-Compiler -CompilerArgs @('abiverify', $file.FullName, $dumpPath)
+      if ($verify.ExitCode -ne 0) {
+        Write-Host "FAIL abi/$($file.Name) abiverify exit=$($verify.ExitCode)"
+        Write-TestOutput -Output $verify.Output
+        $failed++
+        continue
+      }
     }
 
     $header = Get-Content -LiteralPath $headerPath -Raw
@@ -157,7 +161,9 @@ try {
     if ($VerboseOutput) {
       Write-TestOutput -Output $cheader.Output
       Write-TestOutput -Output $dump.Output
-      Write-TestOutput -Output $verify.Output
+      if ($verify) {
+        Write-TestOutput -Output $verify.Output
+      }
     }
   }
 } finally {

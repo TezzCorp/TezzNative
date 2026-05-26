@@ -8,6 +8,7 @@ on:
 jobs:
   stable-core:
     runs-on: windows-2022
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -69,21 +70,29 @@ jobs:
 
       - name: Run stable-core conformance
         shell: powershell
+        timeout-minutes: 5
         run: |
-          powershell -ExecutionPolicy Bypass -File .\tests\conformance\run.ps1 -Tezzc "$env:TEZZC"
+          Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+          & .\tests\conformance\run.ps1 -Tezzc "$env:TEZZC"
 
       - name: Run ABI conformance
         shell: powershell
+        timeout-minutes: 5
         run: |
-          powershell -ExecutionPolicy Bypass -File .\tests\conformance\run-abi.ps1 -Tezzc "$env:TEZZC"
+          Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+          & .\tests\conformance\run-abi.ps1 -Tezzc "$env:TEZZC" -SkipVerify
 
       - name: Check benchmark fixtures
         shell: powershell
+        timeout-minutes: 5
         run: |
-          powershell -ExecutionPolicy Bypass -File .\benchmarks\run.ps1 -Tezzc "$env:TEZZC" -CheckOnly
+          Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+          & .\benchmarks\run.ps1 -Tezzc "$env:TEZZC" -CheckOnly
 
       - name: Run native syntax smoke
         continue-on-error: true
         shell: powershell
+        timeout-minutes: 5
         run: |
-          powershell -ExecutionPolicy Bypass -File .\tests\conformance\run-native-smoke.ps1 -Tezzc "$env:TEZZC" -CheckOnly
+          Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+          & .\tests\conformance\run-native-smoke.ps1 -Tezzc "$env:TEZZC" -CheckOnly

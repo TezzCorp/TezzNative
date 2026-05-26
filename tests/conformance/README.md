@@ -44,5 +44,6 @@ ABI starter tests:
 ```
 
 The ABI runner checks generated C header layout assertions, `abidump`, and
-`abiverify`. It uses targeted dump snippets until the full `abidump` output is
-strict JSON.
+`abiverify`. CI may pass `-SkipVerify` until hosted-runner `abiverify` behavior
+is hardened. The runner uses targeted dump snippets until the full `abidump`
+output is strict JSON.

@@ -359,10 +359,11 @@ Started:
 - Added `tests/conformance/run-abi.ps1`.
 - Added starter ABI fixtures for struct layout, pointer fields, fixed arrays,
   and extern C signatures.
-- Added ABI conformance to GitHub Actions through `cheader`, `abidump`, and
-  `abiverify`.
-- Captured a tooling gap: full `abidump` output still needs strict JSON for
-  structured snapshot testing.
+- Added ABI conformance to GitHub Actions through `cheader` and `abidump`, with
+  full local `abiverify` available from the same runner.
+- Captured tooling gaps: full `abidump` output still needs strict JSON for
+  structured snapshot testing, and hosted-runner `abiverify` needs hardening
+  before it becomes a required CI gate.
 
 ## Milestone 8: Benchmarks And Performance Proof
 
