@@ -16,6 +16,7 @@ fi
 
 ABI_DIR="$ROOT/tests/conformance/abi"
 ARTIFACT_DIR="$(mktemp -d)"
+mkdir -p "$ROOT/build"
 failed=0
 
 cleanup() {

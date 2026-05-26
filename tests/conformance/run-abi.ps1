@@ -19,9 +19,11 @@ if ([string]::IsNullOrWhiteSpace($Tezzc)) {
 
 $abiDir = Join-Path $PSScriptRoot 'abi'
 $artifactRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('tezznative-abi-' + [guid]::NewGuid().ToString('N'))
+$repoBuildDir = Join-Path $repoRoot 'build'
 $failed = 0
 
 New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $repoBuildDir | Out-Null
 
 function Invoke-Compiler {
   param([string[]]$CompilerArgs)
