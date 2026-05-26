@@ -16,8 +16,29 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $sdkUrl = "https://tn.tezzcorp.com/api/download_request.php?artifact=windows-sdk&source=github-actions"
-          Invoke-WebRequest -Uri $sdkUrl -MaximumRedirection 5 -OutFile tezznative-sdk.zip
+          $sdkUrls = @(
+            "https://tn.tezzcorp.com/api/download_request.php?artifact=windows-sdk&source=github-actions",
+            "https://tn.tezzcorp.com/download/tezznative-sdk.zip"
+          )
+          $downloaded = $false
+          foreach ($sdkUrl in $sdkUrls) {
+            for ($attempt = 1; $attempt -le 4; $attempt++) {
+              Remove-Item -LiteralPath tezznative-sdk.zip -Force -ErrorAction SilentlyContinue
+              Write-Host "Downloading SDK attempt $attempt from $sdkUrl"
+              & curl.exe -fL --retry 2 --retry-delay 5 --connect-timeout 20 --max-time 180 -A "TezzNative-GitHub-Actions" -o tezznative-sdk.zip $sdkUrl
+              if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath tezznative-sdk.zip)) {
+                $downloaded = $true
+                break
+              }
+              Start-Sleep -Seconds (5 * $attempt)
+            }
+            if ($downloaded) {
+              break
+            }
+          }
+          if (-not $downloaded) {
+            throw "Unable to download TezzNative SDK from API or static fallback"
+          }
           $zipPath = (Resolve-Path -LiteralPath tezznative-sdk.zip).Path
           $bytes = [System.IO.File]::ReadAllBytes($zipPath)
           if ($bytes.Length -lt 4 -or $bytes[0] -ne 0x50 -or $bytes[1] -ne 0x4B) {
