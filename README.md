@@ -128,6 +128,23 @@ CI currently runs the same lane in advisory `-CheckOnly` mode on the hosted
 Windows runner. Local runs can use the default execute mode, `-CheckIrOnly`, or
 `-BuildOnly` for deeper backend verification.
 
+The first ABI starter lane checks C header layout assertions plus ABI dump and
+verify behavior:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tests\conformance\run-abi.ps1
+```
+
+The public benchmark skeleton records environment metadata, bytecode timing,
+native build timing, native run timing, exit codes, and binary size:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\benchmarks\run.ps1
+```
+
+Use `-IncludeExternal` to run the Python and C comparison fixtures when those
+toolchains are available.
+
 ## Optimization Roadmap
 
 The current priority is trust over feature count:

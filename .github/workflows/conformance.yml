@@ -72,6 +72,16 @@ jobs:
         run: |
           pwsh -NoProfile -ExecutionPolicy Bypass -File .\tests\conformance\run.ps1 -Tezzc "$env:TEZZC"
 
+      - name: Run ABI conformance
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File .\tests\conformance\run-abi.ps1 -Tezzc "$env:TEZZC"
+
+      - name: Check benchmark fixtures
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File .\benchmarks\run.ps1 -Tezzc "$env:TEZZC" -CheckOnly
+
       - name: Run native syntax smoke
         continue-on-error: true
         shell: pwsh

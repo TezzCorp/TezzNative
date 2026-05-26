@@ -9,6 +9,8 @@ easy to diagnose.
 - `valid/` contains programs that must pass `tezzc check`.
 - `invalid/` contains programs that must fail `tezzc check`.
 - `diagnostics/` contains expected diagnostic snippets for invalid programs.
+- `native/` contains native-backend smoke programs.
+- `abi/` contains starter C ABI layout and signature fixtures.
 
 ## Runner
 
@@ -28,3 +30,19 @@ falls back to `tezzc` on `PATH`. A custom compiler can be passed explicitly:
 The runner checks diagnostic snippets when `diagnostics/<test-name>.diag.txt`
 exists. The next step is to expand these snippets into full normalized
 snapshots.
+
+Native smoke tests:
+
+```powershell
+.\tests\conformance\run-native-smoke.ps1
+```
+
+ABI starter tests:
+
+```powershell
+.\tests\conformance\run-abi.ps1
+```
+
+The ABI runner checks generated C header layout assertions, `abidump`, and
+`abiverify`. It uses targeted dump snippets until the full `abidump` output is
+strict JSON.

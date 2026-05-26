@@ -1,0 +1,19 @@
+struct AbiPair:
+  left:int
+  right:int
+
+struct AbiBuffer:
+  data:*char
+  len:int
+
+struct AbiPacket:
+  tag:int
+  bytes:[char;8]
+
+@abi("c")
+extern fn abi_pair_sum(p:*AbiPair, factor:int) -> int
+extern fn abi_buffer_len(buf:AbiBuffer) -> int
+extern fn abi_packet_send(pkt:*AbiPacket) -> void
+
+fn main() -> int:
+  ret 0

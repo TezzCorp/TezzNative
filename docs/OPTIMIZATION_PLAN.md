@@ -335,6 +335,8 @@ Success metric:
 
 ## Milestone 7: C Replacement Strategy
 
+Status: started.
+
 Goal: earn trust from C developers with exact layout and ABI behavior.
 
 Required work:
@@ -352,7 +354,19 @@ Success metric:
 
 - A C library author can predict binary layout without guessing.
 
+Started:
+
+- Added `tests/conformance/run-abi.ps1`.
+- Added starter ABI fixtures for struct layout, pointer fields, fixed arrays,
+  and extern C signatures.
+- Added ABI conformance to GitHub Actions through `cheader`, `abidump`, and
+  `abiverify`.
+- Captured a tooling gap: full `abidump` output still needs strict JSON for
+  structured snapshot testing.
+
 ## Milestone 8: Benchmarks And Performance Proof
+
+Status: started.
 
 Goal: publish honest performance data.
 
@@ -384,6 +398,16 @@ Benchmark rules:
 - Do not hide losing results.
 - Separate bytecode mode from native mode.
 - Separate real GPU/NPU backend results from fallback results.
+
+Started:
+
+- Added `benchmarks/run.ps1`.
+- Added source-visible TezzNative, Python, and C starter fixtures for a numeric
+  loop benchmark.
+- The harness records OS, architecture, PowerShell version, command, exit code,
+  elapsed time, and binary size where available.
+- Added CI check-only validation so public benchmark TezzNative sources stay in
+  the supported syntax subset.
 
 ## Milestone 9: Security And Release Engineering
 
@@ -441,9 +465,11 @@ A change is done when:
 5. Add a stable stdlib module inventory.
 6. Add native smoke tests for hello, math, strings, loops, and structs. Started:
    hello, math/loops, and structs are now covered.
-7. Add an ABI layout test document and starter cases.
+7. Add an ABI layout test document and starter cases. Started with
+   `tests/conformance/run-abi.ps1` and `tests/conformance/abi/starter_abi.tn`.
 8. Add a platform support matrix.
-9. Add a benchmark harness skeleton.
+9. Add a benchmark harness skeleton. Done: `benchmarks/run.ps1` with TezzNative,
+   Python, and C starter fixtures.
 10. Publish the roadmap and stability pages on GitHub and tn.tezzcorp.com.
 
 ## Long-Term Release Gates

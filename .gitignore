@@ -11,6 +11,10 @@
 !lib/**
 !docs/
 !docs/*.md
+!benchmarks/
+!benchmarks/**
+benchmarks/results/
+benchmarks/results/**
 !.github/
 !.github/workflows/
 !.github/workflows/conformance.yml
