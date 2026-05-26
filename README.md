@@ -124,8 +124,8 @@ The first native backend smoke lane builds and runs small executable programs:
 powershell -ExecutionPolicy Bypass -File .\tests\conformance\run-native-smoke.ps1
 ```
 
-CI currently uses the same lane in `-CheckOnly` mode on the hosted Windows
-runner. Local runs can use the default execute mode, `-CheckIrOnly`, or
+CI currently runs the same lane in advisory `-CheckOnly` mode on the hosted
+Windows runner. Local runs can use the default execute mode, `-CheckIrOnly`, or
 `-BuildOnly` for deeper backend verification.
 
 ## Optimization Roadmap

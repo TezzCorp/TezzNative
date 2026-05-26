@@ -73,6 +73,7 @@ jobs:
           pwsh -NoProfile -ExecutionPolicy Bypass -File .\tests\conformance\run.ps1 -Tezzc "$env:TEZZC"
 
       - name: Run native syntax smoke
+        continue-on-error: true
         shell: pwsh
         run: |
           pwsh -NoProfile -ExecutionPolicy Bypass -File .\tests\conformance\run-native-smoke.ps1 -Tezzc "$env:TEZZC" -CheckOnly

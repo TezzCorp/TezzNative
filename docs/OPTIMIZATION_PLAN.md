@@ -175,7 +175,7 @@ Started:
   `tests/conformance/run-native-smoke.ps1`.
 - Added native executable smoke cases for hello output, loop/math lowering, and
   struct array field access.
-- Added native-focused check coverage to the Windows GitHub Actions conformance
+- Added native-focused check coverage as an advisory Windows GitHub Actions
   lane, with local IR, build, and execution smoke available from the same runner.
 
 ## Milestone 3: Standard Library Hardening
