@@ -190,6 +190,11 @@ Started:
   Linux execution gates.
 - Fixed the shared x64 register allocation surface so Linux ELF output no
   longer keeps live values in `RDI`/`RSI` across calls.
+- Fixed Linux/macOS native allocator lowering so `malloc(size)` calls the
+  Tezz allocator ABI with the requested size instead of the Windows
+  `VirtualAlloc` argument shape.
+- Hardened Linux/macOS native `fread`/`fwrite` guard jumps so null and
+  zero-length calls return deterministically.
 - Hardened `io.path_join_p` to use a single allocation/copy path and tightened
   `io.path_norm_p` pointer guards so portable path helpers pass native smoke on
   Windows and Linux x64.
@@ -261,7 +266,7 @@ Started:
   integer vectors, and `arena` allocation/reset workflows.
 - Hardened `io.File` wrapper ownership/failure behavior so failed opens return
   null and null handles do not reach low-level runtime calls; native smoke now
-  gates wrapper open/write/flush/seek/tell/close plus null-read guards.
+  gates wrapper open/write/read/flush/seek/tell/close plus null-read guards.
 - Reworked `io.path_join_p` to avoid intermediate ownership ambiguity and
   reduce allocations.
 - Reworked `io.path_norm_p` guarded pointer reads so native code never touches

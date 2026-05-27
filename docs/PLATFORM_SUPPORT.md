@@ -33,7 +33,7 @@ changes.
 | Bytecode run | Primary | Preview | Planned | Compatibility path while native backend matures. |
 | Native executable | Primary/Beta | Primary/Beta | Planned | Hello, loop/math, math-module, string, string-transform, struct-array, raw/wrapped file IO, portable path, vector, arena, and time executable smoke tests pass on Windows and Linux x64. |
 | Time/date runtime | Beta | Beta | Planned | `time` imports and native clock/sleep/UTC-date execution are gated on Windows/Linux x64; local timezone formatting remains preview. |
-| IO/path/process | Beta | Preview | Planned | Raw file read/write, selected File wrapper paths, and portable path helpers have native smoke coverage; directory listing, process behavior, and full wrapped-read backend behavior still need platform-specific tests. |
+| IO/path/process | Beta | Preview | Planned | Raw file read/write, File wrapper open/write/read/flush/seek/tell/close, and portable path helpers have native smoke coverage; directory listing and process behavior still need platform-specific tests. |
 | Networking | Beta | Preview | Planned | Socket and HTTP tests should be added. |
 | TLS | Beta | Preview | Planned | Linux builds without OpenSSL development headers expose unsupported TLS stubs until linked with a TLS backend. |
 | GUI | Beta | Experimental | Planned | Windows host modules are the clearest path today. |

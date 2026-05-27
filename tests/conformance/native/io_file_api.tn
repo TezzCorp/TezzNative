@@ -42,23 +42,25 @@ fn main() -> int:
     ret 9
   if io.file_tell(inp) != 0:
     ret 10
-  if io.file_close(inp) != 0:
-    ret 15
 
   buf:*char
   unsafe:
     buf = malloc(want + 1)
   if buf == 0:
     ret 11
-  raw:*char = fopen(path, "rb")
-  if raw == 0:
-    ret 17
-  got:int = fread(buf, 1, want, raw)
-  fclose(raw)
+  got:int = io.file_read(inp, buf, want)
   if got != want:
     unsafe:
       free(buf)
     ret 12
+  if io.file_tell(inp) != want:
+    unsafe:
+      free(buf)
+    ret 17
+  if io.file_close(inp) != 0:
+    unsafe:
+      free(buf)
+    ret 15
   unsafe:
     buf[got] = 0 as char
   same:int = 0
