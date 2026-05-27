@@ -40,8 +40,9 @@ These surfaces are useful today but need more conformance tests:
 - `fmt` and `lint`
 - `io`, `str`, `math`, `vec`, `arena`, `time`; imports plus selected native
   executable smoke for file IO, portable paths, math helpers, string
-  transforms, vectors, arenas, and `time` clock/sleep helpers are gated across
-  both primary x64 targets; native date formatting remains preview
+  transforms, vectors, arenas, and `time` clock/sleep/UTC-date helpers are
+  gated across both primary x64 targets; local timezone formatting remains
+  preview
 - `net`, `tls`, `tezzserve`, `tezzapi`
 - `tezzdb` and `tezzdbql`
 - GUI modules on supported host platforms

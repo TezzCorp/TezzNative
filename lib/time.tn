@@ -14,8 +14,82 @@ fn now_ms() -> int:
 fn now_ns() -> int:
   ret time_now_ns()
 
+fn _time_digit(n:int) -> char:
+  ret (48 + n) as char
+
+fn _time_put2(out:*char, off:int, n:int) -> int:
+  if out == 0:
+    ret 0
+  if n < 0:
+    n = 0
+  unsafe:
+    out[off] = _time_digit((n / 10) % 10)
+    out[off + 1] = _time_digit(n % 10)
+  ret 0
+
+fn _time_put4(out:*char, off:int, n:int) -> int:
+  if out == 0:
+    ret 0
+  if n < 0:
+    n = 0
+  unsafe:
+    out[off] = _time_digit((n / 1000) % 10)
+    out[off + 1] = _time_digit((n / 100) % 10)
+    out[off + 2] = _time_digit((n / 10) % 10)
+    out[off + 3] = _time_digit(n % 10)
+  ret 0
+
+fn _time_format_utc_from_unix(sec:int) -> str:
+  if sec < 0:
+    sec = 0
+
+  days:int = sec / 86400
+  rem:int = sec - (days * 86400)
+  hour:int = rem / 3600
+  rem = rem - (hour * 3600)
+  minute:int = rem / 60
+  second:int = rem - (minute * 60)
+
+  z:int = days + 719468
+  era:int = z / 146097
+  doe:int = z - (era * 146097)
+  yoe:int = (doe - (doe / 1460) + (doe / 36524) - (doe / 146096)) / 365
+  year:int = yoe + (era * 400)
+  doy:int = doe - ((365 * yoe) + (yoe / 4) - (yoe / 100))
+  mp:int = ((5 * doy) + 2) / 153
+  day:int = doy - (((153 * mp) + 2) / 5) + 1
+  month:int = mp + 3
+  if mp >= 10:
+    month = mp - 9
+  if month <= 2:
+    year = year + 1
+
+  out:*char = malloc(20)
+  if out == 0:
+    ret 0 as str
+
+  _time_put4(out, 0, year)
+  unsafe:
+    out[4] = 45 as char
+  _time_put2(out, 5, month)
+  unsafe:
+    out[7] = 45 as char
+  _time_put2(out, 8, day)
+  unsafe:
+    out[10] = 32 as char
+  _time_put2(out, 11, hour)
+  unsafe:
+    out[13] = 58 as char
+  _time_put2(out, 14, minute)
+  unsafe:
+    out[16] = 58 as char
+  _time_put2(out, 17, second)
+  unsafe:
+    out[19] = 0 as char
+  ret out as str
+
 fn date_local() -> str:
   ret date_now()
 
 fn date_utc() -> str:
-  ret date_now_utc()
+  ret _time_format_utc_from_unix(now())

@@ -268,9 +268,9 @@ Started:
   both Windows PE and Linux ELF native codegen.
 - Removed the demo `main` from `lib/math.tn` so `math` stays a library-only
   import surface.
-- Closed the first native `time` gap: Windows/Linux x64 now gate clock and
-  sleep helpers in native smoke; native date formatting remains a targeted
-  runtime-backend follow-up.
+- Closed the first native `time` gaps: Windows/Linux x64 now gate clock,
+  sleep, and UTC date-format helpers in native smoke; local timezone formatting
+  remains a targeted runtime-backend follow-up.
 
 ## Milestone 4: Developer Experience
 

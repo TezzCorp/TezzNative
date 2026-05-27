@@ -19,5 +19,31 @@ fn main() -> int:
   if ns < ms * 1000000:
     ret 6
 
+  utc:str = time.date_utc()
+  if utc == 0:
+    ret 7
+  if len(utc) != 19:
+    unsafe:
+      free(utc)
+    ret 8
+  unsafe:
+    if utc[4] != 45 as char:
+      free(utc)
+      ret 9
+    if utc[7] != 45 as char:
+      free(utc)
+      ret 10
+    if utc[10] != 32 as char:
+      free(utc)
+      ret 11
+    if utc[13] != 58 as char:
+      free(utc)
+      ret 12
+    if utc[16] != 58 as char:
+      free(utc)
+      ret 13
+  unsafe:
+    free(utc)
+
   say "time-module"
   ret 0
