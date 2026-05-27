@@ -1,0 +1,71 @@
+import "io"
+
+fn main() -> int:
+  null_file:*File
+  unsafe:
+    null_file = 0 as *File
+  if io.file_write_line(null_file, "x") != (0 - 1):
+    ret 1
+  if io.file_read_line(null_file) != 0:
+    ret 2
+
+  path:str = "tn_native_io_line_api.txt"
+  out:*File = io.open_w(path)
+  if out == 0:
+    ret 3
+  if io.file_write_line(out, "alpha") != 0:
+    ret 4
+  if io.file_write_line(out, "beta") != 0:
+    ret 5
+  if io.file_close(out) != 0:
+    ret 6
+
+  inp:*File = io.open_r(path)
+  if inp == 0:
+    ret 7
+  first:str = io.file_read_line(inp)
+  if first == 0:
+    ret 8
+  second:str = io.file_read_line(inp)
+  if second == 0:
+    unsafe:
+      free(first)
+    ret 9
+  same:int = 0
+  unsafe:
+    same = strcmp(first, "alpha")
+  if same != 0:
+    unsafe:
+      free(first)
+      free(second)
+    ret 10
+  unsafe:
+    same = strcmp(second, "beta")
+  if same != 0:
+    unsafe:
+      free(first)
+      free(second)
+    ret 11
+  third:str = io.file_read_line(inp)
+  if third != 0:
+    unsafe:
+      free(first)
+      free(second)
+      free(third)
+    ret 12
+  if io.file_eof(inp) == 0:
+    unsafe:
+      free(first)
+      free(second)
+    ret 13
+  if io.file_close(inp) != 0:
+    unsafe:
+      free(first)
+      free(second)
+    ret 14
+  unsafe:
+    free(first)
+    free(second)
+
+  say "io-line-api"
+  ret 0

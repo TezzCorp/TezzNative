@@ -104,12 +104,25 @@ fn file_write(f:*File, buf:*char, n:int) -> int:
   ret fwrite(buf, 1, n, h)
 
 fn file_write_line(f:*File, s:str) -> int:
-  if f == 0:
+  if f == 0 || s == 0:
     ret 0 - 1
   if (*f).h == 0 as *char:
     ret 0 - 1
   h:*char = (*f).h
-  ret write_line(h, s)
+  n:int = len(s)
+  p:*char
+  unsafe:
+    p = s as *char
+  if n > 0:
+    if fwrite(p, 1, n, h) != n:
+      ret 0 - 1
+  nl:str = "\n"
+  np:*char
+  unsafe:
+    np = nl as *char
+  if fwrite(np, 1, 1, h) != 1:
+    ret 0 - 1
+  ret 0
 
 fn file_read_line(f:*File) -> str:
   if f == 0:
@@ -117,7 +130,58 @@ fn file_read_line(f:*File) -> str:
   if (*f).h == 0 as *char:
     ret 0 as str
   h:*char = (*f).h
-  ret read_line(h)
+  cap:int = 128
+  line:*char = malloc(cap)
+  if line == 0:
+    ret 0 as str
+  one:*char = malloc(1)
+  if one == 0:
+    free(line)
+    ret 0 as str
+  used:int = 0
+  for ;;:
+    got:int = fread(one, 1, 1, h)
+    if got <= 0:
+      free(one)
+      if used == 0:
+        free(line)
+        ret 0 as str
+      unsafe:
+        line[used] = 0 as char
+      ret line as str
+    ch:int = 0
+    unsafe:
+      ch = one[0] as int
+    if ch == 10:
+      break
+    if ch == 13:
+      got = fread(one, 1, 1, h)
+      if got == 1:
+        next:int = 0
+        unsafe:
+          next = one[0] as int
+        if next != 10:
+          fseek(h, 0 - 1, SEEK_CUR)
+      break
+    if used + 1 >= cap:
+      new_cap:int = cap * 2
+      new_line:*char = malloc(new_cap)
+      if new_line == 0:
+        free(one)
+        free(line)
+        ret 0 as str
+      if used > 0:
+        memcpy(new_line, line, used)
+      free(line)
+      line = new_line
+      cap = new_cap
+    unsafe:
+      line[used] = one[0]
+    used += 1
+  free(one)
+  unsafe:
+    line[used] = 0 as char
+  ret line as str
 
 fn file_seek(f:*File, off:int, whence:int) -> int:
   if f == 0:

@@ -43,8 +43,9 @@ exists. The next step is to expand these snippets into full normalized
 snapshots.
 
 Native smoke tests cover executable hello output, loops/math, deterministic
-`math` helpers, strings and string transforms, struct-array field access, raw
-and wrapped file IO, portable path helpers, vectors, arenas, and time clock/sleep/UTC-date helpers:
+`math` helpers, strings and string transforms, struct-array field access, raw,
+wrapped, and line-oriented file IO, portable path helpers, vectors, arenas, and
+time clock/sleep/UTC-date helpers:
 
 ```powershell
 .\tests\conformance\run-native-smoke.ps1

@@ -184,8 +184,8 @@ Started:
   `tests/conformance/run-native-smoke.sh`.
 - Added native executable smoke cases for hello output, loop/math lowering,
   deterministic `math` module helpers, string utilities and transforms, file
-  read/write, portable path helpers, vector/arena allocation, and struct array
-  field access.
+  read/write and line wrappers, portable path helpers, vector/arena allocation,
+  and struct array field access.
 - Promoted native smoke from advisory syntax coverage to hosted Windows and
   Linux execution gates.
 - Fixed the shared x64 register allocation surface so Linux ELF output no
@@ -195,6 +195,9 @@ Started:
   `VirtualAlloc` argument shape.
 - Hardened Linux/macOS native `fread`/`fwrite` guard jumps so null and
   zero-length calls return deterministically.
+- Reworked `io.File` line wrappers to use the guarded byte IO path instead of
+  backend-specific line helpers, making read/write-line behavior portable across
+  the Windows and Linux x64 native targets.
 - Hardened `io.path_join_p` to use a single allocation/copy path and tightened
   `io.path_norm_p` pointer guards so portable path helpers pass native smoke on
   Windows and Linux x64.
@@ -266,7 +269,8 @@ Started:
   integer vectors, and `arena` allocation/reset workflows.
 - Hardened `io.File` wrapper ownership/failure behavior so failed opens return
   null and null handles do not reach low-level runtime calls; native smoke now
-  gates wrapper open/write/read/flush/seek/tell/close plus null-read guards.
+  gates wrapper open/write/read/write-line/read-line/flush/seek/tell/close plus
+  null-read and EOF guards.
 - Reworked `io.path_join_p` to avoid intermediate ownership ambiguity and
   reduce allocations.
 - Reworked `io.path_norm_p` guarded pointer reads so native code never touches
