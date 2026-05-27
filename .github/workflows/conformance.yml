@@ -140,7 +140,10 @@ jobs:
           mkdir -p tezznative-sdk
           tar -xzf tezznative-sdk-linux.tar.gz -C tezznative-sdk
           find tezznative-sdk -type f -name 'tezzc*' -print
-          compiler="$(find tezznative-sdk -type f \( -name 'tezzc-linux-x64' -o -name 'tezzc' \) | sort | head -n 1)"
+          compiler="$(find tezznative-sdk -type f -name 'tezzc-linux-x64' | sort | sed -n '1p')"
+          if [[ -z "$compiler" ]]; then
+            compiler="$(find tezznative-sdk -type f -name 'tezzc' | sort | sed -n '1p')"
+          fi
           if [[ -z "$compiler" ]]; then
             echo "tezzc compiler not found in Linux SDK archive" >&2
             exit 1
