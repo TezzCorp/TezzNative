@@ -1,0 +1,23 @@
+import "time"
+
+fn main() -> int:
+  if time.sleep(0) != 0:
+    ret 1
+
+  sec:int = time.now()
+  ms:int = time.now_ms()
+  ns:int = time.now_ns()
+
+  if sec <= 0:
+    ret 2
+  if ms <= 0:
+    ret 3
+  if ns <= 0:
+    ret 4
+  if ms < sec * 1000:
+    ret 5
+  if ns < ms * 1000000:
+    ret 6
+
+  say "time-module"
+  ret 0

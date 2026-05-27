@@ -40,8 +40,8 @@ These surfaces are useful today but need more conformance tests:
 - `fmt` and `lint`
 - `io`, `str`, `math`, `vec`, `arena`, `time`; imports plus selected native
   executable smoke for file IO, portable paths, math helpers, string
-  transforms, vectors, and arenas are gated; `time` is import-checked but not
-  native-execution gated across both primary targets yet
+  transforms, vectors, arenas, and `time` clock/sleep helpers are gated across
+  both primary x64 targets; native date formatting remains preview
 - `net`, `tls`, `tezzserve`, `tezzapi`
 - `tezzdb` and `tezzdbql`
 - GUI modules on supported host platforms
@@ -75,7 +75,7 @@ risk. They should not be treated as guaranteed production APIs.
   pointers, and function signatures.
 - Add native executable stress tests for Windows and Linux x86_64 beyond the
   current hello, loop/math, math-module, string, struct, file IO, portable
-  path, vector, and arena smoke.
+  path, vector, arena, and time smoke.
 - Add module-level stdlib checks for stable and beta modules.
 - Add docs for every stable public function.
 - Publish benchmark and platform support matrices.

@@ -268,9 +268,9 @@ Started:
   both Windows PE and Linux ELF native codegen.
 - Removed the demo `main` from `lib/math.tn` so `math` stays a library-only
   import surface.
-- Captured the current `time` gap: runtime clock/date/sleep functions remain
-  import-checked but are not yet native-execution gated across Windows and
-  Linux.
+- Closed the first native `time` gap: Windows/Linux x64 now gate clock and
+  sleep helpers in native smoke; native date formatting remains a targeted
+  runtime-backend follow-up.
 
 ## Milestone 4: Developer Experience
 
@@ -507,8 +507,8 @@ A change is done when:
 5. Add a stable stdlib module inventory. Done for the initial public inventory;
    smoke coverage started with `tests/conformance/stdlib/stable_modules.tn`.
 6. Add native smoke tests for hello, math, strings, loops, structs, file IO,
-   portable path helpers, vectors, and arenas. Done for the initial gate:
-   deterministic math/string/io/path/vec/arena workflows are now
+   portable path helpers, vectors, arenas, and time. Done for the initial gate:
+   deterministic math/string/io/path/time/vec/arena workflows are now
    execution-gated on Windows and Linux.
 7. Add an ABI layout test document and starter cases. Started with
    `tests/conformance/run-abi.ps1`, `tests/conformance/run-abi.sh`, and

@@ -21,7 +21,7 @@ trust in the stable core.
 | `io` | Files, paths, streams, basic OS IO | File read/write and portable path helpers are native-smoke gated; add directory listing and OS-backed path tests next. |
 | `str` | String helpers | Native search/prefix/suffix plus trim/case/slice/replace/repeat/pad/parse smoke is gated; add broader edge-case tests. |
 | `math` | Numeric helpers | Native integer, float, divmod, aggregate, and dot-product smoke is gated; add trigonometry/log/edge-case tests. |
-| `time` | Time and sleep helpers | Import smoke is gated; native runtime clock/date/sleep behavior needs target-specific backend fixes before promotion. |
+| `time` | Time and sleep helpers | Import smoke plus native clock/sleep smoke are gated on Windows/Linux x64; native date formatting still needs target-specific backend work before promotion. |
 | `vec` | Dynamic vector utilities | Native integer vector push/get/set/pop/free smoke is gated; add generic insert/remove/find tests. |
 | `arena` | Arena allocation helpers | Native allocation/alignment/strdup/mark/release/reset smoke is gated; add wrapped-buffer tests. |
 
@@ -74,7 +74,7 @@ A module can move toward Stable Candidate only when:
 ## Immediate Improvements
 
 1. Add deeper module smoke tests for `io`, `str`, `math`, `time`, `vec`, and
-   `arena`; first native `io`/`str`/`math`/`vec`/`arena` coverage is now
+   `arena`; first native `io`/`str`/`math`/`time`/`vec`/`arena` coverage is now
    gated.
 2. Document fallback behavior for `gpu`, `npu`, `tls`, and GUI modules.
 3. Reduce default prelude risk by separating stable and experimental imports.
