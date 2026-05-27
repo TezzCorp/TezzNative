@@ -539,7 +539,12 @@ fn stream_writer_open(path:str) -> *StreamWriter:
   ret sw
 
 fn _sw_flush(sw:*StreamWriter) -> int:
-  if sw == 0 || (*sw).buf_len <= 0:
+  if sw == 0:
+    ret 0 - 1
+  if (*sw).h == 0 as *char || (*sw).buf == 0:
+    (*sw).error = 1
+    ret 0 - 1
+  if (*sw).buf_len <= 0:
     ret 0
   w:int = fwrite((*sw).buf, 1, (*sw).buf_len, (*sw).h)
   if w != (*sw).buf_len:
@@ -552,6 +557,9 @@ fn _sw_flush(sw:*StreamWriter) -> int:
 fn stream_write(sw:*StreamWriter, data:*char, n:int) -> int:
   if sw == 0 || data == 0 || n <= 0:
     ret 0
+  if (*sw).h == 0 as *char || (*sw).buf == 0 || (*sw).buf_cap <= 0:
+    (*sw).error = 1
+    ret 0 - 1
   if (*sw).error != 0:
     ret 0 - 1
   written:int = 0
@@ -597,6 +605,9 @@ fn stream_write_i64_le(sw:*StreamWriter, v:int) -> int:
 fn stream_flush(sw:*StreamWriter) -> int:
   if sw == 0:
     ret 0 - 1
+  if (*sw).h == 0 as *char:
+    (*sw).error = 1
+    ret 0 - 1
   r:int = _sw_flush(sw)
   if r != 0:
     ret r
@@ -615,10 +626,17 @@ fn stream_writer_total(sw:*StreamWriter) -> int:
 fn stream_writer_close(sw:*StreamWriter) -> int:
   if sw == 0:
     ret 0 - 1
-  _sw_flush(sw)
-  fclose((*sw).h)
-  free((*sw).buf)
+  r:int = _sw_flush(sw)
+  c:int = 0
+  if (*sw).h != 0 as *char:
+    c = fclose((*sw).h)
+    (*sw).h = 0 as *char
+  if (*sw).buf != 0:
+    free((*sw).buf)
+    (*sw).buf = 0 as *char
   free(sw)
+  if r != 0 || c != 0:
+    ret 0 - 1
   ret 0
 
 // ─────────────────────────────────────────────────────────────
@@ -935,7 +953,19 @@ fn move_file(src:str, dst:str) -> int:
   ret 0
 
 fn file_size_bytes(path:str) -> int:
-  ret file_size(path)
+  if path == 0:
+    ret 0 - 1
+  h:*char = fopen(path, "rb")
+  if h == 0 as *char:
+    ret 0 - 1
+  if fseek(h, 0, SEEK_END) != 0:
+    fclose(h)
+    ret 0 - 1
+  sz:int = ftell(h)
+  fclose(h)
+  if sz < 0:
+    ret 0 - 1
+  ret sz
 
 fn file_exists(path:str) -> int:
   ret path_exists(path)
@@ -1005,14 +1035,14 @@ fn walk_dir_ex(path:str, cb:fn(str, int)->int) -> int:
     c:int = (lst as *char)[i] as int
     if c == 0:
       if start != (lst as *char) + i:
-        sz:int = file_size(start as str)
+        sz:int = file_size_bytes(start as str)
         if cb(start as str, sz) != 0:
           free(lst)
           ret 1
       break
     if c == 10:
       (lst as *char)[i] = 0 as char
-      sz2:int = file_size(start as str)
+      sz2:int = file_size_bytes(start as str)
       if cb(start as str, sz2) != 0:
         free(lst)
         ret 1
