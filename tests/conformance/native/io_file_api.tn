@@ -1,0 +1,76 @@
+import "io"
+
+fn main() -> int:
+  missing:*File = io.open_r("tn_native_missing_file_api.nope")
+  if missing != 0:
+    io.file_close(missing)
+    ret 1
+  if io.file_valid(missing) != 0:
+    ret 2
+  null_file:*File
+  null_buf:*char
+  unsafe:
+    null_file = 0 as *File
+    null_buf = 0 as *char
+  if io.file_read(null_file, null_buf, 1) != 0:
+    ret 16
+
+  path:str = "tn_native_io_api.txt"
+  data:str = "io-file-api"
+  want:int = len(data)
+
+  out:*File = io.open_w(path)
+  if out == 0:
+    ret 3
+  if io.file_valid(out) == 0:
+    ret 4
+  data_ptr:*char
+  unsafe:
+    data_ptr = data as *char
+  wrote:int = io.file_write(out, data_ptr, want)
+  if wrote != want:
+    ret 5
+  if io.file_flush(out) != 0:
+    ret 6
+  if io.file_close(out) != 0:
+    ret 7
+
+  inp:*File = io.open_r(path)
+  if inp == 0:
+    ret 8
+  if io.file_seek(inp, 0, io.seek_set()) != 0:
+    ret 9
+  if io.file_tell(inp) != 0:
+    ret 10
+  if io.file_close(inp) != 0:
+    ret 15
+
+  buf:*char
+  unsafe:
+    buf = malloc(want + 1)
+  if buf == 0:
+    ret 11
+  raw:*char = fopen(path, "rb")
+  if raw == 0:
+    ret 17
+  got:int = fread(buf, 1, want, raw)
+  fclose(raw)
+  if got != want:
+    unsafe:
+      free(buf)
+    ret 12
+  unsafe:
+    buf[got] = 0 as char
+  same:int = 0
+  unsafe:
+    same = strcmp(buf as str, data)
+  if same != 0:
+    unsafe:
+      free(buf)
+    ret 13
+
+  unsafe:
+    free(buf)
+
+  say "io-file-api"
+  ret 0

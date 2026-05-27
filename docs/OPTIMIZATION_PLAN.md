@@ -259,6 +259,9 @@ Started:
 - Added native executable smoke for `str` helpers, file read/write through C
   runtime IO, portable `io` path helpers, deterministic `math` helpers, `vec`
   integer vectors, and `arena` allocation/reset workflows.
+- Hardened `io.File` wrapper ownership/failure behavior so failed opens return
+  null and null handles do not reach low-level runtime calls; native smoke now
+  gates wrapper open/write/flush/seek/tell/close plus null-read guards.
 - Reworked `io.path_join_p` to avoid intermediate ownership ambiguity and
   reduce allocations.
 - Reworked `io.path_norm_p` guarded pointer reads so native code never touches
@@ -508,7 +511,7 @@ A change is done when:
    smoke coverage started with `tests/conformance/stdlib/stable_modules.tn`.
 6. Add native smoke tests for hello, math, strings, loops, structs, file IO,
    portable path helpers, vectors, arenas, and time. Done for the initial gate:
-   deterministic math/string/io/path/time/vec/arena workflows are now
+   deterministic math/string/io wrapper/path/time/vec/arena workflows are now
    execution-gated on Windows and Linux.
 7. Add an ABI layout test document and starter cases. Started with
    `tests/conformance/run-abi.ps1`, `tests/conformance/run-abi.sh`, and

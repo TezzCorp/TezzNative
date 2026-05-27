@@ -18,7 +18,7 @@ trust in the stable core.
 | Module | Purpose | Next Hardening Step |
 | --- | --- | --- |
 | `std` | Common prelude and helpers | Keep imports predictable; consider separating experimental imports later. |
-| `io` | Files, paths, streams, basic OS IO | File read/write and portable path helpers are native-smoke gated; add directory listing and OS-backed path tests next. |
+| `io` | Files, paths, streams, basic OS IO | Raw file read/write, File wrapper open/write/flush/seek/tell/close, failed-open/null guards, and portable path helpers are native-smoke gated; add directory listing and full wrapped-read backend tests next. |
 | `str` | String helpers | Native search/prefix/suffix plus trim/case/slice/replace/repeat/pad/parse smoke is gated; add broader edge-case tests. |
 | `math` | Numeric helpers | Native integer, float, divmod, aggregate, and dot-product smoke is gated; add trigonometry/log/edge-case tests. |
 | `time` | Time and sleep helpers | Import smoke plus native clock/sleep/UTC-date smoke are gated on Windows/Linux x64; local timezone formatting still needs target-specific backend work before promotion. |

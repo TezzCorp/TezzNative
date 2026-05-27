@@ -42,13 +42,25 @@ struct File:
   owned:int
 
 fn file_open(path:str, mode:str) -> *File:
+  if path == 0 || mode == 0:
+    ret 0 as *File
+  h:*char = fopen(path, mode)
+  if h == 0 as *char:
+    ret 0 as *File
   f:*File = (*File)malloc(sizeof(File))
-  (*f).h = fopen(path, mode)
+  if f == 0:
+    fclose(h)
+    ret 0 as *File
+  (*f).h = h
   (*f).owned = 1
   ret f
 
 fn file_from_handle(h:*char) -> *File:
+  if h == 0 as *char:
+    ret 0 as *File
   f:*File = (*File)malloc(sizeof(File))
+  if f == 0:
+    ret 0 as *File
   (*f).h = h
   (*f).owned = 0
   ret f
@@ -57,52 +69,79 @@ fn file_close(f:*File) -> int:
   if f == 0:
     ret 0 - 1
   r:int = 0
-  if (*f).owned != 0:
+  if (*f).owned != 0 && (*f).h != 0 as *char:
     r = fclose((*f).h)
+  (*f).h = 0 as *char
   free(f)
   ret r
 
 fn file_flush(f:*File) -> int:
   if f == 0:
     ret 0 - 1
-  ret fflush((*f).h)
+  if (*f).h == 0 as *char:
+    ret 0 - 1
+  h:*char = (*f).h
+  ret fflush(h)
 
 fn file_read(f:*File, buf:*char, n:int) -> int:
-  if f == 0:
+  if f == 0 || buf == 0:
+    ret 0
+  if (*f).h == 0 as *char:
     ret 0
   if n <= 0:
     ret 0
-  ret fread(buf, 1, n, (*f).h)
+  h:*char = (*f).h
+  ret fread(buf, 1, n, h)
 
 fn file_write(f:*File, buf:*char, n:int) -> int:
-  if f == 0:
+  if f == 0 || buf == 0:
     ret 0
-  ret fwrite(buf, 1, n, (*f).h)
+  if (*f).h == 0 as *char:
+    ret 0
+  if n <= 0:
+    ret 0
+  h:*char = (*f).h
+  ret fwrite(buf, 1, n, h)
 
 fn file_write_line(f:*File, s:str) -> int:
   if f == 0:
     ret 0 - 1
-  ret write_line((*f).h, s)
+  if (*f).h == 0 as *char:
+    ret 0 - 1
+  h:*char = (*f).h
+  ret write_line(h, s)
 
 fn file_read_line(f:*File) -> str:
   if f == 0:
     ret 0 as str
-  ret read_line((*f).h)
+  if (*f).h == 0 as *char:
+    ret 0 as str
+  h:*char = (*f).h
+  ret read_line(h)
 
 fn file_seek(f:*File, off:int, whence:int) -> int:
   if f == 0:
     ret 0 - 1
-  ret fseek((*f).h, off, whence)
+  if (*f).h == 0 as *char:
+    ret 0 - 1
+  h:*char = (*f).h
+  ret fseek(h, off, whence)
 
 fn file_tell(f:*File) -> int:
   if f == 0:
     ret 0 - 1
-  ret ftell((*f).h)
+  if (*f).h == 0 as *char:
+    ret 0 - 1
+  h:*char = (*f).h
+  ret ftell(h)
 
 fn file_eof(f:*File) -> int:
   if f == 0:
     ret 1
-  ret io_eof((*f).h)
+  if (*f).h == 0 as *char:
+    ret 1
+  h:*char = (*f).h
+  ret io_eof(h)
 
 fn file_err() -> int:
   ret io_err()
