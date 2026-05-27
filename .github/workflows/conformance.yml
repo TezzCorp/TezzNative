@@ -18,8 +18,8 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $sdkUrls = @(
-            "https://tn.tezzcorp.com/api/download_request.php?artifact=windows-sdk&source=github-actions",
-            "https://tn.tezzcorp.com/download/tezznative-sdk.zip"
+            "https://tn.tezzcorp.com/download/tezznative-sdk.zip",
+            "https://tn.tezzcorp.com/api/download_request.php?artifact=windows-sdk&source=github-actions"
           )
           $downloaded = $false
           foreach ($sdkUrl in $sdkUrls) {
@@ -108,8 +108,8 @@ jobs:
         run: |
           set -euo pipefail
           sdk_urls=(
-            "https://tn.tezzcorp.com/api/download_request.php?artifact=linux-sdk&source=github-actions"
             "https://tn.tezzcorp.com/download/tezznative-sdk-linux.tar.gz"
+            "https://tn.tezzcorp.com/api/download_request.php?artifact=linux-sdk&source=github-actions"
           )
           downloaded=0
           for sdk_url in "${sdk_urls[@]}"; do
