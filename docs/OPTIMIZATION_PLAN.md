@@ -183,8 +183,9 @@ Started:
 - Added the POSIX native smoke runner:
   `tests/conformance/run-native-smoke.sh`.
 - Added native executable smoke cases for hello output, loop/math lowering,
-  string utilities and transforms, file read/write, portable path helpers,
-  vector/arena allocation, and struct array field access.
+  deterministic `math` module helpers, string utilities and transforms, file
+  read/write, portable path helpers, vector/arena allocation, and struct array
+  field access.
 - Promoted native smoke from advisory syntax coverage to hosted Windows and
   Linux execution gates.
 - Fixed the shared x64 register allocation surface so Linux ELF output no
@@ -256,8 +257,8 @@ Near-term stdlib optimization:
 Started:
 
 - Added native executable smoke for `str` helpers, file read/write through C
-  runtime IO, portable `io` path helpers, `vec` integer vectors, and `arena`
-  allocation/reset workflows.
+  runtime IO, portable `io` path helpers, deterministic `math` helpers, `vec`
+  integer vectors, and `arena` allocation/reset workflows.
 - Reworked `io.path_join_p` to avoid intermediate ownership ambiguity and
   reduce allocations.
 - Reworked `io.path_norm_p` guarded pointer reads so native code never touches
@@ -265,6 +266,11 @@ Started:
 - Reworked `str.str_replace_first`, `str.str_replace`, and `str.str_pad_int`
   to use direct exact-size allocation/copy paths that are deterministic under
   both Windows PE and Linux ELF native codegen.
+- Removed the demo `main` from `lib/math.tn` so `math` stays a library-only
+  import surface.
+- Captured the current `time` gap: runtime clock/date/sleep functions remain
+  import-checked but are not yet native-execution gated across Windows and
+  Linux.
 
 ## Milestone 4: Developer Experience
 
@@ -501,8 +507,9 @@ A change is done when:
 5. Add a stable stdlib module inventory. Done for the initial public inventory;
    smoke coverage started with `tests/conformance/stdlib/stable_modules.tn`.
 6. Add native smoke tests for hello, math, strings, loops, structs, file IO,
-   portable path helpers, vectors, and arenas. Done for the initial gate: all
-   are now execution-gated on Windows and Linux.
+   portable path helpers, vectors, and arenas. Done for the initial gate:
+   deterministic math/string/io/path/vec/arena workflows are now
+   execution-gated on Windows and Linux.
 7. Add an ABI layout test document and starter cases. Started with
    `tests/conformance/run-abi.ps1`, `tests/conformance/run-abi.sh`, and
    `tests/conformance/abi/starter_abi.tn`.

@@ -1,0 +1,71 @@
+import "math"
+
+fn near(actual:float, expected:float, eps:float) -> int:
+  diff:float = actual - expected
+  if diff < 0.0:
+    diff = 0.0 - diff
+  if diff <= eps:
+    ret 1
+  ret 0
+
+fn main() -> int:
+  if math.abs(0 - 42) != 42:
+    ret 1
+  if math.min(7, 3) != 3:
+    ret 2
+  if math.max(7, 3) != 7:
+    ret 3
+  if math.clamp(99, 0, 10) != 10:
+    ret 4
+  if math.sign(0 - 9) != 0 - 1:
+    ret 5
+  if math.gcd(54, 24) != 6:
+    ret 6
+  if math.lcm(6, 8) != 24:
+    ret 7
+  if math.pow_int(3, 4) != 81:
+    ret 8
+
+  q:int = 0
+  r:int = 0
+  div_rc:int = 0
+  unsafe:
+    div_rc = math.divmod(17, 5, &q, &r)
+  if div_rc != 0 || q != 3 || r != 2:
+    ret 9
+
+  if near(math.sqrt(81.0), 9.0, 0.000001) == 0:
+    ret 10
+  if near(math.floor(3.9), 3.0, 0.000001) == 0:
+    ret 11
+  if near(math.ceil(3.1), 4.0, 0.000001) == 0:
+    ret 12
+  if near(math.round(3.6), 4.0, 0.000001) == 0:
+    ret 13
+  if near(math.frac(3.25), 0.25, 0.000001) == 0:
+    ret 14
+  if near(math.fmod(7.5, 2.0), 1.5, 0.000001) == 0:
+    ret 15
+  if near(math.lerp(10.0, 20.0, 0.25), 12.5, 0.000001) == 0:
+    ret 16
+
+  nums:[float;3]
+  nums[0] = 1.0
+  nums[1] = 2.0
+  nums[2] = 3.0
+  total:float = 0.0
+  avg:float = 0.0
+  dot:float = 0.0
+  unsafe:
+    total = math.sum_f64(&nums[0], 3)
+    avg = math.mean_f64(&nums[0], 3)
+    dot = math.dot_f64(&nums[0], &nums[0], 3)
+  if near(total, 6.0, 0.000001) == 0:
+    ret 17
+  if near(avg, 2.0, 0.000001) == 0:
+    ret 18
+  if near(dot, 14.0, 0.000001) == 0:
+    ret 19
+
+  say "math-module"
+  ret 0

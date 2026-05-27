@@ -415,6 +415,3 @@ fn dot_f64(a:*float, b:*float, n:int) -> float:
     i = i + 1
   ret acc
 
-fn main():
-  say abs(48)
-

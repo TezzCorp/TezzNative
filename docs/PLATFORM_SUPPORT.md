@@ -31,7 +31,8 @@ changes.
 | --- | --- | --- | --- | --- |
 | Core language | Primary | Primary | Planned | Stable-core conformance runs on Windows and Linux SDKs. |
 | Bytecode run | Primary | Preview | Planned | Compatibility path while native backend matures. |
-| Native executable | Primary/Beta | Primary/Beta | Planned | Hello, loop/math, string, string-transform, struct-array, file IO, portable path, vector, and arena executable smoke tests pass on Windows and Linux x64. |
+| Native executable | Primary/Beta | Primary/Beta | Planned | Hello, loop/math, math-module, string, string-transform, struct-array, file IO, portable path, vector, and arena executable smoke tests pass on Windows and Linux x64. |
+| Time/date runtime | Preview | Preview | Planned | `time` imports are checked; native clock/date/sleep execution is not yet a cross-platform gate. |
 | IO/path/process | Beta | Preview | Planned | File read/write and portable path helpers have native smoke coverage; OS-backed path/process behavior still needs platform-specific tests. |
 | Networking | Beta | Preview | Planned | Socket and HTTP tests should be added. |
 | TLS | Beta | Preview | Planned | Linux builds without OpenSSL development headers expose unsupported TLS stubs until linked with a TLS backend. |
