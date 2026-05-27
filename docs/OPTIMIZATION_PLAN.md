@@ -209,6 +209,9 @@ Started:
 - Confirmed direct-native directory enumeration remains a backend parity gap;
   runtime-backed directory listing/glob is hardened separately under the stdlib
   gate instead of being promoted as native-complete.
+- Hardened direct-native `list_dir`, `list_dir_recursive`, `glob`, and
+  `proc_out` fallbacks so unsupported OS-backed calls return `null` instead of
+  a synthetic newline string.
 - Hardened `io.path_join_p` to use a single allocation/copy path and tightened
   `io.path_norm_p` pointer guards so portable path helpers pass native smoke on
   Windows and Linux x64.
