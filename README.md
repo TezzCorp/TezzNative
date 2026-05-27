@@ -35,7 +35,7 @@ than the full repository surface.
 | Native executable flow | Beta (gated x64) | Windows/Linux SDKs build and run hello, loops/math module, strings/transforms, structs, raw/wrapped/line/stream file IO, directory lifecycle, portable paths, vectors, arenas, and time clock/sleep/UTC-date helpers |
 | Bytecode run flow | Stable/Beta | Useful for development and compatibility |
 | C ABI / extern calls | Beta (gated starter) | Header/ABI dump checks cover pointers, arrays, nested structs, scalar mixes, and extern signatures |
-| Stable stdlib candidates | Stable/Beta (smoke gated) | Core imports plus native math, string, raw/wrapped/line/stream file IO, directory lifecycle, portable path, vector, arena, and `time` clock/sleep/UTC-date smoke; local timezone formatting remains runtime-backend hardening |
+| Stable stdlib candidates | Stable/Beta (smoke gated) | Core imports plus native math, string, raw/wrapped/line/stream file IO, directory lifecycle, portable path, vector, arena, and `time` clock/sleep/UTC-date smoke; VM/runtime gates also cover deterministic directory listing, recursive listing, and glob filters. Local timezone formatting remains runtime-backend hardening |
 | Networking/TLS/GUI/DB | Beta | Useful, but needs platform matrix testing |
 | GPU/NPU/LLM/kernel modules | Experimental | API surface exists; backend support depends on runtime build |
 

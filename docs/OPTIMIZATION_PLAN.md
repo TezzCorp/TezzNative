@@ -206,6 +206,9 @@ Started:
   exists/make/remove workflows, with null-guarded public wrappers.
 - Wired Linux ELF native filesystem lifecycle calls to syscall shims and moved
   Windows x64 native `remove`/`rename` lowering onto C-runtime return semantics.
+- Confirmed direct-native directory enumeration remains a backend parity gap;
+  runtime-backed directory listing/glob is hardened separately under the stdlib
+  gate instead of being promoted as native-complete.
 - Hardened `io.path_join_p` to use a single allocation/copy path and tightened
   `io.path_norm_p` pointer guards so portable path helpers pass native smoke on
   Windows and Linux x64.
@@ -284,6 +287,12 @@ Started:
 - Hardened `io.file_exists`, `io.dir_exists`, `io.file_delete`,
   `io.file_rename`, `io.dir_make`, `io.dir_remove`, `io.dir_list`,
   `io.dir_list_rec`, and `io.glob_list` null/failure behavior.
+- Hardened VM/runtime directory enumeration to return deterministic sorted
+  listings, sorted recursive walks, and glob results built from the same
+  listing path; added a runtime gate for listing contents, ordering, recursive
+  discovery, glob inclusion/exclusion, and cleanup.
+- Fixed the runtime-hardening freestanding manifest so hosted `say` examples do
+  not appear in the freestanding-ok boundary list.
 - Reworked `io.path_join_p` to avoid intermediate ownership ambiguity and
   reduce allocations.
 - Reworked `io.path_norm_p` guarded pointer reads so native code never touches

@@ -42,7 +42,8 @@ These surfaces are useful today but need more conformance tests:
   executable smoke for raw/wrapped/line/stream file IO, directory lifecycle,
   portable paths, math helpers, string transforms, vectors, arenas, and `time`
   clock/sleep/UTC-date helpers are gated across both primary x64 targets; local
-  timezone formatting remains preview
+  timezone formatting remains preview. VM/runtime gates also cover sorted
+  directory listing, recursive listing, and glob filters
 - `net`, `tls`, `tezzserve`, `tezzapi`
 - `tezzdb` and `tezzdbql`
 - GUI modules on supported host platforms
@@ -77,6 +78,7 @@ risk. They should not be treated as guaranteed production APIs.
 - Add native executable stress tests for Windows and Linux x86_64 beyond the
   current hello, loop/math, math-module, string, struct, raw/wrapped/line/stream
   file IO, directory lifecycle, portable path, vector, arena, and time smoke.
+- Add direct-native parity for directory listing/glob and process output.
 - Add module-level stdlib checks for stable and beta modules.
 - Add docs for every stable public function.
 - Publish benchmark and platform support matrices.
