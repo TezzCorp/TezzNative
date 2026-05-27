@@ -202,6 +202,10 @@ Started:
   path instead of target-specific file-size lowering, and added native smoke for
   BigFile chunk reads plus StreamWriter buffered writes across buffer
   boundaries.
+- Added native smoke for file exists/delete/rename and directory
+  exists/make/remove workflows, with null-guarded public wrappers.
+- Wired Linux ELF native filesystem lifecycle calls to syscall shims and moved
+  Windows x64 native `remove`/`rename` lowering onto C-runtime return semantics.
 - Hardened `io.path_join_p` to use a single allocation/copy path and tightened
   `io.path_norm_p` pointer guards so portable path helpers pass native smoke on
   Windows and Linux x64.
@@ -277,6 +281,9 @@ Started:
   null-read and EOF guards.
 - Hardened `StreamWriter` flush/close behavior so invalid handles mark errors
   and close reports flush or `fclose` failures.
+- Hardened `io.file_exists`, `io.dir_exists`, `io.file_delete`,
+  `io.file_rename`, `io.dir_make`, `io.dir_remove`, `io.dir_list`,
+  `io.dir_list_rec`, and `io.glob_list` null/failure behavior.
 - Reworked `io.path_join_p` to avoid intermediate ownership ambiguity and
   reduce allocations.
 - Reworked `io.path_norm_p` guarded pointer reads so native code never touches

@@ -968,17 +968,29 @@ fn file_size_bytes(path:str) -> int:
   ret sz
 
 fn file_exists(path:str) -> int:
-  ret path_exists(path)
+  if path == 0:
+    ret 0
+  if path_exists(path) == 0:
+    ret 0
+  if path_is_dir(path) != 0:
+    ret 0
+  ret 1
 
 fn dir_exists(path:str) -> int:
+  if path == 0:
+    ret 0
   if path_exists(path) == 0:
     ret 0
   ret path_is_dir(path)
 
 fn file_delete(path:str) -> int:
+  if path == 0:
+    ret 0 - 1
   ret remove(path)
 
 fn file_rename(old:str, new_path:str) -> int:
+  if old == 0 || new_path == 0:
+    ret 0 - 1
   ret rename(old, new_path)
 
 // ─────────────────────────────────────────────────────────────
@@ -989,15 +1001,28 @@ fn cwd() -> str:
   ret get_cwd()
 
 fn dir_make(path:str) -> int:
+  if path == 0:
+    ret 0 - 1
   ret mkdir(path)
 
+fn dir_remove(path:str) -> int:
+  if path == 0:
+    ret 0 - 1
+  ret rmdir(path)
+
 fn dir_list(p:str) -> str:
+  if p == 0:
+    ret 0 as str
   ret list_dir(p)
 
 fn dir_list_rec(p:str) -> str:
+  if p == 0:
+    ret 0 as str
   ret list_dir_recursive(p)
 
 fn glob_list(p:str) -> str:
+  if p == 0:
+    ret 0 as str
   ret glob(p)
 
 fn walk_dir(path:str, cb:fn(str)->int) -> int:

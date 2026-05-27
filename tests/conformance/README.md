@@ -44,8 +44,8 @@ snapshots.
 
 Native smoke tests cover executable hello output, loops/math, deterministic
 `math` helpers, strings and string transforms, struct-array field access, raw,
-wrapped, line-oriented, and chunked stream file IO, portable path helpers,
-vectors, arenas, and time clock/sleep/UTC-date helpers:
+wrapped, line-oriented, and chunked stream file IO, directory lifecycle,
+portable path helpers, vectors, arenas, and time clock/sleep/UTC-date helpers:
 
 ```powershell
 .\tests\conformance\run-native-smoke.ps1
