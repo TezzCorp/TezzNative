@@ -1,0 +1,86 @@
+import "io"
+
+fn has_substr(hay:str, needle:str) -> int:
+  if hay == 0 || needle == 0:
+    ret 0
+  hn:int = len(hay)
+  nn:int = len(needle)
+  if nn == 0:
+    ret 1
+  if hn < nn:
+    ret 0
+  i:int = 0
+  while i <= hn - nn:
+    j:int = 0
+    ok:int = 1
+    while j < nn:
+      unsafe:
+        if (hay as *char)[i + j] != (needle as *char)[j]:
+          ok = 0
+          break
+      j = j + 1
+    if ok != 0:
+      ret 1
+    i = i + 1
+  ret 0
+
+fn main() -> int:
+  dir:str = "tn_native_glob_list_d"
+  keep:str = "tn_native_glob_list_d/alpha.tn"
+  skip:str = "tn_native_glob_list_d/beta.txt"
+  io.file_delete(keep)
+  io.file_delete(skip)
+  io.dir_remove(dir)
+  if io.dir_make(dir) != 0:
+    ret 1
+
+  out:*File = io.open_w(keep)
+  if out == 0:
+    io.dir_remove(dir)
+    ret 2
+  if io.file_write_line(out, "payload") != 0:
+    io.file_delete(keep)
+    io.dir_remove(dir)
+    ret 3
+  io.file_close(out)
+
+  out2:*File = io.open_w(skip)
+  if out2 == 0:
+    io.file_delete(keep)
+    io.dir_remove(dir)
+    ret 4
+  io.file_write_line(out2, "payload")
+  io.file_close(out2)
+
+  matches:str = io.glob_list("tn_native_glob_list_d/*.tn")
+  if matches == 0:
+    io.file_delete(keep)
+    io.file_delete(skip)
+    io.dir_remove(dir)
+    ret 5
+  has_alpha:int = 0
+  has_beta:int = 0
+  unsafe:
+    has_alpha = has_substr(matches, "alpha.tn")
+    has_beta = has_substr(matches, "beta.txt")
+  if has_alpha == 0:
+    unsafe:
+      free(matches)
+    io.file_delete(keep)
+    io.file_delete(skip)
+    io.dir_remove(dir)
+    ret 6
+  if has_beta != 0:
+    unsafe:
+      free(matches)
+    io.file_delete(keep)
+    io.file_delete(skip)
+    io.dir_remove(dir)
+    ret 7
+  unsafe:
+    free(matches)
+  io.file_delete(keep)
+  io.file_delete(skip)
+  io.dir_remove(dir)
+  say "native-glob-list"
+  ret 0

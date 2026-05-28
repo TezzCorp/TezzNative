@@ -1020,10 +1020,123 @@ fn dir_list_rec(p:str) -> str:
     ret 0 as str
   ret list_dir_recursive(p)
 
+fn _glob_match_impl(pat:str, text:str) -> int:
+  if pat == 0 || text == 0:
+    ret 0
+  plen:int = len(pat)
+  tlen:int = len(text)
+  pi:int = 0
+  ti:int = 0
+  star:int = 0 - 1
+  mark:int = 0
+  while ti < tlen:
+    pc:int = 0
+    tc:int = 0
+    if pi < plen:
+      unsafe:
+        pc = (pat as *char)[pi] as int
+    unsafe:
+      tc = (text as *char)[ti] as int
+    if pi < plen && (pc == 63 || pc == tc):
+      pi = pi + 1
+      ti = ti + 1
+      continue
+    if pi < plen && pc == 42:
+      star = pi
+      mark = ti
+      pi = pi + 1
+      continue
+    if star >= 0:
+      pi = star + 1
+      mark = mark + 1
+      ti = mark
+      continue
+    ret 0
+  while pi < plen:
+    pc2:int = 0
+    unsafe:
+      pc2 = (pat as *char)[pi] as int
+    if pc2 != 42:
+      break
+    pi = pi + 1
+  if pi == plen:
+    ret 1
+  ret 0
+
 fn glob_list(p:str) -> str:
   if p == 0:
     ret 0 as str
-  ret glob(p)
+  n:int = len(p)
+  last_sep:int = 0 - 1
+  i:int = 0
+  while i < n:
+    c:int = 0
+    unsafe:
+      c = (p as *char)[i] as int
+    if c == 47 || c == 92:
+      last_sep = i
+    i = i + 1
+
+  dir:str
+  pat:str
+  if last_sep >= 0:
+    dir = _str_slice(p, 0, last_sep)
+    pat = _str_slice(p, last_sep + 1, n)
+  else:
+    dir = _str_dup(".")
+    pat = _str_dup(p)
+  if dir == 0 || pat == 0:
+    if dir != 0:
+      free(dir)
+    if pat != 0:
+      free(pat)
+    ret 0 as str
+
+  listing:str = dir_list(dir)
+  if listing == 0:
+    free(dir)
+    free(pat)
+    ret 0 as str
+
+  out:str = _str_dup("")
+  start:int = 0
+  ln:int = len(listing)
+  idx:int = 0
+  while idx <= ln:
+    at_end:int = 0
+    ch:int = 0
+    if idx == ln:
+      at_end = 1
+    else:
+      unsafe:
+        ch = (listing as *char)[idx] as int
+    if at_end != 0 || ch == 10:
+      if idx > start:
+        name:str = _str_slice(listing, start, idx)
+        if name != 0:
+          if _glob_match_impl(pat, name) != 0:
+            full:str = path_join_portable(dir, name)
+            if full != 0:
+              if out == 0 || len(out) == 0:
+                next0:str = _str_dup(full)
+                if out != 0:
+                  free(out)
+                out = next0
+              else:
+                next1:str = _str_join3(out, "\n", full)
+                free(out)
+                out = next1
+              free(full)
+          free(name)
+      start = idx + 1
+    idx = idx + 1
+
+  free(listing)
+  free(dir)
+  free(pat)
+  if out == 0:
+    ret _str_dup("")
+  ret out
 
 fn walk_dir(path:str, cb:fn(str)->int) -> int:
   lst:str = list_dir_recursive(path)
