@@ -21,6 +21,37 @@ jobs:
             $PSNativeCommandUseErrorActionPreference = $false
           }
           $cacheKey = if ($env:GITHUB_SHA) { $env:GITHUB_SHA } else { [guid]::NewGuid().ToString("N") }
+          $compilerUrls = @(
+            "https://tn.tezzcorp.com/download/sdk/bin/tezzc-windows-x64.exe?v=$cacheKey",
+            "https://tn.tezzcorp.com/download/sdk/bin/tezzc.exe?v=$cacheKey"
+          )
+          $directCompiler = $false
+          foreach ($compilerUrl in $compilerUrls) {
+            for ($attempt = 1; $attempt -le 4; $attempt++) {
+              Remove-Item -LiteralPath tezzc.exe -Force -ErrorAction SilentlyContinue
+              Write-Host "Downloading compiler attempt $attempt from $compilerUrl"
+              & curl.exe -4 -fL --retry 1 --retry-delay 3 --connect-timeout 20 --max-time 120 -A "TezzNative-GitHub-Actions" -o tezzc.exe $compilerUrl
+              $curlExit = $LASTEXITCODE
+              if ($curlExit -eq 0 -and (Test-Path -LiteralPath tezzc.exe)) {
+                $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path -LiteralPath tezzc.exe).Path)
+                if ($bytes.Length -gt 1024 -and $bytes[0] -eq 0x4D -and $bytes[1] -eq 0x5A) {
+                  $directCompiler = $true
+                  break
+                }
+              }
+              Write-Warning "Compiler download attempt $attempt failed with curl exit $curlExit"
+              Start-Sleep -Seconds (5 * $attempt)
+            }
+            if ($directCompiler) {
+              break
+            }
+          }
+          if ($directCompiler) {
+            $compilerPath = (Resolve-Path -LiteralPath tezzc.exe).Path
+            "TEZZC=$compilerPath" | Out-File -FilePath $env:GITHUB_ENV -Append
+            return
+          }
+
           $sdkUrls = @(
             "https://tn.tezzcorp.com/api/download_request.php?artifact=windows-sdk&source=github-actions&v=$cacheKey",
             "https://tn.tezzcorp.com/download/tezznative-sdk.zip?v=$cacheKey"
@@ -114,6 +145,36 @@ jobs:
         run: |
           set -euo pipefail
           cache_key="${GITHUB_SHA:-$(date +%s)}"
+          compiler_urls=(
+            "https://tn.tezzcorp.com/download/sdk/bin/tezzc-linux-x64?v=${cache_key}"
+          )
+          compiler=""
+          for compiler_url in "${compiler_urls[@]}"; do
+            for attempt in 1 2 3 4; do
+              rm -f tezzc-linux-x64
+              echo "Downloading Linux compiler attempt ${attempt} from ${compiler_url}"
+              if curl -4 -fL --retry 1 --retry-delay 3 --connect-timeout 20 --max-time 120 \
+                -A "TezzNative-GitHub-Actions" \
+                -o tezzc-linux-x64 \
+                "${compiler_url}"; then
+                if [[ -s tezzc-linux-x64 ]]; then
+                  chmod +x tezzc-linux-x64
+                  compiler="./tezzc-linux-x64"
+                  break
+                fi
+              fi
+              sleep $((5 * attempt))
+            done
+            if [[ -n "$compiler" ]]; then
+              break
+            fi
+          done
+          if [[ -n "$compiler" ]]; then
+            "$compiler" version || true
+            echo "TEZZC=$compiler" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
           sdk_urls=(
             "https://tn.tezzcorp.com/api/download_request.php?artifact=linux-sdk&source=github-actions&v=${cache_key}"
             "https://tn.tezzcorp.com/download/tezznative-sdk-linux.tar.gz?v=${cache_key}"
