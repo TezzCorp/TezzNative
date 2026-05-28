@@ -1,0 +1,128 @@
+import "net"
+
+fn expect_owned(actual:str, expected:str, code:int) -> int:
+  if actual == 0:
+    ret code
+  cmp:int = strcmp(actual, expected)
+  unsafe:
+    free(actual)
+  if cmp != 0:
+    ret code
+  ret 0
+
+fn expect_const(actual:str, expected:str, code:int) -> int:
+  if actual == 0:
+    ret code
+  if strcmp(actual, expected) != 0:
+    ret code
+  ret 0
+
+fn main() -> int:
+  url:str = "HTTPS://Example.com:8443/api/v1?q=tezz+native&n=42#frag"
+
+  if net.is_https_url(url) != 1:
+    ret 1
+  if net.is_http_url(url) != 0:
+    ret 2
+  if net.url_is_secure(url) != 1:
+    ret 3
+  if net.url_default_port("httpsx://example.com") != 80:
+    ret 4
+  if net.url_default_port("wss://socket.example/ws") != 443:
+    ret 5
+  if net.url_port(url) != 8443:
+    ret 6
+
+  rc:int = expect_owned(net.url_scheme(url), "HTTPS", 7)
+  if rc != 0:
+    ret rc
+  rc = expect_owned(net.url_host(url), "Example.com", 8)
+  if rc != 0:
+    ret rc
+  rc = expect_owned(net.url_path(url), "/api/v1", 9)
+  if rc != 0:
+    ret rc
+  rc = expect_owned(net.url_query(url), "q=tezz+native&n=42", 10)
+  if rc != 0:
+    ret rc
+  rc = expect_owned(net.url_fragment(url), "frag", 11)
+  if rc != 0:
+    ret rc
+  rc = expect_owned(net.url_path_query(url), "/api/v1?q=tezz+native&n=42", 12)
+  if rc != 0:
+    ret rc
+  rc = expect_owned(net.query_param(url, "q"), "tezz native", 13)
+  if rc != 0:
+    ret rc
+  if net.query_param_int(url, "n", 0 - 1) != 42:
+    ret 14
+  rc = expect_owned(net.query_param("a=1#frag", "a"), "1", 15)
+  if rc != 0:
+    ret rc
+
+  if net.dns_is_ipv4("127.0.0.1") != 1:
+    ret 16
+  if net.dns_is_ipv4("999.0.0.1") != 0:
+    ret 17
+  if net.dns_is_ipv6("2001:db8::1") != 1:
+    ret 18
+  rc = expect_owned(net.dns_endpoint_host("[2001:db8::1]:8443"), "2001:db8::1", 19)
+  if rc != 0:
+    ret rc
+  if net.dns_endpoint_port("[2001:db8::1]:8443", 443) != 8443:
+    ret 20
+  rc = expect_owned(net.dns_endpoint_join("2001:db8::1", 443), "[2001:db8::1]:443", 21)
+  if rc != 0:
+    ret rc
+
+  req:str = "POST /submit?x=1 HTTP/1.1\nhost: example.com\nContent-Length: 5\nAuthorization: Bearer abc123\nCookie: sid=xyz; theme=dark\n\nhello"
+  rc = expect_owned(net.http_method(req), "POST", 22)
+  if rc != 0:
+    ret rc
+  rc = expect_owned(net.http_path(req), "/submit?x=1", 23)
+  if rc != 0:
+    ret rc
+  rc = expect_owned(net.http_version(req), "HTTP/1.1", 24)
+  if rc != 0:
+    ret rc
+  rc = expect_owned(net.http_get_header(req, "Host"), "example.com", 25)
+  if rc != 0:
+    ret rc
+  if net.http_content_length(req) != 5:
+    ret 26
+  rc = expect_owned(net.http_bearer_token(req), "abc123", 27)
+  if rc != 0:
+    ret rc
+  rc = expect_owned(net.http_get_cookie(req, "theme"), "dark", 28)
+  if rc != 0:
+    ret rc
+  if net.http_request_start_line_valid(req) != 1:
+    ret 29
+  if net.http_route_match(req, "/submit") != 1:
+    ret 30
+  if net.http_route_request_match(req, "POST", "/submit") != 1:
+    ret 31
+  if net.http_route_request_match(req, "GET", "/submit") != 0:
+    ret 32
+
+  resp:str = "HTTP/1.1 201 Created\ncontent-type: text/plain\ntransfer-encoding: chunked\n\n5\nhello\n0\n\n"
+  if net.http_status_code(resp) != 201:
+    ret 33
+  rc = expect_owned(net.http_reason_phrase(resp), "Created", 34)
+  if rc != 0:
+    ret rc
+  rc = expect_owned(net.http_response_header(resp, "Content-Type"), "text/plain", 35)
+  if rc != 0:
+    ret rc
+  if net.http_is_chunked(resp) != 1:
+    ret 36
+  rc = expect_owned(net.http_response_body_decoded(resp), "hello", 37)
+  if rc != 0:
+    ret rc
+
+  rc = expect_const(net.http_status_text(404), "Not Found", 38)
+  if rc != 0:
+    ret rc
+
+  say "net-http-url"
+  ret 0

@@ -41,9 +41,10 @@ These surfaces are useful today but need more conformance tests:
 - `io`, `str`, `math`, `vec`, `arena`, `time`; imports plus selected native
   executable smoke for raw/wrapped/line/stream file IO, directory lifecycle,
   direct `dir_list`, raw/public recursive listing and glob, portable paths, math
-  helpers, string transforms, vectors, arenas, process run/output capture, and
-  `time` clock/sleep/UTC/local-date helpers are gated across both primary x64
-  targets. VM/runtime gates also
+  helpers, string transforms, vectors, arenas, process run/output capture,
+  `time` clock/sleep/UTC/local-date helpers, and deterministic `net` URL, DNS,
+  HTTP parser, route, auth/cookie, and chunked response helpers are gated across
+  both primary x64 targets. VM/runtime gates also
   cover sorted recursive directory listing and raw glob filters.
 - `net`, `tls`, `tezzserve`, `tezzapi`
 - `tezzdb` and `tezzdbql`
@@ -80,7 +81,8 @@ risk. They should not be treated as guaranteed production APIs.
   current hello, loop/math, math-module, string, struct, raw/wrapped/line/stream
   file IO, directory lifecycle, recursive listing, portable path, vector,
   arena, process, and time smoke.
-- Add networking/socket and HTTP smoke tests before promoting networking.
+- Add loopback socket and real HTTP client/server smoke tests before promoting
+  networking.
 - Add module-level stdlib checks for stable and beta modules.
 - Add docs for every stable public function.
 - Publish benchmark and platform support matrices.

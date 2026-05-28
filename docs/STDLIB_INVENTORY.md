@@ -29,7 +29,7 @@ trust in the stable core.
 
 | Module | Purpose | Next Hardening Step |
 | --- | --- | --- |
-| `net` | TCP, UDP, HTTP helpers | Add loopback socket and HTTP client/server tests. |
+| `net` | TCP, UDP, HTTP helpers | URL parsing, DNS endpoint helpers, HTTP parser/routing/auth/cookie utilities, and chunked response decoding are native-smoke gated; add loopback socket and HTTP client/server tests next. |
 | `tls` | TLS runtime wrappers | Document backend policy and certificate behavior. |
 | `tezzserve` | HTTP/server helpers | Add route, JSON, static file, and websocket smoke tests. |
 | `tezzapi` | REST API framework | Add request/response validation examples. |

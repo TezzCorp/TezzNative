@@ -329,6 +329,13 @@ Started:
   import surface.
 - Closed the native `time` date-format gaps: Windows/Linux x64 now gate clock,
   sleep, UTC date-format, and local date-format helpers in native smoke.
+- Hardened deterministic `net` helpers: URL path/query handling no longer
+  duplicates query strings, scheme security/default-port checks use exact
+  case-insensitive schemes, HTTP header lookup is case-insensitive, LF-only
+  HTTP buffers are accepted, reason phrases preserve ordinary `r` characters,
+  IPv4 octets are range checked, and query strings with fragments are handled.
+  Native smoke now gates URL, DNS endpoint, HTTP parser, route, auth/cookie,
+  and chunked response decoding helpers on Windows and Linux x64.
 
 ## Milestone 4: Developer Experience
 

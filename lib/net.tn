@@ -262,17 +262,23 @@ fn default_max_read() -> int:
 fn is_http_url(url:str) -> int:
   if url == 0:
     ret 0
-  if _starts_with(url, "http://") != 0:
-    ret 1
-  ret 0
+  s:str = url_scheme(url)
+  if s == 0:
+    ret 0
+  ok:int = _streq_nocase(s, "http")
+  free(s)
+  ret ok
 
 // Check if URL starts with https://
 fn is_https_url(url:str) -> int:
   if url == 0:
     ret 0
-  if _starts_with(url, "https://") != 0:
-    ret 1
-  ret 0
+  s:str = url_scheme(url)
+  if s == 0:
+    ret 0
+  ok:int = _streq_nocase(s, "https")
+  free(s)
+  ret ok
 
 // Convenience: TCP socket.
 fn tcp_socket() -> int:
@@ -691,16 +697,19 @@ fn _parse_int_dec(s:str) -> int:
   ret v * sign
 
 fn _find_header_end_index(buf:*char, n:int) -> int:
-  if buf == 0 || n < 4:
+  if buf == 0 || n < 2:
     ret 0 - 1
   i:int = 0
-  while i + 3 < n:
-    if (((buf[i] as int) & 255) == 13):
+  while i + 1 < n:
+    if (((buf[i] as int) & 255) == 10):
+      if (((buf[i + 1] as int) & 255) == 10):
+        ret i + 2
+    if i + 3 < n && (((buf[i] as int) & 255) == 13):
       if (((buf[i + 1] as int) & 255) == 10):
         if (((buf[i + 2] as int) & 255) == 13):
           if (((buf[i + 3] as int) & 255) == 10):
             ret i + 4
-    if (((buf[i] as int) & 255) == 114): // 'r' fallback when CR escapes are normalized
+    if i + 3 < n && (((buf[i] as int) & 255) == 114): // 'r' fallback when CR escapes are normalized
       if (((buf[i + 1] as int) & 255) == 10):
         if (((buf[i + 2] as int) & 255) == 114):
           if (((buf[i + 3] as int) & 255) == 10):
@@ -916,7 +925,7 @@ fn http_get_header(req:str, name:str) -> str:
       else:
         break
     key:str = _substr_dup(req, ks, ke)
-    if key != 0 && _streq(key, name) != 0:
+    if key != 0 && _streq_nocase(key, name) != 0:
       vs:int = colon + 1
       while vs < line_end:
         c7:int = _byte_at(req, vs)
@@ -2183,6 +2192,7 @@ fn dns_is_ipv4(addr:str) -> int:
     ret 0
   dots:int = 0
   digits:int = 0
+  part:int = 0
   i:int = 0
   while addr[i] != 0 as char:
     c:int = (addr[i] as int) & 255
@@ -2190,11 +2200,15 @@ fn dns_is_ipv4(addr:str) -> int:
       digits = digits + 1
       if digits > 3:
         ret 0
+      part = (part * 10) + (c - 48)
+      if part > 255:
+        ret 0
     else if c == 46:
       if digits == 0:
         ret 0
       dots = dots + 1
       digits = 0
+      part = 0
       if dots > 3:
         ret 0
     else:
@@ -2358,7 +2372,7 @@ fn url_default_port(url:str) -> int:
   if s == 0:
     ret HTTP_PORT
   port:int = HTTP_PORT
-  if _starts_with(s, "https") != 0 || _starts_with(s, "wss") != 0 || _starts_with(s, "HTTPS") != 0 || _starts_with(s, "WSS") != 0:
+  if _streq_nocase(s, "https") != 0 || _streq_nocase(s, "wss") != 0:
     port = HTTPS_PORT
   free(s)
   ret port
@@ -2380,17 +2394,17 @@ fn url_path(url:str) -> str:
   if ps < 0 || ps >= n:
     ret _substr_dup("/", 0, 1)
   if url[ps] == 63 as char: // '?'
-    base:str = "/"
-    q:str = _substr_dup(url, ps, n)
-    out:str = _join2(base, q)
-    free(q)
-    ret out
+    ret _substr_dup("/", 0, 1)
   if url[ps] == 35 as char: // '#'
     ret _substr_dup("/", 0, 1)
-  qe:int = _find_char_from(url, 35, ps) // '#'
-  if qe < 0:
-    qe = n
-  ret _substr_dup(url, ps, qe)
+  qe:int = _find_char_from(url, 63, ps) // '?'
+  he:int = _find_char_from(url, 35, ps) // '#'
+  end:int = n
+  if qe >= 0 && qe < end:
+    end = qe
+  if he >= 0 && he < end:
+    end = he
+  ret _substr_dup(url, ps, end)
 
 fn url_query(url:str) -> str:
   if url == 0:
@@ -2434,7 +2448,7 @@ fn url_is_secure(url:str) -> int:
   if s == 0:
     ret 0
   ok:int = 0
-  if _starts_with(s, "https") != 0 || _starts_with(s, "wss") != 0 || _starts_with(s, "HTTPS") != 0 || _starts_with(s, "WSS") != 0:
+  if _streq_nocase(s, "https") != 0 || _streq_nocase(s, "wss") != 0:
     ok = 1
   free(s)
   ret ok
@@ -2536,10 +2550,14 @@ fn query_param(query_or_url:str, key:str) -> str:
   if query_or_url == 0 || key == 0:
     ret 0 as str
   qsrc:str = 0 as str
-  if _find_char_from(query_or_url, 63, 0) >= 0 || _find_char_from(query_or_url, 35, 0) >= 0:
+  if _find_char_from(query_or_url, 63, 0) >= 0:
     qsrc = url_query(query_or_url)
   else:
-    qsrc = _substr_dup(query_or_url, 0, len(query_or_url))
+    h:int = _find_char_from(query_or_url, 35, 0)
+    if h >= 0:
+      qsrc = _substr_dup(query_or_url, 0, h)
+    else:
+      qsrc = _substr_dup(query_or_url, 0, len(query_or_url))
   if qsrc == 0:
     ret 0 as str
   n:int = len(qsrc)
@@ -2806,7 +2824,13 @@ fn http_reason_phrase(resp:str) -> str:
   while resp[i] == 32 as char:
     i = i + 1
   start:int = i
-  while resp[i] != 0 as char && resp[i] != 10 as char && resp[i] != 13 as char && resp[i] != 114 as char:
+  while resp[i] != 0 as char:
+    c:int = (resp[i] as int) & 255
+    if c == 10 || c == 13:
+      break
+    if c == 114:
+      if (((resp[i + 1] as int) & 255) == 10):
+        break
     i = i + 1
   ret _substr_dup(resp, start, i)
 
