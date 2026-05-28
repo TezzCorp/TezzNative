@@ -17,9 +17,13 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+            $PSNativeCommandUseErrorActionPreference = $false
+          }
+          $cacheKey = if ($env:GITHUB_SHA) { $env:GITHUB_SHA } else { [guid]::NewGuid().ToString("N") }
           $sdkUrls = @(
-            "https://tn.tezzcorp.com/download/tezznative-sdk.zip",
-            "https://tn.tezzcorp.com/api/download_request.php?artifact=windows-sdk&source=github-actions"
+            "https://tn.tezzcorp.com/api/download_request.php?artifact=windows-sdk&source=github-actions&v=$cacheKey",
+            "https://tn.tezzcorp.com/download/tezznative-sdk.zip?v=$cacheKey"
           )
           $downloaded = $false
           foreach ($sdkUrl in $sdkUrls) {
@@ -27,10 +31,12 @@ jobs:
               Remove-Item -LiteralPath tezznative-sdk.zip -Force -ErrorAction SilentlyContinue
               Write-Host "Downloading SDK attempt $attempt from $sdkUrl"
               & curl.exe -4 -fL --retry 1 --retry-delay 3 --connect-timeout 20 --max-time 240 -A "TezzNative-GitHub-Actions" -o tezznative-sdk.zip $sdkUrl
-              if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath tezznative-sdk.zip)) {
+              $curlExit = $LASTEXITCODE
+              if ($curlExit -eq 0 -and (Test-Path -LiteralPath tezznative-sdk.zip)) {
                 $downloaded = $true
                 break
               }
+              Write-Warning "SDK download attempt $attempt failed with curl exit $curlExit"
               Start-Sleep -Seconds (5 * $attempt)
             }
             if ($downloaded) {
@@ -107,9 +113,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cache_key="${GITHUB_SHA:-$(date +%s)}"
           sdk_urls=(
-            "https://tn.tezzcorp.com/download/tezznative-sdk-linux.tar.gz"
-            "https://tn.tezzcorp.com/api/download_request.php?artifact=linux-sdk&source=github-actions"
+            "https://tn.tezzcorp.com/api/download_request.php?artifact=linux-sdk&source=github-actions&v=${cache_key}"
+            "https://tn.tezzcorp.com/download/tezznative-sdk-linux.tar.gz?v=${cache_key}"
           )
           downloaded=0
           for sdk_url in "${sdk_urls[@]}"; do
