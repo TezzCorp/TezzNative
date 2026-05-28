@@ -214,8 +214,8 @@ Started:
   a synthetic newline string.
 - Added Linux x64 direct-native `dir_list` using the ELF syscall shim layer and
   promoted it behind a Linux-only native smoke gate; recursive directory
-  listing, glob, and process-output capture remain fail-closed until their
-  platform implementations land.
+  listing and glob were later bridged through the native-smoke-gated stdlib
+  helpers, and process-output capture now has Windows/Linux x64 parity.
 - Added Windows x64 direct-native `dir_list` using `FindFirstFileA`/
   `FindNextFileA`/`FindClose`, and replaced the public `io.glob_list` wrapper
   with a portable stdlib implementation backed by `dir_list`; both are now
@@ -223,6 +223,9 @@ Started:
 - Replaced public `io.dir_list_rec`/walk helpers with a portable stdlib
   implementation backed by the native-smoke-gated `dir_list`, and added
   Windows/Linux native executable coverage for recursive discovery.
+- Bridged raw direct-native `list_dir_recursive` and `glob` calls to the same
+  stdlib helper implementations loaded through the production prelude, with
+  null-guard and positive raw-builtin smoke coverage.
 - Added Windows x64 direct-native `proc_run`/`proc_out` lowering through the C
   runtime with bounded output capture and a Windows-only native smoke gate;
   added Linux x64 ELF syscall-backed `proc_run`/`proc_out` using

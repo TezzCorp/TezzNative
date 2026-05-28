@@ -1,0 +1,94 @@
+import "io"
+
+fn has_substr(hay:str, needle:str) -> int:
+  if hay == 0 || needle == 0:
+    ret 0
+  hn:int = len(hay)
+  nn:int = len(needle)
+  if nn == 0:
+    ret 1
+  if hn < nn:
+    ret 0
+  i:int = 0
+  while i <= hn - nn:
+    j:int = 0
+    ok:int = 1
+    while j < nn:
+      unsafe:
+        if (hay as *char)[i + j] != (needle as *char)[j]:
+          ok = 0
+          break
+      j = j + 1
+    if ok != 0:
+      ret 1
+    i = i + 1
+  ret 0
+
+fn cleanup(root:str, child:str, keep:str, nested:str, skip:str) -> int:
+  io.file_delete(keep)
+  io.file_delete(nested)
+  io.file_delete(skip)
+  io.dir_remove(child)
+  io.dir_remove(root)
+  ret 0
+
+fn write_text_line(path:str, text:str) -> int:
+  f:*File = io.open_w(path)
+  if f == 0:
+    ret 0 - 1
+  rc:int = io.file_write_line(f, text)
+  if io.file_close(f) != 0:
+    ret 0 - 1
+  ret rc
+
+fn main() -> int:
+  root:str = "tn_native_dir_raw_builtins"
+  child:str = "tn_native_dir_raw_builtins/child"
+  keep:str = "tn_native_dir_raw_builtins/alpha.tn"
+  nested:str = "tn_native_dir_raw_builtins/child/gamma.tn"
+  skip:str = "tn_native_dir_raw_builtins/beta.txt"
+
+  cleanup(root, child, keep, nested, skip)
+  if io.dir_make(root) != 0:
+    ret 1
+  if io.dir_make(child) != 0:
+    cleanup(root, child, keep, nested, skip)
+    ret 2
+  if write_text_line(keep, "alpha") != 0:
+    cleanup(root, child, keep, nested, skip)
+    ret 3
+  if write_text_line(nested, "gamma") != 0:
+    cleanup(root, child, keep, nested, skip)
+    ret 4
+  if write_text_line(skip, "beta") != 0:
+    cleanup(root, child, keep, nested, skip)
+    ret 5
+
+  rec:str = list_dir_recursive(root)
+  if rec == 0:
+    cleanup(root, child, keep, nested, skip)
+    ret 6
+  if has_substr(rec, "alpha.tn") == 0:
+    cleanup(root, child, keep, nested, skip)
+    ret 7
+  if has_substr(rec, "gamma.tn") == 0:
+    cleanup(root, child, keep, nested, skip)
+    ret 8
+
+  matches:str = glob("tn_native_dir_raw_builtins/*.tn")
+  if matches == 0:
+    cleanup(root, child, keep, nested, skip)
+    ret 9
+  if has_substr(matches, "alpha.tn") == 0:
+    cleanup(root, child, keep, nested, skip)
+    ret 10
+  if has_substr(matches, "beta.txt") != 0:
+    cleanup(root, child, keep, nested, skip)
+    ret 11
+
+  unsafe:
+    free(rec)
+    free(matches)
+  cleanup(root, child, keep, nested, skip)
+  say "native-dir-raw-builtins"
+  ret 0
