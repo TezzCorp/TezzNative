@@ -1,0 +1,83 @@
+import "io"
+
+fn contains(s:str, token:str) -> int:
+  if s == 0 || token == 0:
+    ret 0
+  n:int = len(s)
+  m:int = len(token)
+  if m <= 0 || n < m:
+    ret 0
+  i:int = 0
+  while i <= n - m:
+    j:int = 0
+    ok:int = 1
+    while j < m:
+      unsafe:
+        if (s as *char)[i + j] != (token as *char)[j]:
+          ok = 0
+          break
+      j = j + 1
+    if ok != 0:
+      ret 1
+    i = i + 1
+  ret 0
+
+fn cleanup(root:str, child:str, alpha:str, gamma:str) -> int:
+  io.file_delete(alpha)
+  io.file_delete(gamma)
+  io.dir_remove(child)
+  io.dir_remove(root)
+  ret 0
+
+fn write_text(path:str, text:str) -> int:
+  f:*File = io.open_w(path)
+  if f == 0:
+    ret 0 - 1
+  n:int = len(text)
+  p:*char
+  unsafe:
+    p = text as *char
+  rc:int = io.file_write(f, p, n)
+  if io.file_close(f) != 0:
+    ret 0 - 1
+  if rc != n:
+    ret 0 - 1
+  ret rc
+
+fn main() -> int:
+  root:str = "tn_native_dir_list_rec"
+  child:str = "tn_native_dir_list_rec/child"
+  alpha:str = "tn_native_dir_list_rec/alpha.txt"
+  gamma:str = "tn_native_dir_list_rec/child/gamma.txt"
+
+  cleanup(root, child, alpha, gamma)
+
+  if io.dir_make(root) != 0:
+    ret 1
+  if io.dir_make(child) != 0:
+    cleanup(root, child, alpha, gamma)
+    ret 2
+  if write_text(alpha, "alpha") != 5:
+    cleanup(root, child, alpha, gamma)
+    ret 3
+  if write_text(gamma, "gamma") != 5:
+    cleanup(root, child, alpha, gamma)
+    ret 4
+
+  rec:str = io.dir_list_rec(root)
+  if rec == 0:
+    cleanup(root, child, alpha, gamma)
+    ret 5
+  if contains(rec, "alpha.txt") == 0:
+    cleanup(root, child, alpha, gamma)
+    ret 6
+  if contains(rec, "child") == 0:
+    cleanup(root, child, alpha, gamma)
+    ret 7
+  if contains(rec, "gamma.txt") == 0:
+    cleanup(root, child, alpha, gamma)
+    ret 8
+
+  cleanup(root, child, alpha, gamma)
+  say "native-dir-list-rec"
+  ret 0

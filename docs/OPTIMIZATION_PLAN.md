@@ -220,6 +220,12 @@ Started:
   `FindNextFileA`/`FindClose`, and replaced the public `io.glob_list` wrapper
   with a portable stdlib implementation backed by `dir_list`; both are now
   native-smoke gated.
+- Replaced public `io.dir_list_rec`/walk helpers with a portable stdlib
+  implementation backed by the native-smoke-gated `dir_list`, and added
+  Windows/Linux native executable coverage for recursive discovery.
+- Added Windows x64 direct-native `proc_run`/`proc_out` lowering through the C
+  runtime with bounded output capture and a Windows-only native smoke gate;
+  Linux process-output capture remains fail-closed until ELF parity lands.
 - Hardened `io.path_join_p` to use a single allocation/copy path and tightened
   `io.path_norm_p` pointer guards so portable path helpers pass native smoke on
   Windows and Linux x64.

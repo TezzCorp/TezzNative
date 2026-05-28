@@ -1018,7 +1018,64 @@ fn dir_list(p:str) -> str:
 fn dir_list_rec(p:str) -> str:
   if p == 0:
     ret 0 as str
-  ret list_dir_recursive(p)
+  ret _dir_list_rec_impl(p, 0)
+
+fn _str_append_line(out:str, item:str) -> str:
+  if item == 0:
+    ret out
+  if len(item) == 0:
+    ret out
+  if out == 0 || len(out) == 0:
+    next0:str = _str_dup(item)
+    if out != 0:
+      free(out)
+    ret next0
+  next1:str = _str_join3(out, "\n", item)
+  free(out)
+  ret next1
+
+fn _dir_list_rec_impl(path:str, depth:int) -> str:
+  if path == 0:
+    ret 0 as str
+  if depth > 64:
+    ret _str_dup("")
+  listing:str = dir_list(path)
+  if listing == 0:
+    ret 0 as str
+
+  out:str = _str_dup("")
+  start:int = 0
+  ln:int = len(listing)
+  idx:int = 0
+  while idx <= ln:
+    at_end:int = 0
+    ch:int = 0
+    if idx == ln:
+      at_end = 1
+    else:
+      unsafe:
+        ch = (listing as *char)[idx] as int
+    if at_end != 0 || ch == 10:
+      if idx > start:
+        name:str = _str_slice(listing, start, idx)
+        if name != 0:
+          full:str = path_join_portable(path, name)
+          if full != 0:
+            out = _str_append_line(out, full)
+            if path_is_dir(full) != 0:
+              child:str = _dir_list_rec_impl(full, depth + 1)
+              if child != 0:
+                out = _str_append_line(out, child)
+                free(child)
+            free(full)
+          free(name)
+      start = idx + 1
+    idx = idx + 1
+
+  free(listing)
+  if out == 0:
+    ret _str_dup("")
+  ret out
 
 fn _glob_match_impl(pat:str, text:str) -> int:
   if pat == 0 || text == 0:
@@ -1139,7 +1196,7 @@ fn glob_list(p:str) -> str:
   ret out
 
 fn walk_dir(path:str, cb:fn(str)->int) -> int:
-  lst:str = list_dir_recursive(path)
+  lst:str = dir_list_rec(path)
   if lst == 0:
     ret 0 - 1
   i:int = 0
@@ -1164,7 +1221,7 @@ fn walk_dir(path:str, cb:fn(str)->int) -> int:
 
 // Walk with file name + size info
 fn walk_dir_ex(path:str, cb:fn(str, int)->int) -> int:
-  lst:str = list_dir_recursive(path)
+  lst:str = dir_list_rec(path)
   if lst == 0:
     ret 0 - 1
   i:int = 0

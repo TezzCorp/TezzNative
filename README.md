@@ -32,10 +32,10 @@ than the full repository surface.
 | --- | --- | --- |
 | Core syntax | Stable (gated) | Functions, variables, control flow, structs, arrays, imports, `sizeof`/`alignof`, and unsafe pointer blocks |
 | Static type checking | Stable/Beta (gated core) | Type mismatch, unknown name/field, arity, and unsafe diagnostics are snippet checked; richer help is still improving |
-| Native executable flow | Beta (gated x64) | Windows/Linux SDKs build and run hello, loops/math module, strings/transforms, structs, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, `glob_list`, portable paths, vectors, arenas, and time clock/sleep/UTC-date helpers |
+| Native executable flow | Beta (gated x64) | Windows/Linux SDKs build and run hello, loops/math module, strings/transforms, structs, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, public `dir_list_rec`/`glob_list`, portable paths, vectors, arenas, and time clock/sleep/UTC-date helpers; Windows x64 also gates `proc_run`/`proc_out` |
 | Bytecode run flow | Stable/Beta | Useful for development and compatibility |
 | C ABI / extern calls | Beta (gated starter) | Header/ABI dump checks cover pointers, arrays, nested structs, scalar mixes, and extern signatures |
-| Stable stdlib candidates | Stable/Beta (smoke gated) | Core imports plus native math, string, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, public `glob_list`, portable path, vector, arena, and `time` clock/sleep/UTC-date smoke; VM/runtime gates cover deterministic recursive listing and raw glob filters. Direct-native recursive listing and process-output calls fail closed until OS-backed parity lands |
+| Stable stdlib candidates | Stable/Beta (smoke gated) | Core imports plus native math, string, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, public `dir_list_rec`/`glob_list`, portable path, vector, arena, and `time` clock/sleep/UTC-date smoke; Windows x64 also gates process run/output capture. Raw recursive/glob builtins and Linux process-output capture still fail closed until backend parity lands |
 | Networking/TLS/GUI/DB | Beta | Useful, but needs platform matrix testing |
 | GPU/NPU/LLM/kernel modules | Experimental | API surface exists; backend support depends on runtime build |
 
