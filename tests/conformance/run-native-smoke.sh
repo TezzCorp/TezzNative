@@ -37,6 +37,18 @@ normalize_output() {
 for file in "$SMOKE_DIR"/*.tn; do
   name="$(basename "$file")"
   base="${name%.tn}"
+  case "$(uname -s):$name" in
+    Linux*:windows_*.tn)
+      echo "NATIVE_SKIP $name platform=windows"
+      continue
+      ;;
+    *:linux_*.tn)
+      if [[ "$(uname -s)" != Linux* ]]; then
+        echo "NATIVE_SKIP $name platform=linux"
+        continue
+      fi
+      ;;
+  esac
 
   output="$("$TEZZC" check "$file" 2>&1)"
   rc=$?

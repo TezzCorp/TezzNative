@@ -32,10 +32,10 @@ than the full repository surface.
 | --- | --- | --- |
 | Core syntax | Stable (gated) | Functions, variables, control flow, structs, arrays, imports, `sizeof`/`alignof`, and unsafe pointer blocks |
 | Static type checking | Stable/Beta (gated core) | Type mismatch, unknown name/field, arity, and unsafe diagnostics are snippet checked; richer help is still improving |
-| Native executable flow | Beta (gated x64) | Windows/Linux SDKs build and run hello, loops/math module, strings/transforms, structs, raw/wrapped/line/stream file IO, directory lifecycle, portable paths, vectors, arenas, and time clock/sleep/UTC-date helpers |
+| Native executable flow | Beta (gated x64) | Windows/Linux SDKs build and run hello, loops/math module, strings/transforms, structs, raw/wrapped/line/stream file IO, directory lifecycle, portable paths, vectors, arenas, and time clock/sleep/UTC-date helpers; Linux also gates direct `dir_list` |
 | Bytecode run flow | Stable/Beta | Useful for development and compatibility |
 | C ABI / extern calls | Beta (gated starter) | Header/ABI dump checks cover pointers, arrays, nested structs, scalar mixes, and extern signatures |
-| Stable stdlib candidates | Stable/Beta (smoke gated) | Core imports plus native math, string, raw/wrapped/line/stream file IO, directory lifecycle, portable path, vector, arena, and `time` clock/sleep/UTC-date smoke; VM/runtime gates also cover deterministic directory listing, recursive listing, and glob filters. Direct-native listing/glob/process-output calls fail closed until OS-backed parity lands |
+| Stable stdlib candidates | Stable/Beta (smoke gated) | Core imports plus native math, string, raw/wrapped/line/stream file IO, directory lifecycle, portable path, vector, arena, and `time` clock/sleep/UTC-date smoke; Linux direct `dir_list` is gated, and VM/runtime gates cover deterministic directory listing, recursive listing, and glob filters. Direct-native recursive listing/glob/process-output calls fail closed until OS-backed parity lands |
 | Networking/TLS/GUI/DB | Beta | Useful, but needs platform matrix testing |
 | GPU/NPU/LLM/kernel modules | Experimental | API surface exists; backend support depends on runtime build |
 
@@ -128,7 +128,9 @@ Windows and Linux SDK packages.
 
 The native backend smoke lane builds and runs small executable programs for
 hello output, loops/math, math module helpers, strings and transforms, structs,
-raw/wrapped/line/stream file IO, directory lifecycle, portable path helpers, vectors, arenas, and time clock/sleep/UTC-date helpers:
+raw/wrapped/line/stream file IO, directory lifecycle, portable path helpers,
+vectors, arenas, time clock/sleep/UTC-date helpers, and Linux x64 direct
+directory listing:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tests\conformance\run-native-smoke.ps1

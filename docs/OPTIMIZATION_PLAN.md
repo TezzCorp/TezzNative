@@ -212,6 +212,10 @@ Started:
 - Hardened direct-native `list_dir`, `list_dir_recursive`, `glob`, and
   `proc_out` fallbacks so unsupported OS-backed calls return `null` instead of
   a synthetic newline string.
+- Added Linux x64 direct-native `dir_list` using the ELF syscall shim layer and
+  promoted it behind a Linux-only native smoke gate; recursive directory
+  listing, glob, and process-output capture remain fail-closed until their
+  platform implementations land.
 - Hardened `io.path_join_p` to use a single allocation/copy path and tightened
   `io.path_norm_p` pointer guards so portable path helpers pass native smoke on
   Windows and Linux x64.

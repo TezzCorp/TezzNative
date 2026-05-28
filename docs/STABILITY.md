@@ -41,9 +41,10 @@ These surfaces are useful today but need more conformance tests:
 - `io`, `str`, `math`, `vec`, `arena`, `time`; imports plus selected native
   executable smoke for raw/wrapped/line/stream file IO, directory lifecycle,
   portable paths, math helpers, string transforms, vectors, arenas, and `time`
-  clock/sleep/UTC-date helpers are gated across both primary x64 targets; local
-  timezone formatting remains preview. VM/runtime gates also cover sorted
-  directory listing, recursive listing, and glob filters. Direct-native
+  clock/sleep/UTC-date helpers are gated across both primary x64 targets; Linux
+  x64 also gates direct-native non-recursive `dir_list`. Local timezone
+  formatting remains preview. VM/runtime gates also cover sorted directory
+  listing, recursive listing, and glob filters. Direct-native recursive
   directory listing, glob, and process-output calls fail closed with `null`
   until OS-backed PE/ELF implementations are promoted
 - `net`, `tls`, `tezzserve`, `tezzapi`
@@ -80,8 +81,8 @@ risk. They should not be treated as guaranteed production APIs.
 - Add native executable stress tests for Windows and Linux x86_64 beyond the
   current hello, loop/math, math-module, string, struct, raw/wrapped/line/stream
   file IO, directory lifecycle, portable path, vector, arena, and time smoke.
-- Add direct-native OS-backed parity for directory listing/glob and process
-  output after the current fail-closed native fallbacks.
+- Add Windows direct-native directory listing, plus recursive listing/glob and
+  process-output parity after the current fail-closed native fallbacks.
 - Add module-level stdlib checks for stable and beta modules.
 - Add docs for every stable public function.
 - Publish benchmark and platform support matrices.

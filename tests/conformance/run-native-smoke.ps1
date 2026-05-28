@@ -70,6 +70,15 @@ function Write-TestOutput {
 
 try {
   foreach ($file in Get-ChildItem -LiteralPath $smokeDir -Filter '*.tn' | Sort-Object Name) {
+    if ($isWindows -and $file.Name -like 'linux_*.tn') {
+      Write-Host "NATIVE_SKIP $($file.Name) platform=linux"
+      continue
+    }
+    if (-not $isWindows -and $file.Name -like 'windows_*.tn') {
+      Write-Host "NATIVE_SKIP $($file.Name) platform=windows"
+      continue
+    }
+
     $check = Invoke-Compiler -CompilerArgs @('check', $file.FullName)
     if ($check.ExitCode -ne 0) {
       Write-Host "FAIL native/$($file.Name) check exit=$($check.ExitCode)"

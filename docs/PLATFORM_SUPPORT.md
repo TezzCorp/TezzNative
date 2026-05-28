@@ -31,9 +31,9 @@ changes.
 | --- | --- | --- | --- | --- |
 | Core language | Primary | Primary | Planned | Stable-core conformance runs on Windows and Linux SDKs. |
 | Bytecode run | Primary | Preview | Planned | Compatibility path while native backend matures. |
-| Native executable | Primary/Beta | Primary/Beta | Planned | Hello, loop/math, math-module, string, string-transform, struct-array, raw/wrapped/line/stream file IO, directory lifecycle, portable path, vector, arena, and time executable smoke tests pass on Windows and Linux x64. |
+| Native executable | Primary/Beta | Primary/Beta | Planned | Hello, loop/math, math-module, string, string-transform, struct-array, raw/wrapped/line/stream file IO, directory lifecycle, portable path, vector, arena, and time executable smoke tests pass on Windows and Linux x64. Linux x64 also gates direct-native directory listing. |
 | Time/date runtime | Beta | Beta | Planned | `time` imports and native clock/sleep/UTC-date execution are gated on Windows/Linux x64; local timezone formatting remains preview. |
-| IO/path/process | Beta | Preview | Planned | Raw file read/write, File wrapper open/write/read/write-line/read-line/flush/seek/tell/close, BigFile chunk reads, StreamWriter flush/close behavior, portable `file_size_bytes`, file delete/rename, directory make/remove/exists, EOF/null guards, and portable path helpers have native smoke coverage; VM/runtime gates cover deterministic directory listing, recursive listing, and glob filters. Direct-native directory listing, glob, and process-output calls now fail closed with `null`; OS-backed implementations still need platform-specific tests. |
+| IO/path/process | Beta | Preview | Planned | Raw file read/write, File wrapper open/write/read/write-line/read-line/flush/seek/tell/close, BigFile chunk reads, StreamWriter flush/close behavior, portable `file_size_bytes`, file delete/rename, directory exists/make/remove, EOF/null guards, portable path helpers, and Linux x64 direct `dir_list` have native smoke coverage; VM/runtime gates cover deterministic directory listing, recursive listing, and glob filters. Windows direct `dir_list`, direct recursive listing/glob, and process-output capture still fail closed with `null`. |
 | Networking | Beta | Preview | Planned | Socket and HTTP tests should be added. |
 | TLS | Beta | Preview | Planned | Linux builds without OpenSSL development headers expose unsupported TLS stubs until linked with a TLS backend. |
 | GUI | Beta | Experimental | Planned | Windows host modules are the clearest path today. |
@@ -55,8 +55,9 @@ A target should not move to Primary until:
 ## Immediate Improvements
 
 1. Add CI jobs for Windows x64 and Linux x64.
-2. Add OS-backed direct-native directory listing/glob/process implementations
-   and promote them only after Windows and Linux x64 smoke tests pass.
+2. Add Windows direct-native directory listing, then direct recursive
+   listing/glob/process implementations, and promote each only after target
+   smoke tests pass.
 3. Publish exact binary names, hashes, and sizes for every download.
 4. Add target-specific notes to docs and download pages.
 5. Fail unsupported targets clearly instead of silently falling back.

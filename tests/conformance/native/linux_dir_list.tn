@@ -1,0 +1,62 @@
+import "io"
+
+fn has_substr(hay:str, needle:str) -> int:
+  if hay == 0 || needle == 0:
+    ret 0
+  hn:int = len(hay)
+  nn:int = len(needle)
+  if nn == 0:
+    ret 1
+  if hn < nn:
+    ret 0
+  i:int = 0
+  while i <= hn - nn:
+    j:int = 0
+    ok:int = 1
+    while j < nn:
+      unsafe:
+        if (hay as *char)[i + j] != (needle as *char)[j]:
+          ok = 0
+          break
+      j = j + 1
+    if ok != 0:
+      ret 1
+    i = i + 1
+  ret 0
+
+fn main() -> int:
+  dir:str = "tn_native_linux_dir_list_d"
+  file:str = "tn_native_linux_dir_list_d/alpha.txt"
+  io.file_delete(file)
+  io.dir_remove(dir)
+  if io.dir_make(dir) != 0:
+    ret 1
+  out:*File = io.open_w(file)
+  if out == 0:
+    io.dir_remove(dir)
+    ret 2
+  if io.file_write_line(out, "payload") != 0:
+    io.file_delete(file)
+    io.dir_remove(dir)
+    ret 3
+  if io.file_close(out) != 0:
+    io.file_delete(file)
+    io.dir_remove(dir)
+    ret 4
+  listing:str = io.dir_list(dir)
+  if listing == 0:
+    io.file_delete(file)
+    io.dir_remove(dir)
+    ret 5
+  if has_substr(listing, "alpha.txt") == 0:
+    unsafe:
+      free(listing)
+    io.file_delete(file)
+    io.dir_remove(dir)
+    ret 6
+  unsafe:
+    free(listing)
+  io.file_delete(file)
+  io.dir_remove(dir)
+  say "native-linux-dir-list"
+  ret 0
