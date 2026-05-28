@@ -240,8 +240,11 @@ Started:
 - Added a Linux x64 ELF syscall-backed `net` bridge for IPv4 loopback TCP:
   socket, bind, listen, connect, accept, send, recv, close, and network
   constants now lower through direct-native stubs and are covered by a
-  Linux-only loopback send/recv smoke test. Windows socket parity remains the
-  next backend networking gap.
+  Linux-only loopback send/recv smoke test.
+- Added Windows x64 direct-native `net` socket parity through the PE import
+  table and Winsock adapters for WSA startup/cleanup, socket, bind, listen,
+  connect, accept, send, recv, close, blocking mode, and socket timeouts. A
+  Windows-only loopback smoke gate now validates bidirectional TCP send/recv.
 
 ## Milestone 3: Standard Library Hardening
 
@@ -344,6 +347,10 @@ Started:
 - Added a Linux x64 `net` loopback smoke gate that creates a listener,
   connects a client, accepts the server peer, and validates bidirectional
   `ping`/`pong` TCP send/recv through the direct-native backend.
+- Added the matching Windows x64 `net` loopback smoke gate through Winsock PE
+  imports, closing the first direct-native socket parity slice. DNS-backed
+  sockets and live HTTP client/server execution remain the next networking
+  hardening gates.
 
 ## Milestone 4: Developer Experience
 
