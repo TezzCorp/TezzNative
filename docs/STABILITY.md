@@ -41,13 +41,12 @@ These surfaces are useful today but need more conformance tests:
 - `io`, `str`, `math`, `vec`, `arena`, `time`; imports plus selected native
   executable smoke for raw/wrapped/line/stream file IO, directory lifecycle,
   direct `dir_list`, public `dir_list_rec`/`glob_list`, portable paths, math
-  helpers, string transforms, vectors, arenas, and `time`
-  clock/sleep/UTC-date helpers are gated across both primary x64 targets.
-  Windows x64 also gates `proc_run` and `proc_out` through the direct-native
-  backend. Local timezone formatting remains preview. VM/runtime gates also
+  helpers, string transforms, vectors, arenas, process run/output capture, and
+  `time` clock/sleep/UTC-date helpers are gated across both primary x64
+  targets. Local timezone formatting remains preview. VM/runtime gates also
   cover sorted recursive directory listing and raw glob filters. Raw
-  recursive/glob builtins and Linux process-output capture still fail closed
-  with `null` until the remaining backend implementations are promoted
+  recursive/glob builtins still fail closed with `null` until the remaining
+  backend implementations are promoted
 - `net`, `tls`, `tezzserve`, `tezzapi`
 - `tezzdb` and `tezzdbql`
 - GUI modules on supported host platforms
@@ -83,8 +82,8 @@ risk. They should not be treated as guaranteed production APIs.
   current hello, loop/math, math-module, string, struct, raw/wrapped/line/stream
   file IO, directory lifecycle, recursive listing, portable path, vector,
   arena, process, and time smoke.
-- Add Linux direct-native process-output parity and raw recursive/glob builtin
-  parity after the current fail-closed native fallbacks.
+- Add raw recursive/glob builtin parity after the current fail-closed native
+  fallbacks.
 - Add module-level stdlib checks for stable and beta modules.
 - Add docs for every stable public function.
 - Publish benchmark and platform support matrices.

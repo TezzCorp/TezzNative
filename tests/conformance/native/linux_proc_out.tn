@@ -1,0 +1,33 @@
+fn contains(s:str, token:str) -> int:
+  if s == 0 || token == 0:
+    ret 0
+  n:int = len(s)
+  m:int = len(token)
+  if m <= 0 || n < m:
+    ret 0
+  i:int = 0
+  while i <= n - m:
+    j:int = 0
+    ok:int = 1
+    while j < m:
+      unsafe:
+        if (s as *char)[i + j] != (token as *char)[j]:
+          ok = 0
+          break
+      j = j + 1
+    if ok != 0:
+      ret 1
+    i = i + 1
+  ret 0
+
+fn main() -> int:
+  out:str = proc_out("printf tezznative-linux-proc-out")
+  if out == 0:
+    ret 1
+  if contains(out, "tezznative-linux-proc-out") == 0:
+    ret 2
+  rc:int = proc_run("true")
+  if rc != 0:
+    ret 3
+  say "native-linux-proc-out"
+  ret 0
