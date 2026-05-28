@@ -1,5 +1,23 @@
 import "time"
 
+fn check_date19(s:str) -> int:
+  if s == 0:
+    ret 0
+  if len(s) != 19:
+    ret 0
+  unsafe:
+    if s[4] != 45 as char:
+      ret 0
+    if s[7] != 45 as char:
+      ret 0
+    if s[10] != 32 as char:
+      ret 0
+    if s[13] != 58 as char:
+      ret 0
+    if s[16] != 58 as char:
+      ret 0
+  ret 1
+
 fn main() -> int:
   if time.sleep(0) != 0:
     ret 1
@@ -20,30 +38,22 @@ fn main() -> int:
     ret 6
 
   utc:str = time.date_utc()
-  if utc == 0:
+  if check_date19(utc) == 0:
+    if utc != 0:
+      unsafe:
+        free(utc)
     ret 7
-  if len(utc) != 19:
-    unsafe:
-      free(utc)
-    ret 8
-  unsafe:
-    if utc[4] != 45 as char:
-      free(utc)
-      ret 9
-    if utc[7] != 45 as char:
-      free(utc)
-      ret 10
-    if utc[10] != 32 as char:
-      free(utc)
-      ret 11
-    if utc[13] != 58 as char:
-      free(utc)
-      ret 12
-    if utc[16] != 58 as char:
-      free(utc)
-      ret 13
   unsafe:
     free(utc)
+
+  local:str = time.date_local()
+  if check_date19(local) == 0:
+    if local != 0:
+      unsafe:
+        free(local)
+    ret 8
+  unsafe:
+    free(local)
 
   say "time-module"
   ret 0

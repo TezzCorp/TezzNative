@@ -231,6 +231,9 @@ Started:
   added Linux x64 ELF syscall-backed `proc_run`/`proc_out` using
   fork/execve/wait4 and bounded pipe capture, with a Linux-only native smoke
   gate.
+- Hardened `time.date_local()` with strict date-shape validation and
+  Windows/Linux process-backed local-time formatting fallback, and promoted it
+  into the native time smoke gate.
 - Hardened `io.path_join_p` to use a single allocation/copy path and tightened
   `io.path_norm_p` pointer guards so portable path helpers pass native smoke on
   Windows and Linux x64.
@@ -324,9 +327,8 @@ Started:
   both Windows PE and Linux ELF native codegen.
 - Removed the demo `main` from `lib/math.tn` so `math` stays a library-only
   import surface.
-- Closed the first native `time` gaps: Windows/Linux x64 now gate clock,
-  sleep, and UTC date-format helpers in native smoke; local timezone formatting
-  remains a targeted runtime-backend follow-up.
+- Closed the native `time` date-format gaps: Windows/Linux x64 now gate clock,
+  sleep, UTC date-format, and local date-format helpers in native smoke.
 
 ## Milestone 4: Developer Experience
 

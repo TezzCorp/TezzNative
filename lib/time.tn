@@ -17,6 +17,81 @@ fn now_ns() -> int:
 fn _time_digit(n:int) -> char:
   ret (48 + n) as char
 
+fn _time_is_digit_code(c:int) -> int:
+  if c >= 48 && c <= 57:
+    ret 1
+  ret 0
+
+fn _time_is_date19_at(s:str, off:int) -> int:
+  if s == 0 || off < 0:
+    ret 0
+  if len(s) < off + 19:
+    ret 0
+  unsafe:
+    if _time_is_digit_code((s as *char)[off] as int) == 0:
+      ret 0
+    if _time_is_digit_code((s as *char)[off + 1] as int) == 0:
+      ret 0
+    if _time_is_digit_code((s as *char)[off + 2] as int) == 0:
+      ret 0
+    if _time_is_digit_code((s as *char)[off + 3] as int) == 0:
+      ret 0
+    if (s as *char)[off + 4] != 45 as char:
+      ret 0
+    if _time_is_digit_code((s as *char)[off + 5] as int) == 0:
+      ret 0
+    if _time_is_digit_code((s as *char)[off + 6] as int) == 0:
+      ret 0
+    if (s as *char)[off + 7] != 45 as char:
+      ret 0
+    if _time_is_digit_code((s as *char)[off + 8] as int) == 0:
+      ret 0
+    if _time_is_digit_code((s as *char)[off + 9] as int) == 0:
+      ret 0
+    if (s as *char)[off + 10] != 32 as char:
+      ret 0
+    if _time_is_digit_code((s as *char)[off + 11] as int) == 0:
+      ret 0
+    if _time_is_digit_code((s as *char)[off + 12] as int) == 0:
+      ret 0
+    if (s as *char)[off + 13] != 58 as char:
+      ret 0
+    if _time_is_digit_code((s as *char)[off + 14] as int) == 0:
+      ret 0
+    if _time_is_digit_code((s as *char)[off + 15] as int) == 0:
+      ret 0
+    if (s as *char)[off + 16] != 58 as char:
+      ret 0
+    if _time_is_digit_code((s as *char)[off + 17] as int) == 0:
+      ret 0
+    if _time_is_digit_code((s as *char)[off + 18] as int) == 0:
+      ret 0
+  ret 1
+
+fn _time_copy_date19(s:str, off:int) -> str:
+  if _time_is_date19_at(s, off) == 0:
+    ret 0 as str
+  out:*char = malloc(20)
+  if out == 0:
+    ret 0 as str
+  i:int = 0
+  while i < 19:
+    unsafe:
+      out[i] = (s as *char)[off + i]
+    i = i + 1
+  unsafe:
+    out[19] = 0 as char
+  ret out as str
+
+fn _time_date19_from_output(cmd:str) -> str:
+  raw:str = proc_out(cmd)
+  if raw == 0:
+    ret 0 as str
+  out:str = _time_copy_date19(raw, 0)
+  unsafe:
+    free(raw)
+  ret out
+
 fn _time_put2(out:*char, off:int, n:int) -> int:
   if out == 0:
     ret 0
@@ -89,7 +164,19 @@ fn _time_format_utc_from_unix(sec:int) -> str:
   ret out as str
 
 fn date_local() -> str:
-  ret date_now()
+  raw:str = date_now()
+  if _time_is_date19_at(raw, 0) != 0:
+    ret raw
+
+  out:str = _time_date19_from_output("date '+%Y-%m-%d %H:%M:%S'")
+  if out != 0:
+    ret out
+
+  out = _time_date19_from_output("powershell -NoProfile -Command \"Get-Date -Format 'yyyy-MM-dd HH:mm:ss'\"")
+  if out != 0:
+    ret out
+
+  ret date_utc()
 
 fn date_utc() -> str:
   ret _time_format_utc_from_unix(now())
