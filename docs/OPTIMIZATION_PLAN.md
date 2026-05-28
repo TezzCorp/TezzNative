@@ -237,6 +237,11 @@ Started:
 - Hardened `io.path_join_p` to use a single allocation/copy path and tightened
   `io.path_norm_p` pointer guards so portable path helpers pass native smoke on
   Windows and Linux x64.
+- Added a Linux x64 ELF syscall-backed `net` bridge for IPv4 loopback TCP:
+  socket, bind, listen, connect, accept, send, recv, close, and network
+  constants now lower through direct-native stubs and are covered by a
+  Linux-only loopback send/recv smoke test. Windows socket parity remains the
+  next backend networking gap.
 
 ## Milestone 3: Standard Library Hardening
 
@@ -336,6 +341,9 @@ Started:
   IPv4 octets are range checked, and query strings with fragments are handled.
   Native smoke now gates URL, DNS endpoint, HTTP parser, route, auth/cookie,
   and chunked response decoding helpers on Windows and Linux x64.
+- Added a Linux x64 `net` loopback smoke gate that creates a listener,
+  connects a client, accepts the server peer, and validates bidirectional
+  `ping`/`pong` TCP send/recv through the direct-native backend.
 
 ## Milestone 4: Developer Experience
 

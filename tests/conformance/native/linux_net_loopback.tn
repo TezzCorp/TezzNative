@@ -1,0 +1,91 @@
+import "net"
+
+fn close_if(sock:int) -> int:
+  if sock >= 0:
+    net.close(sock)
+  ret 0
+
+fn open_listener(port:int) -> int:
+  ret net.tcp_listen("127.0.0.1", port, 8)
+
+fn main() -> int:
+  if net.init() != 0:
+    ret 1
+
+  port:int = 39191
+  listener:int = open_listener(port)
+  if listener < 0:
+    port = 39203
+    listener = open_listener(port)
+  if listener < 0:
+    port = 39227
+    listener = open_listener(port)
+  if listener < 0:
+    net.cleanup()
+    ret 2
+
+  client:int = net.tcp_connect("127.0.0.1", port)
+  if client < 0:
+    close_if(listener)
+    net.cleanup()
+    ret 3
+
+  server:int = net.accept(listener)
+  if server < 0:
+    close_if(client)
+    close_if(listener)
+    net.cleanup()
+    ret 4
+
+  if net.tcp_send_text(client, "ping") != 4:
+    close_if(server)
+    close_if(client)
+    close_if(listener)
+    net.cleanup()
+    ret 5
+
+  buf:[char;8]
+  r:int = 0
+  unsafe:
+    r = net.recv(server, &buf[0], 4)
+  if r != 4:
+    close_if(server)
+    close_if(client)
+    close_if(listener)
+    net.cleanup()
+    ret 6
+  if (((buf[0] as int) & 255) != 112) || (((buf[1] as int) & 255) != 105) || (((buf[2] as int) & 255) != 110) || (((buf[3] as int) & 255) != 103):
+    close_if(server)
+    close_if(client)
+    close_if(listener)
+    net.cleanup()
+    ret 7
+
+  if net.tcp_send_text(server, "pong") != 4:
+    close_if(server)
+    close_if(client)
+    close_if(listener)
+    net.cleanup()
+    ret 8
+
+  unsafe:
+    r = net.recv(client, &buf[0], 4)
+  if r != 4:
+    close_if(server)
+    close_if(client)
+    close_if(listener)
+    net.cleanup()
+    ret 9
+  if (((buf[0] as int) & 255) != 112) || (((buf[1] as int) & 255) != 111) || (((buf[2] as int) & 255) != 110) || (((buf[3] as int) & 255) != 103):
+    close_if(server)
+    close_if(client)
+    close_if(listener)
+    net.cleanup()
+    ret 10
+
+  close_if(server)
+  close_if(client)
+  close_if(listener)
+  net.cleanup()
+  say "linux-net-loopback"
+  ret 0
