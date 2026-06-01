@@ -1,0 +1,68 @@
+import "io"
+
+fn main() -> int:
+  path:str = "tn_benchmark_file_io.tmp"
+  chunk:str = "TezzNativeBenchmarkBlock"
+  chunk_len:int = len(chunk)
+  reps:int = 12000
+  expected_bytes:int = chunk_len * reps
+
+  out:*File = io.open_wb(path)
+  if out == 0:
+    ret 1
+  data:*char
+  unsafe:
+    data = chunk as *char
+
+  i:int = 0
+  while i < reps:
+    wrote:int = io.file_write(out, data, chunk_len)
+    if wrote != chunk_len:
+      ret 2
+    i = i + 1
+  if io.file_close(out) != 0:
+    ret 3
+  if io.file_size_bytes(path) != expected_bytes:
+    io.file_delete(path)
+    ret 4
+
+  inp:*File = io.open_rb(path)
+  if inp == 0:
+    io.file_delete(path)
+    ret 5
+
+  buf:*char
+  unsafe:
+    buf = malloc(chunk_len)
+  if buf == 0:
+    io.file_delete(path)
+    ret 6
+
+  total:int = 0
+  acc:int = 0
+  while total < expected_bytes:
+    got:int = io.file_read(inp, buf, chunk_len)
+    if got != chunk_len:
+      unsafe:
+        free(buf)
+      io.file_delete(path)
+      ret 7
+    j:int = 0
+    while j < got:
+      unsafe:
+        acc = (acc + ((buf[j] as int) & 255)) & 1048575
+      j = j + 1
+    total = total + got
+
+  unsafe:
+    free(buf)
+  if io.file_close(inp) != 0:
+    io.file_delete(path)
+    ret 8
+  if io.file_delete(path) != 0:
+    ret 9
+  if total != expected_bytes:
+    ret 10
+  if acc == 0 - 1:
+    ret 11
+  ret 0

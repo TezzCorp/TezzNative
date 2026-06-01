@@ -78,6 +78,9 @@ risk. They should not be treated as guaranteed production APIs.
 - Experimental APIs may change without migration guarantees.
 - Runtime-backed modules must document whether they use a real backend, a CPU
   fallback, or a stub on each platform.
+- Benchmark claims must include source-visible fixtures plus CSV/metadata output
+  from the public harness; bytecode, native build, native run, and external
+  language comparisons must remain separate.
 
 ## Near-Term Hardening Checklist
 

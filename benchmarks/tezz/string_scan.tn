@@ -1,0 +1,18 @@
+fn main() -> int:
+  text:str = "TezzNative makes native tools readable and fast."
+  reps:int = 60000
+  i:int = 0
+  acc:int = 0
+  n:int = len(text)
+  while i < reps:
+    j:int = 0
+    while j < n:
+      ch:int = 0
+      unsafe:
+        ch = ((text as *char)[j] as int)
+      acc = (acc + ((ch * (j + 1)) & 65535)) & 1048575
+      j = j + 1
+    i = i + 1
+  if acc == 0 - 1:
+    ret 1
+  ret 0

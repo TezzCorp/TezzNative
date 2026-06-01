@@ -532,7 +532,7 @@ Started:
 
 ## Milestone 8: Benchmarks And Performance Proof
 
-Status: started.
+Status: completed for the current public benchmark surface.
 
 Goal: publish honest performance data.
 
@@ -565,7 +565,7 @@ Benchmark rules:
 - Separate bytecode mode from native mode.
 - Separate real GPU/NPU backend results from fallback results.
 
-Started:
+Delivered:
 
 - Added `benchmarks/run.ps1`.
 - Added `benchmarks/run.sh`.
@@ -575,6 +575,22 @@ Started:
   elapsed time, and binary size where available.
 - Added CI check-only validation so public benchmark TezzNative sources stay in
   the supported syntax subset.
+- Expanded the source-visible workload set to startup, numeric loop,
+  string-scan, and binary file read/write.
+- Added optional comparison fixtures for Python, C, Node.js, Go, and Rust.
+- Upgraded the runners to emit schema-labeled CSV plus metadata JSON with
+  command lines, exit codes, output hashes, timeout status, binary sizes, and
+  peak working-set memory where the host exposes it.
+- Separated TezzNative check, bytecode run, native build, and native run phases
+  so compile time, runtime, and binary size are not mixed.
+- Documented the public workload matrix, skipped-tool behavior, result schema,
+  and publishing rules in `docs/BENCHMARKS.md`.
+
+Still intentionally unclaimed:
+
+- JSON parsing, HTTP throughput, matrix math, and GPU/NPU performance remain
+  outside public benchmark claims until source-visible fixtures and backend
+  correctness gates exist.
 
 ## Milestone 9: Security And Release Engineering
 

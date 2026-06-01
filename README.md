@@ -165,15 +165,17 @@ Windows and Linux CI both run this lane with full `abiverify` against the
 published SDK compiler. The JSON ABI manifest records struct sizes, alignment,
 field offsets, field type shapes, function return types, and parameter shapes.
 
-The public benchmark skeleton records environment metadata, bytecode timing,
-native build timing, native run timing, exit codes, and binary size:
+The public benchmark harness records environment metadata, bytecode timing,
+native build timing, native run timing, peak memory where available, exit codes,
+output hashes, and binary size:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\benchmarks\run.ps1
 ```
 
-Use `-IncludeExternal` to run the Python and C comparison fixtures when those
-toolchains are available.
+Use `-IncludeExternal` to run optional Python, C, Node.js, Go, and Rust
+comparison fixtures when those toolchains are available. See
+`docs/BENCHMARKS.md` for the workload matrix and publishing rules.
 
 Release manifests can be generated and verified with:
 
