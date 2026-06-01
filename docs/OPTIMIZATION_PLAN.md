@@ -257,6 +257,10 @@ Started:
   so `net.connect`, `net.bind`, `tcp_connect`, `tcp_listen`, and `udp_connect`
   behave consistently across direct-native Windows/Linux x64. Native smoke now
   gates mixed-case localhost bind/connect plus TCP send/recv and UDP connect.
+- Added an HTTP response reader that stops on `Content-Length` or completed
+  chunked framing instead of waiting for peer close/timeout. `tcp_request` now
+  uses this path, `Transfer-Encoding` token matching handles comma-separated
+  values, and native smoke gates keep-alive fixed-length and chunked responses.
 
 ## Milestone 3: Standard Library Hardening
 
@@ -371,6 +375,9 @@ Started:
 - Added Windows/Linux native smoke for public localhost socket wrappers across
   bind, TCP connect, and UDP connect. DNS-backed sockets and public-network HTTP
   execution remain the next networking hardening gates.
+- Added Windows/Linux native smoke for keep-alive HTTP response reads covering
+  fixed `Content-Length`, chunked bodies with extensions/trailers, and
+  comma-separated `Transfer-Encoding` tokens.
 
 ## Milestone 4: Developer Experience
 

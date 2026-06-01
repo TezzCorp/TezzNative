@@ -1,0 +1,149 @@
+import "net"
+
+fn close_if(sock:int) -> int:
+  if sock >= 0:
+    net.close(sock)
+  ret 0
+
+fn release_owned(s:str) -> int:
+  if s != 0:
+    unsafe:
+      free(s)
+  ret 0
+
+fn expect_owned(actual:str, expected:str, code:int) -> int:
+  if actual == 0:
+    ret code
+  cmp:int = strcmp(actual, expected)
+  unsafe:
+    free(actual)
+  if cmp != 0:
+    ret code
+  ret 0
+
+fn open_listener(port:int) -> int:
+  ret net.http_server_listen("127.0.0.1", port, 8)
+
+fn read_request_and_send(server:int, response:str) -> int:
+  req:str = net.http_read_request(server, 4096)
+  if req == 0:
+    ret 1
+  release_owned(req)
+  if net.tcp_send_text(server, response) != len(response):
+    ret 2
+  ret 0
+
+fn main() -> int:
+  if net.init() != 0:
+    ret 1
+
+  port:int = 39611
+  listener:int = open_listener(port)
+  if listener < 0:
+    port = 39623
+    listener = open_listener(port)
+  if listener < 0:
+    port = 39631
+    listener = open_listener(port)
+  if listener < 0:
+    net.cleanup()
+    ret 2
+
+  client1:int = net.tcp_connect_timeout("127.0.0.1", port, 2500)
+  if client1 < 0:
+    close_if(listener)
+    net.cleanup()
+    ret 3
+  if net.tcp_send_text(client1, "GET /fixed HTTP/1.1\r\nHost: localhost\r\n\r\n") <= 0:
+    close_if(client1)
+    close_if(listener)
+    net.cleanup()
+    ret 4
+  server1:int = net.http_server_accept(listener, 2500)
+  if server1 < 0:
+    close_if(client1)
+    close_if(listener)
+    net.cleanup()
+    ret 5
+  fixed_resp:str = "HTTP/1.1 202 Accepted\r\nContent-Length: 4\r\nConnection: keep-alive\r\n\r\npong"
+  if read_request_and_send(server1, fixed_resp) != 0:
+    close_if(server1)
+    close_if(client1)
+    close_if(listener)
+    net.cleanup()
+    ret 6
+  resp1:str = net.http_read_response(client1, 4096)
+  if resp1 == 0:
+    close_if(server1)
+    close_if(client1)
+    close_if(listener)
+    net.cleanup()
+    ret 7
+  if net.http_status_code(resp1) != 202:
+    release_owned(resp1)
+    close_if(server1)
+    close_if(client1)
+    close_if(listener)
+    net.cleanup()
+    ret 8
+  rc:int = expect_owned(net.http_response_body_decoded(resp1), "pong", 9)
+  release_owned(resp1)
+  close_if(server1)
+  close_if(client1)
+  if rc != 0:
+    close_if(listener)
+    net.cleanup()
+    ret rc
+
+  client2:int = net.tcp_connect_timeout("127.0.0.1", port, 2500)
+  if client2 < 0:
+    close_if(listener)
+    net.cleanup()
+    ret 10
+  if net.tcp_send_text(client2, "GET /chunked HTTP/1.1\r\nHost: localhost\r\n\r\n") <= 0:
+    close_if(client2)
+    close_if(listener)
+    net.cleanup()
+    ret 11
+  server2:int = net.http_server_accept(listener, 2500)
+  if server2 < 0:
+    close_if(client2)
+    close_if(listener)
+    net.cleanup()
+    ret 12
+  chunked_resp:str = "HTTP/1.1 200 Fine\r\nTransfer-Encoding: gzip, Chunked\r\nConnection: keep-alive\r\n\r\n5;ext=1\r\nhello\r\n6\r\n world\r\n0\r\nX-Trailer: ok\r\n\r\n"
+  if read_request_and_send(server2, chunked_resp) != 0:
+    close_if(server2)
+    close_if(client2)
+    close_if(listener)
+    net.cleanup()
+    ret 13
+  resp2:str = net.http_read_response(client2, 4096)
+  if resp2 == 0:
+    close_if(server2)
+    close_if(client2)
+    close_if(listener)
+    net.cleanup()
+    ret 14
+  if net.http_status_code(resp2) != 200:
+    release_owned(resp2)
+    close_if(server2)
+    close_if(client2)
+    close_if(listener)
+    net.cleanup()
+    ret 15
+  rc = expect_owned(net.http_reason_phrase(resp2), "Fine", 16)
+  if rc == 0 && net.http_is_chunked(resp2) != 1:
+    rc = 17
+  if rc == 0:
+    rc = expect_owned(net.http_response_body_decoded(resp2), "hello world", 18)
+  release_owned(resp2)
+  close_if(server2)
+  close_if(client2)
+  close_if(listener)
+  net.cleanup()
+  if rc != 0:
+    ret rc
+
+  say "net-http-response-keepalive"
+  ret 0

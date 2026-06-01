@@ -390,7 +390,7 @@ fn tcp_request(host:str, port:int, request:str, timeout_ms:int, max_bytes:int) -
   if tcp_send_text(s, request) < 0:
     net_close(s)
     ret 0 as str
-  resp:str = tcp_recv_all(s, max_bytes)
+  resp:str = http_read_response(s, max_bytes)
   net_close(s)
   ret resp
 
@@ -775,6 +775,117 @@ fn _contains_nocase(hay:str, needle:str) -> int:
     i = i + 1
   ret 0
 
+fn _header_has_token(value:str, token:str) -> int:
+  if value == 0 || token == 0:
+    ret 0
+  n:int = len(value)
+  i:int = 0
+  while i < n:
+    while i < n:
+      c0:int = _byte_at(value, i)
+      if c0 == 44 || c0 == 32 || c0 == 9:
+        i = i + 1
+      else:
+        break
+    start:int = i
+    end:int = i
+    while i < n:
+      c1:int = _byte_at(value, i)
+      if c1 == 44:
+        break
+      if c1 == 59:
+        j:int = i
+        while j < n && _byte_at(value, j) != 44:
+          j = j + 1
+        end = i
+        i = j
+        break
+      end = i + 1
+      i = i + 1
+    while end > start:
+      c2:int = _byte_at(value, end - 1)
+      if c2 == 32 || c2 == 9:
+        end = end - 1
+      else:
+        break
+    if end > start && _eq_nocase_range(value, start, end, token) != 0:
+      ret 1
+    if i < n && _byte_at(value, i) == 44:
+      i = i + 1
+  ret 0
+
+fn _line_end_index(s:str, n:int, start:int) -> int:
+  if s == 0:
+    ret 0 - 1
+  i:int = start
+  if i < 0:
+    i = 0
+  while i < n:
+    c:int = _byte_at(s, i)
+    if c == 10 || c == 13:
+      ret i
+    if c == 114 && (i + 1) < n:
+      if _byte_at(s, i + 1) == 10:
+        ret i
+    i = i + 1
+  ret 0 - 1
+
+fn _skip_line_break(s:str, n:int, i:int) -> int:
+  if s == 0 || i >= n:
+    ret i
+  c:int = _byte_at(s, i)
+  if c == 13:
+    if (i + 1) < n && _byte_at(s, i + 1) == 10:
+      ret i + 2
+    ret i + 1
+  if c == 10:
+    ret i + 1
+  if c == 114 && (i + 1) < n && _byte_at(s, i + 1) == 10:
+    ret i + 2
+  ret i
+
+fn _http_content_length_or_missing(msg:str) -> int:
+  h:str = http_get_header(msg, "Content-Length")
+  if h == 0:
+    ret 0 - 1
+  n:int = _parse_int_dec(h)
+  free(h)
+  if n < 0:
+    n = 0
+  ret n
+
+fn _http_chunked_complete_index(msg:str, total:int, body_start:int) -> int:
+  if msg == 0 || body_start < 0:
+    ret 0 - 1
+  i:int = body_start
+  while i < total:
+    line_end:int = _line_end_index(msg, total, i)
+    if line_end < 0:
+      ret 0 - 1
+    sz:int = _parse_hex_slice(msg, i, line_end)
+    after_line:int = _skip_line_break(msg, total, line_end)
+    if after_line == line_end:
+      ret 0 - 1
+    if sz <= 0:
+      j:int = after_line
+      while j < total:
+        trailer_end:int = _line_end_index(msg, total, j)
+        if trailer_end < 0:
+          ret 0 - 1
+        next:int = _skip_line_break(msg, total, trailer_end)
+        if trailer_end == j:
+          ret next
+        j = next
+      ret 0 - 1
+    if after_line + sz > total:
+      ret 0 - 1
+    i = after_line + sz
+    next_data:int = _skip_line_break(msg, total, i)
+    if next_data == i:
+      ret 0 - 1
+    i = next_data
+  ret 0 - 1
+
 // HTTP server helpers.
 
 fn http_server_listen(host:str, port:int, backlog:int) -> int:
@@ -832,6 +943,59 @@ fn http_read_request(sock:int, max_bytes:int) -> str:
           break
       continue
     if target >= 0 && got >= target:
+      break
+  out[got] = 0 as char
+  ret out as str
+
+// Reads one HTTP response and stops when Content-Length or chunked framing is complete.
+// Falls back to close/timeout-delimited reads when the response has no body framing.
+fn http_read_response(sock:int, max_bytes:int) -> str:
+  if sock < 0:
+    ret 0 as str
+  lim:int = max_bytes
+  if lim <= 0:
+    lim = NET_DEFAULT_MAX_READ
+  out:*char = malloc(lim + 1)
+  if out == 0:
+    ret 0 as str
+  got:int = 0
+  header_end:int = 0 - 1
+  target:int = 0 - 1
+  chunked:int = 0
+  chunk_buf:[char;2048]
+  while got < lim:
+    chunk:int = lim - got
+    if chunk > 2048:
+      chunk = 2048
+    r:int = net_recv(sock, &chunk_buf[0], chunk)
+    if r <= 0:
+      break
+    i:int = 0
+    while i < r:
+      out[got + i] = chunk_buf[i]
+      i = i + 1
+    got = got + r
+    out[got] = 0 as char
+    if header_end < 0:
+      header_end = _find_header_end_index(out, got)
+      if header_end >= 0:
+        te:str = http_get_header(out as str, "Transfer-Encoding")
+        if te != 0:
+          if _header_has_token(te, "chunked") != 0:
+            chunked = 1
+          free(te)
+        if chunked == 0:
+          cl:int = _http_content_length_or_missing(out as str)
+          if cl >= 0:
+            target = header_end + cl
+        if target >= 0 && got >= target:
+          break
+        if chunked != 0 && _http_chunked_complete_index(out as str, got, header_end) >= 0:
+          break
+      continue
+    if target >= 0 && got >= target:
+      break
+    if chunked != 0 && _http_chunked_complete_index(out as str, got, header_end) >= 0:
       break
   out[got] = 0 as char
   ret out as str
@@ -2872,9 +3036,7 @@ fn http_is_chunked(resp:str) -> int:
   h:str = http_get_header(resp, "Transfer-Encoding")
   if h == 0:
     ret 0
-  ok:int = 0
-  if _starts_with(h, "chunked") != 0 || _starts_with(h, "Chunked") != 0 || _starts_with(h, "CHUNKED") != 0:
-    ok = 1
+  ok:int = _header_has_token(h, "chunked")
   free(h)
   ret ok
 

@@ -44,12 +44,13 @@ These surfaces are useful today but need more conformance tests:
   direct `dir_list`, raw/public recursive listing and glob, portable paths,
   many-argument calls, math helpers, string transforms, vectors, arenas, process
   run/output capture, `time` clock/sleep/UTC/local-date helpers, deterministic
-  `net` URL, DNS, HTTP parser, route, auth/cookie, and chunked response helpers,
-  socket options, IPv4 literal socket bind hosts, localhost TCP/UDP connect
-  wrappers, and local HTTP client/server route execution are gated across both
-  primary x64 targets. Windows/Linux x64 direct-native TCP loopback socket
-  send/recv is gated separately while DNS-backed sockets and public-network HTTP
-  coverage remain beta backend gaps. VM/runtime gates also
+  `net` URL, DNS, HTTP parser, route, auth/cookie, chunked response helpers,
+  keep-alive HTTP response reads, socket options, IPv4 literal socket bind
+  hosts, localhost TCP/UDP connect wrappers, and local HTTP client/server route
+  execution are gated across both primary x64 targets. Windows/Linux x64
+  direct-native TCP loopback socket send/recv is gated separately while
+  DNS-backed sockets and public-network HTTP coverage remain beta backend gaps.
+  VM/runtime gates also
   cover sorted recursive directory listing and raw glob filters.
 - `net`, `tls`, `tezzserve`, `tezzapi`
 - `tezzdb` and `tezzdbql`
