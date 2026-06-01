@@ -43,6 +43,8 @@ match.
 ## Release Checklist
 
 - Rebuild Windows and Linux SDK archives.
+- Build the Linux direct compiler with `TN_STATIC=1` so hosted runners do not
+  depend on the WSL/build-host glibc version.
 - Generate archive `.sha256` files.
 - Generate and verify `release_manifest.json`.
 - Run stable conformance, native smoke, ABI, and release-security checks.
