@@ -69,8 +69,7 @@ On Linux or WSL:
 bash tests/conformance/run-abi.sh ./TezzNative-language/bin/tezzc-linux-x64
 ```
 
-The ABI runner checks generated C header layout assertions, `abidump`, and
-`abiverify` for pointer fields, fixed arrays, nested structs, scalar mixes, and
-extern signatures. CI may pass `-SkipVerify` until hosted-runner `abiverify`
-behavior is hardened. The runner uses targeted dump snippets until the full
-`abidump` output is strict JSON.
+The ABI runner checks generated C header layout assertions, strict JSON
+`abidump`, and `abiverify` for pointer fields, fixed arrays, nested structs,
+scalar mixes, field offsets, by-value struct parameters, and extern signatures.
+Windows and Linux CI run the same full verification lane.

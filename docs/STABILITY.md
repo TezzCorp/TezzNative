@@ -35,8 +35,9 @@ pointer/address-of coverage.
 These surfaces are useful today but need more conformance tests:
 
 - Native executable generation
-- C ABI interop, `extern fn`, C header generation, ABI dump/verify with starter
-  layout coverage for scalar mixes, arrays, pointers, and nested structs
+- C ABI interop, `extern fn`, C header generation, structured ABI dump/verify
+  with starter layout coverage for field offsets, scalar mixes, arrays,
+  pointers, by-value structs, and nested structs
 - Borrow/mutability diagnostics
 - `fmt` and `lint`
 - `io`, `str`, `math`, `vec`, `arena`, `time`; imports plus selected native
@@ -82,7 +83,7 @@ risk. They should not be treated as guaranteed production APIs.
 
 - Add parser and type-checker snapshot tests.
 - Continue expanding ABI layout tests beyond the starter structs, arrays,
-  pointers, and function signatures.
+  pointers, by-value structs, and function signatures.
 - Add native executable stress tests for Windows and Linux x86_64 beyond the
   current hello, loop/math, math-module, string, struct, raw/wrapped/line/stream
   file IO, directory lifecycle, recursive listing, portable path, vector,

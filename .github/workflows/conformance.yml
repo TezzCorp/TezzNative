@@ -187,7 +187,7 @@ jobs:
         timeout-minutes: 5
         run: |
           Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
-          & .\tests\conformance\run-abi.ps1 -Tezzc "$env:TEZZC" -SkipVerify
+          & .\tests\conformance\run-abi.ps1 -Tezzc "$env:TEZZC"
 
       - name: Check benchmark fixtures
         shell: powershell

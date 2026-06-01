@@ -18,7 +18,7 @@ changes.
 | Target | Status | Notes |
 | --- | --- | --- |
 | Windows x64 | Primary | Main packaged SDK and installer target. Native executable flow is the first production hardening target. |
-| Linux x64 | Primary/Beta | Static SDK compiler archive and direct compiler download are published to avoid hosted-runner glibc drift. Stable-core, ABI, benchmark fixture checks, and native executable smoke pass under WSL and GitHub Actions. |
+| Linux x64 | Primary/Beta | Static SDK compiler archive and direct compiler download are published to avoid hosted-runner glibc drift. Stable-core, ABI header/dump/verify checks, benchmark fixture checks, and native executable smoke pass under WSL and GitHub Actions. |
 | macOS x64 | Planned | Listed as a target in metadata, but needs packaged toolchain validation. |
 | Linux ARM64 | Planned | Listed as a target in metadata, but not a release gate yet. |
 | macOS ARM64 | Planned | Listed as a target in metadata, but not a release gate yet. |

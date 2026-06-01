@@ -34,16 +34,16 @@ than the full repository surface.
 | Static type checking | Stable/Beta (gated core) | Type mismatch, named unknown name/module/function, arity, and unsafe diagnostics are snippet checked; richer help is still improving |
 | Native executable flow | Beta (gated x64) | Windows/Linux SDKs build and run hello, loops/math module, many-argument calls, strings/transforms, structs, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable paths, vectors, arenas, process run/output, time clock/sleep/UTC/local-date helpers, deterministic net/HTTP URL parsing, Windows/Linux x64 TCP loopback sockets, IPv4 literal socket bind handling, localhost connect/bind wrappers, keep-alive HTTP response reads, and local HTTP client/server loopback |
 | Bytecode run flow | Stable/Beta | Useful for development and compatibility |
-| C ABI / extern calls | Beta (gated starter) | Header/ABI dump checks cover pointers, arrays, nested structs, scalar mixes, and extern signatures |
+| C ABI / extern calls | Beta (gated starter) | Header/structured ABI dump checks cover pointers, arrays, nested structs, scalar mixes, field offsets, and extern signatures |
 | Stable stdlib candidates | Stable/Beta (smoke gated) | Core imports plus native math, string, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable path, vector, arena, process run/output capture, and `time` clock/sleep/UTC/local-date smoke |
 | Networking/TLS/GUI/DB | Beta | `net` URL, DNS endpoint, HTTP parser, route, auth/cookie, chunked response helpers, keep-alive `Content-Length`/chunked response reads, Windows/Linux x64 TCP loopback send/recv, IPv4 literal bind hosts, localhost TCP/UDP connect wrappers, socket options, and local HTTP client/server route helpers are smoke gated; TLS, public-network HTTP, DNS-backed sockets, and wider backend matrix testing are still needed |
 | GPU/NPU/LLM/kernel modules | Experimental | API surface exists; backend support depends on runtime build |
 
 See `docs/STABILITY.md` for the full stability map.
 See `docs/PLATFORM_SUPPORT.md` for target support and
-`docs/STDLIB_INVENTORY.md` for module maturity. Release integrity and privacy
-policies are documented in `docs/RELEASE_ENGINEERING.md`,
-`docs/TELEMETRY_PRIVACY.md`, and `SECURITY.md`.
+`docs/STDLIB_INVENTORY.md` for module maturity. C ABI rules are documented in
+`docs/C_ABI.md`. Release integrity and privacy policies are documented in
+`docs/RELEASE_ENGINEERING.md`, `docs/TELEMETRY_PRIVACY.md`, and `SECURITY.md`.
 
 ## Quick Example
 
@@ -154,17 +154,16 @@ On Linux or WSL:
 bash tests/conformance/run-native-smoke.sh ./TezzNative-language/bin/tezzc-linux-x64
 ```
 
-The first ABI starter lane checks C header layout assertions plus ABI dump and
-verify behavior:
+The first ABI starter lane checks C header layout assertions plus structured
+ABI dump and verify behavior:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tests\conformance\run-abi.ps1
 ```
 
-CI uses `-SkipVerify` for this lane until hosted-runner `abiverify` behavior is
-hardened; local full verification is available with the default command above.
-Linux CI runs the POSIX ABI runner with full local `abiverify` against the
-published Linux SDK.
+Windows and Linux CI both run this lane with full `abiverify` against the
+published SDK compiler. The JSON ABI manifest records struct sizes, alignment,
+field offsets, field type shapes, function return types, and parameter shapes.
 
 The public benchmark skeleton records environment metadata, bytecode timing,
 native build timing, native run timing, exit codes, and binary size:

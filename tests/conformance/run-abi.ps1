@@ -70,6 +70,137 @@ function Assert-Contains {
   return $false
 }
 
+function Assert-Equal {
+  param(
+    [object]$Actual,
+    [object]$Expected,
+    [string]$Label
+  )
+
+  if ([string]$Actual -eq [string]$Expected) {
+    return $true
+  }
+
+  Write-Host "FAIL $Label expected=$Expected got=$Actual"
+  return $false
+}
+
+function Get-AbiStruct {
+  param(
+    [object]$Abi,
+    [string]$Name
+  )
+
+  $Abi.structs | Where-Object { $_.name -eq $Name } | Select-Object -First 1
+}
+
+function Get-AbiField {
+  param(
+    [object]$Struct,
+    [string]$Name
+  )
+
+  $Struct.fields | Where-Object { $_.name -eq $Name } | Select-Object -First 1
+}
+
+function Get-AbiFunction {
+  param(
+    [object]$Abi,
+    [string]$Name
+  )
+
+  $Abi.fns | Where-Object { $_.name -eq $Name } | Select-Object -First 1
+}
+
+function Get-TypeShape {
+  param([object]$Type)
+
+  if (-not $Type) {
+    return "<missing>"
+  }
+
+  switch ([string]$Type.kind) {
+    "ptr" {
+      return "ptr(" + (Get-TypeShape -Type $Type.elem) + ")"
+    }
+    "array" {
+      return "array(" + (Get-TypeShape -Type $Type.elem) + "," + [string]$Type.len + ")"
+    }
+    "struct" {
+      return "struct:" + [string]$Type.name
+    }
+    default {
+      return [string]$Type.kind
+    }
+  }
+}
+
+function Assert-AbiField {
+  param(
+    [object]$Struct,
+    [string]$FieldName,
+    [int]$Offset,
+    [int]$Size,
+    [int]$Align,
+    [string]$TypeShape,
+    [string]$Label
+  )
+
+  $field = Get-AbiField -Struct $Struct -Name $FieldName
+  if (-not $field) {
+    Write-Host "FAIL $Label missing field $FieldName"
+    return $false
+  }
+
+  $ok = $true
+  if (-not (Assert-Equal -Actual $field.off -Expected $Offset -Label "$Label.$FieldName off")) { $ok = $false }
+  if (-not (Assert-Equal -Actual $field.size -Expected $Size -Label "$Label.$FieldName size")) { $ok = $false }
+  if (-not (Assert-Equal -Actual $field.align -Expected $Align -Label "$Label.$FieldName align")) { $ok = $false }
+  if (-not (Assert-Equal -Actual (Get-TypeShape -Type $field.type) -Expected $TypeShape -Label "$Label.$FieldName type")) { $ok = $false }
+  return $ok
+}
+
+function Assert-AbiStruct {
+  param(
+    [object]$Abi,
+    [string]$Name,
+    [int]$Size,
+    [int]$Align
+  )
+
+  $struct = Get-AbiStruct -Abi $Abi -Name $Name
+  if (-not $struct) {
+    Write-Host "FAIL abi struct missing: $Name"
+    return $null
+  }
+  if (-not (Assert-Equal -Actual $struct.size -Expected $Size -Label "abi/$Name size")) { return $null }
+  if (-not (Assert-Equal -Actual $struct.align -Expected $Align -Label "abi/$Name align")) { return $null }
+  return $struct
+}
+
+function Assert-AbiFunction {
+  param(
+    [object]$Abi,
+    [string]$Name,
+    [string]$Ret,
+    [string[]]$Params,
+    [bool]$Extern
+  )
+
+  $fn = Get-AbiFunction -Abi $Abi -Name $Name
+  if (-not $fn) {
+    Write-Host "FAIL abi function missing: $Name"
+    return $false
+  }
+
+  $ok = $true
+  if (-not (Assert-Equal -Actual $fn.extern -Expected $Extern -Label "abi/$Name extern")) { $ok = $false }
+  if (-not (Assert-Equal -Actual (Get-TypeShape -Type $fn.ret) -Expected $Ret -Label "abi/$Name ret")) { $ok = $false }
+  $actualParams = @($fn.params | ForEach-Object { Get-TypeShape -Type $_ })
+  if (-not (Assert-Equal -Actual ($actualParams -join ",") -Expected ($Params -join ",") -Label "abi/$Name params")) { $ok = $false }
+  return $ok
+}
+
 try {
   foreach ($file in Get-ChildItem -LiteralPath $abiDir -Filter '*.tn' | Sort-Object Name) {
     $check = Invoke-Compiler -CompilerArgs @('check', $file.FullName)
@@ -112,7 +243,16 @@ try {
     }
 
     $header = Get-Content -LiteralPath $headerPath -Raw
-    $abi = Get-Content -LiteralPath $dumpPath -Raw
+    $abiText = Get-Content -LiteralPath $dumpPath -Raw
+    try {
+      $abi = $abiText | ConvertFrom-Json
+    } catch {
+      Write-Host "FAIL abi/$($file.Name) abidump is not valid JSON"
+      Write-Host "  $($_.Exception.Message)"
+      $failed++
+      continue
+    }
+
     $ok = $true
 
     $headerSnippets = @(
@@ -147,34 +287,44 @@ try {
       }
     }
 
-    $abiSnippets = @(
-      '"name":"AbiPair","size":16,"align":8',
-      '"name":"AbiBuffer","size":16,"align":8',
-      '"name":"AbiPacket","size":16,"align":8',
-      '"name":"AbiNumbers","size":24,"align":8',
-      '"name":"flag","off":0,"size":1,"align":1,"type":"u8"',
-      '"name":"count","off":0,"size":8,"align":8,"type":"i64"',
-      '"name":"ratio","off":0,"size":8,"align":8,"type":"f64"',
-      '"name":"AbiTable","size":40,"align":8',
-      '"name":"values","off":0,"size":24,"align":8,"type":"array","elem":"i64","len":3',
-      '"name":"head","off":0,"size":16,"align":8,"type":"struct","name":"AbiPair"',
-      '"name":"abi_pair_sum","extern":true,"ret":"i64"',
-      '"params":["ptr","elem":"struct","name":"AbiPair","i64"]',
-      '"name":"abi_buffer_len","extern":true,"ret":"i64"',
-      '"params":["struct","name":"AbiBuffer"]',
-      '"name":"abi_packet_send","extern":true,"ret":"void"',
-      '"params":["ptr","elem":"struct","name":"AbiPacket"]',
-      '"name":"abi_numbers_scale","extern":true,"ret":"i64"',
-      '"params":["struct","name":"AbiNumbers","ptr","elem":"struct","name":"AbiNumbers"]',
-      '"name":"abi_table_first","extern":true,"ret":"i64"',
-      '"params":["ptr","elem":"struct","name":"AbiTable"]'
-    )
+    if (-not (Assert-Equal -Actual $abi.schema -Expected "tezznative.abi.v1" -Label "abi/$($file.Name) schema")) { $ok = $false }
 
-    foreach ($snippet in $abiSnippets) {
-      if (-not (Assert-Contains -Text $abi -Needle $snippet -Label "abi/$($file.Name) abidump")) {
-        $ok = $false
-      }
+    $pair = Assert-AbiStruct -Abi $abi -Name "AbiPair" -Size 16 -Align 8
+    if (-not $pair) { $ok = $false } else {
+      if (-not (Assert-AbiField -Struct $pair -FieldName "left" -Offset 0 -Size 8 -Align 8 -TypeShape "i64" -Label "AbiPair")) { $ok = $false }
+      if (-not (Assert-AbiField -Struct $pair -FieldName "right" -Offset 8 -Size 8 -Align 8 -TypeShape "i64" -Label "AbiPair")) { $ok = $false }
     }
+
+    $buffer = Assert-AbiStruct -Abi $abi -Name "AbiBuffer" -Size 16 -Align 8
+    if (-not $buffer) { $ok = $false } else {
+      if (-not (Assert-AbiField -Struct $buffer -FieldName "data" -Offset 0 -Size 8 -Align 8 -TypeShape "ptr(u8)" -Label "AbiBuffer")) { $ok = $false }
+      if (-not (Assert-AbiField -Struct $buffer -FieldName "len" -Offset 8 -Size 8 -Align 8 -TypeShape "i64" -Label "AbiBuffer")) { $ok = $false }
+    }
+
+    $packet = Assert-AbiStruct -Abi $abi -Name "AbiPacket" -Size 16 -Align 8
+    if (-not $packet) { $ok = $false } else {
+      if (-not (Assert-AbiField -Struct $packet -FieldName "tag" -Offset 0 -Size 8 -Align 8 -TypeShape "i64" -Label "AbiPacket")) { $ok = $false }
+      if (-not (Assert-AbiField -Struct $packet -FieldName "bytes" -Offset 8 -Size 8 -Align 1 -TypeShape "array(u8,8)" -Label "AbiPacket")) { $ok = $false }
+    }
+
+    $numbers = Assert-AbiStruct -Abi $abi -Name "AbiNumbers" -Size 24 -Align 8
+    if (-not $numbers) { $ok = $false } else {
+      if (-not (Assert-AbiField -Struct $numbers -FieldName "flag" -Offset 0 -Size 1 -Align 1 -TypeShape "u8" -Label "AbiNumbers")) { $ok = $false }
+      if (-not (Assert-AbiField -Struct $numbers -FieldName "count" -Offset 8 -Size 8 -Align 8 -TypeShape "i64" -Label "AbiNumbers")) { $ok = $false }
+      if (-not (Assert-AbiField -Struct $numbers -FieldName "ratio" -Offset 16 -Size 8 -Align 8 -TypeShape "f64" -Label "AbiNumbers")) { $ok = $false }
+    }
+
+    $table = Assert-AbiStruct -Abi $abi -Name "AbiTable" -Size 40 -Align 8
+    if (-not $table) { $ok = $false } else {
+      if (-not (Assert-AbiField -Struct $table -FieldName "values" -Offset 0 -Size 24 -Align 8 -TypeShape "array(i64,3)" -Label "AbiTable")) { $ok = $false }
+      if (-not (Assert-AbiField -Struct $table -FieldName "head" -Offset 24 -Size 16 -Align 8 -TypeShape "struct:AbiPair" -Label "AbiTable")) { $ok = $false }
+    }
+
+    if (-not (Assert-AbiFunction -Abi $abi -Name "abi_pair_sum" -Extern $true -Ret "i64" -Params @("ptr(struct:AbiPair)", "i64"))) { $ok = $false }
+    if (-not (Assert-AbiFunction -Abi $abi -Name "abi_buffer_len" -Extern $true -Ret "i64" -Params @("struct:AbiBuffer"))) { $ok = $false }
+    if (-not (Assert-AbiFunction -Abi $abi -Name "abi_packet_send" -Extern $true -Ret "void" -Params @("ptr(struct:AbiPacket)"))) { $ok = $false }
+    if (-not (Assert-AbiFunction -Abi $abi -Name "abi_numbers_scale" -Extern $true -Ret "i64" -Params @("struct:AbiNumbers", "ptr(struct:AbiNumbers)"))) { $ok = $false }
+    if (-not (Assert-AbiFunction -Abi $abi -Name "abi_table_first" -Extern $true -Ret "i64" -Params @("ptr(struct:AbiTable)"))) { $ok = $false }
 
     if (-not $ok) {
       $failed++

@@ -487,7 +487,7 @@ Success metric:
 
 ## Milestone 7: C Replacement Strategy
 
-Status: started.
+Status: completed for the current starter ABI surface.
 
 Goal: earn trust from C developers with exact layout and ABI behavior.
 
@@ -517,9 +517,18 @@ Started:
 - Expanded ABI runner assertions on Windows and POSIX so header and dump checks
   cover alignment assertions, array fields, nested struct fields, by-value
   struct parameters, and pointer parameters.
-- Captured tooling gaps: full `abidump` output still needs strict JSON for
-  structured snapshot testing, and hosted-runner `abiverify` needs hardening
-  before it becomes a required CI gate.
+- Fixed `abidump` field offsets so the ABI manifest records computed layout
+  offsets instead of parser placeholder offsets.
+- Promoted `abidump` to strict structured JSON with schema
+  `tezznative.abi.v1`.
+- Replaced brittle dump string checks with parsed JSON assertions for struct
+  sizes, alignment, field offsets, field type shapes, extern return types, and
+  parameter type shapes.
+- Promoted Windows hosted ABI CI to full `abiverify`; Windows and Linux now
+  both run `cheader`, `abidump`, and `abiverify` against the published SDK
+  compiler.
+- Added `docs/C_ABI.md` with the current layout contract, C type mapping,
+  header/dump workflow, and C interop examples.
 
 ## Milestone 8: Benchmarks And Performance Proof
 
