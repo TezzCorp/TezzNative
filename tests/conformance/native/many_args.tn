@@ -1,0 +1,13 @@
+fn sum8(a:int, b:int, c:int, d:int, e:int, f:int, g:int, h:int) -> int:
+  ret (a * 10000000) + (b * 1000000) + (c * 100000) + (d * 10000) + (e * 1000) + (f * 100) + (g * 10) + h
+
+fn choose8(a:int, b:int, c:int, d:int, e:int, f:int, g:int, h:int) -> int:
+  ret e + (f * 10) + (g * 100) + (h * 1000)
+
+fn main() -> int:
+  if sum8(1, 2, 3, 4, 5, 6, 7, 8) != 12345678:
+    ret 1
+  if choose8(10, 20, 30, 40, 5, 6, 7, 8) != 8765:
+    ret 2
+  say "many-args"
+  ret 0

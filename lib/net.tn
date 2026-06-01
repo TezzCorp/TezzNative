@@ -1043,7 +1043,7 @@ fn http_write_response_ex(sock:int, status:int, content_type:str, body:str, extr
   ret NET_OK
 
 fn http_write_response(sock:int, status:int, content_type:str, body:str) -> int:
-  ret http_write_response_ex(sock, status, content_type, body, 0 as str)
+  ret http_write_response_ex(sock, status, content_type, body, "")
 
 fn http_respond_text(sock:int, status:int, text:str) -> int:
   ret http_write_response(sock, status, "text/plain; charset=utf-8", text)
@@ -1691,6 +1691,11 @@ fn http_route_table_add_crud(tab:*HttpRouteTable, resource_path:str, create_hand
 fn http_server_serve_route_once(listener:int, timeout_ms:int, max_req_bytes:int, method:str, pattern:str, status:int, content_type:str, body:str) -> int:
   if listener < 0:
     ret NET_ERR
+  route_method:str = method
+  route_pattern:str = pattern
+  route_status:int = status
+  route_content_type:str = content_type
+  route_body:str = body
   cli:int = http_server_accept(listener, timeout_ms)
   if cli < 0:
     ret NET_ERR
@@ -1698,9 +1703,15 @@ fn http_server_serve_route_once(listener:int, timeout_ms:int, max_req_bytes:int,
   if req == 0:
     close(cli)
     ret NET_ERR
-  matched:int = http_route_respond_ex_if(req, cli, method, pattern, status, content_type, body, 0 as str)
-  if matched == 0:
-    http_respond_not_found(cli)
+  matched:int = 0
+  if http_route_request_match(req, route_method, route_pattern) != 0:
+    if http_write_response_ex(cli, route_status, route_content_type, route_body, "") != 0:
+      matched = NET_ERR
+    else:
+      matched = 1
+  else:
+    if http_respond_not_found(cli) != 0:
+      matched = NET_ERR
   close(cli)
   free(req)
   if matched < 0:

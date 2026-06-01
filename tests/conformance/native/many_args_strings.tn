@@ -1,0 +1,21 @@
+fn pick8(a:int, b:str, c:int, d:str, e:str, f:int, g:str, h:int) -> int:
+  if strcmp(e, "five") != 0:
+    ret 1
+  if f != 6:
+    ret 2
+  if strcmp(g, "seven") != 0:
+    ret 3
+  if h != 8:
+    ret 4
+  if strcmp(b, "two") != 0:
+    ret 5
+  if strcmp(d, "four") != 0:
+    ret 6
+  ret 0
+
+fn main() -> int:
+  rc:int = pick8(1, "two", 3, "four", "five", 6, "seven", 8)
+  if rc != 0:
+    ret rc
+  say "many-args-strings"
+  ret 0

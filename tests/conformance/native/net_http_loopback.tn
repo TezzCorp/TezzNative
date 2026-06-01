@@ -1,0 +1,140 @@
+import "net"
+
+fn close_if(sock:int) -> int:
+  if sock >= 0:
+    net.close(sock)
+  ret 0
+
+fn open_listener(port:int) -> int:
+  ret net.http_server_listen("127.0.0.1", port, 8)
+
+fn expect_owned(actual:str, expected:str, code:int) -> int:
+  if actual == 0:
+    ret code
+  cmp:int = strcmp(actual, expected)
+  unsafe:
+    free(actual)
+  if cmp != 0:
+    ret code
+  ret 0
+
+fn release_owned(s:str) -> int:
+  if s != 0:
+    unsafe:
+      free(s)
+  ret 0
+
+fn main() -> int:
+  if net.init() != 0:
+    ret 1
+
+  port:int = 39401
+  listener:int = open_listener(port)
+  if listener < 0:
+    port = 39413
+    listener = open_listener(port)
+  if listener < 0:
+    port = 39427
+    listener = open_listener(port)
+  if listener < 0:
+    net.cleanup()
+    ret 2
+
+  client:int = net.tcp_connect_timeout("127.0.0.1", port, 2500)
+  if client < 0:
+    close_if(listener)
+    net.cleanup()
+    ret 3
+
+  req_text:str = "POST /api/echo?x=1 HTTP/1.1\nHost: localhost\nContent-Length: 4\nConnection: close\n\nping"
+  if net.tcp_send_text(client, req_text) != len(req_text):
+    close_if(client)
+    close_if(listener)
+    net.cleanup()
+    ret 4
+
+  server:int = net.http_server_accept(listener, 2500)
+  if server < 0:
+    close_if(client)
+    close_if(listener)
+    net.cleanup()
+    ret 5
+
+  req:str = net.http_read_request(server, 4096)
+  if req == 0:
+    close_if(server)
+    close_if(client)
+    close_if(listener)
+    net.cleanup()
+    ret 6
+
+  rc:int = expect_owned(net.http_method(req), "POST", 7)
+  if rc != 0:
+    release_owned(req)
+    close_if(server)
+    close_if(client)
+    close_if(listener)
+    net.cleanup()
+    ret rc
+
+  rc = expect_owned(net.http_path(req), "/api/echo?x=1", 8)
+  if rc != 0:
+    release_owned(req)
+    close_if(server)
+    close_if(client)
+    close_if(listener)
+    net.cleanup()
+    ret rc
+
+  rc = expect_owned(net.http_get_header(req, "host"), "localhost", 9)
+  if rc != 0:
+    release_owned(req)
+    close_if(server)
+    close_if(client)
+    close_if(listener)
+    net.cleanup()
+    ret rc
+
+  if net.http_content_length(req) != 4:
+    release_owned(req)
+    close_if(server)
+    close_if(client)
+    close_if(listener)
+    net.cleanup()
+    ret 10
+
+  if net.http_write_response_ex(server, 201, "text/plain", "pong", "X-Tezz: Native") != 0:
+    release_owned(req)
+    close_if(server)
+    close_if(client)
+    close_if(listener)
+    net.cleanup()
+    ret 11
+
+  release_owned(req)
+  close_if(server)
+  close_if(listener)
+
+  resp:str = net.tcp_recv_all(client, 4096)
+  close_if(client)
+  net.cleanup()
+  if resp == 0:
+    ret 12
+
+  if net.http_status_code(resp) != 201:
+    release_owned(resp)
+    ret 13
+
+  rc = expect_owned(net.http_response_header(resp, "x-tezz"), "Native", 14)
+  if rc != 0:
+    release_owned(resp)
+    ret rc
+
+  rc = expect_owned(net.http_response_body_decoded(resp), "pong", 15)
+  if rc != 0:
+    release_owned(resp)
+    ret rc
+
+  release_owned(resp)
+  say "net-http-loopback"
+  ret 0

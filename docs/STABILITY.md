@@ -40,13 +40,14 @@ These surfaces are useful today but need more conformance tests:
 - `fmt` and `lint`
 - `io`, `str`, `math`, `vec`, `arena`, `time`; imports plus selected native
   executable smoke for raw/wrapped/line/stream file IO, directory lifecycle,
-  direct `dir_list`, raw/public recursive listing and glob, portable paths, math
-  helpers, string transforms, vectors, arenas, process run/output capture,
-  `time` clock/sleep/UTC/local-date helpers, and deterministic `net` URL, DNS,
-  HTTP parser, route, auth/cookie, and chunked response helpers are gated across
+  direct `dir_list`, raw/public recursive listing and glob, portable paths,
+  many-argument calls, math helpers, string transforms, vectors, arenas, process
+  run/output capture, `time` clock/sleep/UTC/local-date helpers, deterministic
+  `net` URL, DNS, HTTP parser, route, auth/cookie, and chunked response helpers,
+  socket options, and local HTTP client/server route execution are gated across
   both primary x64 targets. Windows/Linux x64 direct-native TCP loopback socket
-  send/recv is now gated separately while DNS-backed sockets and live HTTP
-  client/server coverage remain beta backend gaps. VM/runtime gates also
+  send/recv is gated separately while DNS-backed sockets and public-network HTTP
+  coverage remain beta backend gaps. VM/runtime gates also
   cover sorted recursive directory listing and raw glob filters.
 - `net`, `tls`, `tezzserve`, `tezzapi`
 - `tezzdb` and `tezzdbql`
@@ -83,7 +84,7 @@ risk. They should not be treated as guaranteed production APIs.
   current hello, loop/math, math-module, string, struct, raw/wrapped/line/stream
   file IO, directory lifecycle, recursive listing, portable path, vector,
   arena, process, and time smoke.
-- Add DNS-backed socket and real HTTP client/server smoke tests before
+- Add DNS-backed socket and public-network HTTP smoke tests before
   promoting networking.
 - Add module-level stdlib checks for stable and beta modules.
 - Add docs for every stable public function.

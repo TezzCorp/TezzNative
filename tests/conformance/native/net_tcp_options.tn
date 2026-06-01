@@ -1,0 +1,35 @@
+import "net"
+
+fn main() -> int:
+  if net.init() != 0:
+    ret 1
+
+  sock:int = net.tcp_socket()
+  if sock < 0:
+    net.cleanup()
+    ret 2
+
+  if net.set_timeout(sock, 1500) != 0:
+    net.close(sock)
+    net.cleanup()
+    ret 3
+
+  if net.set_blocking(sock, 0) != 0:
+    net.close(sock)
+    net.cleanup()
+    ret 4
+
+  if net.set_blocking(sock, 1) != 0:
+    net.close(sock)
+    net.cleanup()
+    ret 5
+
+  if net.close(sock) != 0:
+    net.cleanup()
+    ret 6
+
+  if net.cleanup() != 0:
+    ret 7
+
+  say "net-tcp-options"
+  ret 0

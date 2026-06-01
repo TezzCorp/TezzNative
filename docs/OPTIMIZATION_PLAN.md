@@ -245,6 +245,9 @@ Started:
   table and Winsock adapters for WSA startup/cleanup, socket, bind, listen,
   connect, accept, send, recv, close, blocking mode, and socket timeouts. A
   Windows-only loopback smoke gate now validates bidirectional TCP send/recv.
+- Added native smoke gates for 8-argument call/stack-argument handling on
+  Windows/Linux x64, covering integer, string, and nested-call argument
+  patterns that are common in stdlib service APIs.
 
 ## Milestone 3: Standard Library Hardening
 
@@ -348,9 +351,14 @@ Started:
   connects a client, accepts the server peer, and validates bidirectional
   `ping`/`pong` TCP send/recv through the direct-native backend.
 - Added the matching Windows x64 `net` loopback smoke gate through Winsock PE
-  imports, closing the first direct-native socket parity slice. DNS-backed
-  sockets and live HTTP client/server execution remain the next networking
-  hardening gates.
+  imports, closing the first direct-native socket parity slice.
+- Added Windows/Linux native smoke for socket timeout/blocking options, manual
+  local HTTP request/read/response flow, and the higher-level
+  `http_server_serve_route_once` route helper. `http_write_response` and the
+  route helper now pass a concrete empty header string for the no-extra-headers
+  case, avoiding nullable stack-argument behavior in nested native calls.
+  DNS-backed sockets and public-network HTTP execution remain the next
+  networking hardening gates.
 
 ## Milestone 4: Developer Experience
 

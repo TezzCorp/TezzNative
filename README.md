@@ -32,11 +32,11 @@ than the full repository surface.
 | --- | --- | --- |
 | Core syntax | Stable (gated) | Functions, variables, control flow, structs, arrays, imports, `sizeof`/`alignof`, and unsafe pointer blocks |
 | Static type checking | Stable/Beta (gated core) | Type mismatch, unknown name/field, arity, and unsafe diagnostics are snippet checked; richer help is still improving |
-| Native executable flow | Beta (gated x64) | Windows/Linux SDKs build and run hello, loops/math module, strings/transforms, structs, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable paths, vectors, arenas, process run/output, time clock/sleep/UTC/local-date helpers, deterministic net/HTTP URL parsing, and Windows/Linux x64 TCP loopback sockets |
+| Native executable flow | Beta (gated x64) | Windows/Linux SDKs build and run hello, loops/math module, many-argument calls, strings/transforms, structs, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable paths, vectors, arenas, process run/output, time clock/sleep/UTC/local-date helpers, deterministic net/HTTP URL parsing, Windows/Linux x64 TCP loopback sockets, and local HTTP client/server loopback |
 | Bytecode run flow | Stable/Beta | Useful for development and compatibility |
 | C ABI / extern calls | Beta (gated starter) | Header/ABI dump checks cover pointers, arrays, nested structs, scalar mixes, and extern signatures |
 | Stable stdlib candidates | Stable/Beta (smoke gated) | Core imports plus native math, string, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable path, vector, arena, process run/output capture, and `time` clock/sleep/UTC/local-date smoke |
-| Networking/TLS/GUI/DB | Beta | `net` URL, DNS endpoint, HTTP parser, route, auth/cookie, chunked response helpers, and Windows/Linux x64 TCP loopback send/recv are smoke gated; TLS, live HTTP client/server, DNS-backed sockets, and wider backend matrix testing are still needed |
+| Networking/TLS/GUI/DB | Beta | `net` URL, DNS endpoint, HTTP parser, route, auth/cookie, chunked response helpers, Windows/Linux x64 TCP loopback send/recv, socket options, and local HTTP client/server route helpers are smoke gated; TLS, public-network HTTP, DNS-backed sockets, and wider backend matrix testing are still needed |
 | GPU/NPU/LLM/kernel modules | Experimental | API surface exists; backend support depends on runtime build |
 
 See `docs/STABILITY.md` for the full stability map.
@@ -128,10 +128,12 @@ Windows and Linux SDK packages.
 
 The native backend smoke lane builds and runs small executable programs for
 hello output, loops/math, math module helpers, strings and transforms, structs,
+many-argument call handling,
 raw/wrapped/line/stream file IO, directory lifecycle, direct directory listing,
 raw/public glob filters, portable path helpers, vectors, arenas, time
-clock/sleep/UTC/local-date helpers, deterministic `net` URL/HTTP parsing, and
-Windows/Linux x64 TCP loopback sockets:
+clock/sleep/UTC/local-date helpers, deterministic `net` URL/HTTP parsing,
+Windows/Linux x64 TCP loopback sockets, socket options, and local HTTP
+client/server route helpers:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tests\conformance\run-native-smoke.ps1

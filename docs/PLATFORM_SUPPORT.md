@@ -31,10 +31,10 @@ changes.
 | --- | --- | --- | --- | --- |
 | Core language | Primary | Primary | Planned | Stable-core conformance runs on Windows and Linux SDKs. |
 | Bytecode run | Primary | Preview | Planned | Compatibility path while native backend matures. |
-| Native executable | Primary/Beta | Primary/Beta | Planned | Hello, loop/math, math-module, string, string-transform, struct-array, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable path, vector, arena, process run/output, time, deterministic net/HTTP parser, and Windows/Linux TCP loopback smoke tests pass on the claimed x64 targets. |
+| Native executable | Primary/Beta | Primary/Beta | Planned | Hello, loop/math, many-argument calls, math-module, string, string-transform, struct-array, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable path, vector, arena, process run/output, time, deterministic net/HTTP parser, Windows/Linux TCP loopback, and local HTTP route smoke tests pass on the claimed x64 targets. |
 | Time/date runtime | Beta | Beta | Planned | `time` imports and native clock/sleep/UTC/local-date execution are gated on Windows/Linux x64. |
 | IO/path/process | Beta | Beta | Planned | Raw file read/write, File wrapper open/write/read-line/write-line/flush/seek/tell/close, BigFile chunk reads, StreamWriter flush/close behavior, portable `file_size_bytes`, file delete/rename, directory exists/make/remove, EOF/null guards, portable path helpers, direct `dir_list`, raw/public recursive listing and glob, and `proc_run`/`proc_out` have native smoke coverage on Windows/Linux x64. |
-| Networking | Beta | Beta | Planned | URL parsing, DNS endpoint helpers, HTTP parser/routing/auth/cookie utilities, chunked response decoding, and Windows/Linux x64 TCP loopback send/recv are smoke gated. DNS-backed sockets and live HTTP client/server tests are still needed. |
+| Networking | Beta | Beta | Planned | URL parsing, DNS endpoint helpers, HTTP parser/routing/auth/cookie utilities, chunked response decoding, Windows/Linux x64 TCP loopback send/recv, socket timeout/blocking options, and local HTTP client/server route helpers are smoke gated. DNS-backed sockets and public-network HTTP tests are still needed. |
 | TLS | Beta | Preview | Planned | Linux builds without OpenSSL development headers expose unsupported TLS stubs until linked with a TLS backend. |
 | GUI | Beta | Experimental | Planned | Windows host modules are the clearest path today. |
 | TezzDB | Beta | Preview | Planned | Needs database consistency and WAL tests. |
@@ -55,7 +55,7 @@ A target should not move to Primary until:
 ## Immediate Improvements
 
 1. Add CI jobs for Windows x64 and Linux x64.
-2. Add DNS-backed socket and live HTTP client/server smoke tests before
+2. Add DNS-backed socket and public-network HTTP smoke tests before
    promoting networking beyond Beta.
 3. Publish exact binary names, hashes, and sizes for every download.
 4. Add target-specific notes to docs and download pages.
