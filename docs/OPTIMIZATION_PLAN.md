@@ -253,6 +253,10 @@ Started:
   `net.bind` and `net.connect` lowering. A new smoke gate proves invalid remote
   literal binds fail while `127.0.0.1` and `0.0.0.0` binds succeed; DNS-backed
   socket names and public-network HTTP remain the next networking gates.
+- Normalized `localhost` in the public `net` module before backend socket calls
+  so `net.connect`, `net.bind`, `tcp_connect`, `tcp_listen`, and `udp_connect`
+  behave consistently across direct-native Windows/Linux x64. Native smoke now
+  gates mixed-case localhost bind/connect plus TCP send/recv and UDP connect.
 
 ## Milestone 3: Standard Library Hardening
 
@@ -364,7 +368,8 @@ Started:
   case, avoiding nullable stack-argument behavior in nested native calls.
 - Added Windows/Linux native smoke for IPv4 literal socket bind host handling
   so direct-native `net.bind` no longer collapses every host string to loopback.
-  DNS-backed sockets, IPv4 literal connect coverage, and public-network HTTP
+- Added Windows/Linux native smoke for public localhost socket wrappers across
+  bind, TCP connect, and UDP connect. DNS-backed sockets and public-network HTTP
   execution remain the next networking hardening gates.
 
 ## Milestone 4: Developer Experience

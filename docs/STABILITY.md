@@ -45,11 +45,11 @@ These surfaces are useful today but need more conformance tests:
   many-argument calls, math helpers, string transforms, vectors, arenas, process
   run/output capture, `time` clock/sleep/UTC/local-date helpers, deterministic
   `net` URL, DNS, HTTP parser, route, auth/cookie, and chunked response helpers,
-  socket options, IPv4 literal socket bind hosts, and local HTTP client/server
-  route execution are gated across both primary x64 targets. Windows/Linux x64
-  direct-native TCP loopback socket send/recv is gated separately while
-  DNS-backed sockets and public-network HTTP coverage remain beta backend gaps.
-  VM/runtime gates also
+  socket options, IPv4 literal socket bind hosts, localhost TCP/UDP connect
+  wrappers, and local HTTP client/server route execution are gated across both
+  primary x64 targets. Windows/Linux x64 direct-native TCP loopback socket
+  send/recv is gated separately while DNS-backed sockets and public-network HTTP
+  coverage remain beta backend gaps. VM/runtime gates also
   cover sorted recursive directory listing and raw glob filters.
 - `net`, `tls`, `tezzserve`, `tezzapi`
 - `tezzdb` and `tezzdbql`
@@ -86,8 +86,8 @@ risk. They should not be treated as guaranteed production APIs.
   current hello, loop/math, math-module, string, struct, raw/wrapped/line/stream
   file IO, directory lifecycle, recursive listing, portable path, vector,
   arena, process, and time smoke.
-- Add DNS-backed socket, IPv4 literal connect, and public-network HTTP smoke
-  tests before promoting networking.
+- Add DNS-backed socket and public-network HTTP smoke tests before promoting
+  networking.
 - Add module-level stdlib checks for stable and beta modules.
 - Add docs for every stable public function.
 - Publish benchmark and platform support matrices.

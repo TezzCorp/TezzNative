@@ -1,0 +1,83 @@
+import "net"
+
+fn close_if(sock:int) -> int:
+  if sock >= 0:
+    net.close(sock)
+  ret 0
+
+fn open_listener(port:int) -> int:
+  ret net.tcp_listen("LOCALHOST", port, 8)
+
+fn main() -> int:
+  if net.init() != 0:
+    ret 1
+
+  port:int = 39551
+  listener:int = open_listener(port)
+  if listener < 0:
+    port = 39563
+    listener = open_listener(port)
+  if listener < 0:
+    port = 39577
+    listener = open_listener(port)
+  if listener < 0:
+    net.cleanup()
+    ret 2
+
+  client:int = net.tcp_socket()
+  if client < 0:
+    close_if(listener)
+    net.cleanup()
+    ret 3
+  if net.connect(client, "localhost", port) != 0:
+    close_if(client)
+    close_if(listener)
+    net.cleanup()
+    ret 4
+
+  server:int = net.accept(listener)
+  if server < 0:
+    close_if(client)
+    close_if(listener)
+    net.cleanup()
+    ret 5
+
+  if net.tcp_send_text(client, "hi") != 2:
+    close_if(server)
+    close_if(client)
+    close_if(listener)
+    net.cleanup()
+    ret 6
+
+  buf:[char;4]
+  r:int = 0
+  unsafe:
+    r = net.recv(server, &buf[0], 2)
+  if r != 2:
+    close_if(server)
+    close_if(client)
+    close_if(listener)
+    net.cleanup()
+    ret 7
+  if (((buf[0] as int) & 255) != 104) || (((buf[1] as int) & 255) != 105):
+    close_if(server)
+    close_if(client)
+    close_if(listener)
+    net.cleanup()
+    ret 8
+
+  udp:int = net.udp_connect("LOCALHOST", port)
+  if udp < 0:
+    close_if(server)
+    close_if(client)
+    close_if(listener)
+    net.cleanup()
+    ret 9
+
+  close_if(udp)
+  close_if(server)
+  close_if(client)
+  close_if(listener)
+  net.cleanup()
+  say "net-localhost-connect"
+  ret 0

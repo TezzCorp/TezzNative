@@ -162,6 +162,15 @@ fn _byte_at(s:str, i:int) -> int:
     c = c + 256
   ret c
 
+fn _socket_host(host:str) -> str:
+  if host == 0:
+    ret host
+  if host[0] == 0 as char:
+    ret host
+  if _streq_nocase(host, "localhost") != 0:
+    ret "127.0.0.1"
+  ret host
+
 // Address family constant: IPv4.
 fn af_inet() -> int:
   ret net_af_inet()
@@ -208,11 +217,11 @@ fn close(sock:int) -> int:
 
 // Connect socket to host:port.
 fn connect(sock:int, host:str, port:int) -> int:
-  ret net_connect(sock, host, port)
+  ret net_connect(sock, _socket_host(host), port)
 
 // Bind socket to host:port.
 fn bind(sock:int, host:str, port:int) -> int:
-  ret net_bind(sock, host, port)
+  ret net_bind(sock, _socket_host(host), port)
 
 // Mark TCP socket as listening.
 fn listen(sock:int, backlog:int) -> int:
@@ -289,7 +298,7 @@ fn tcp_connect(host:str, port:int) -> int:
   s:int = tcp_socket()
   if s < 0:
     ret NET_ERR
-  if net_connect(s, host, port) != 0:
+  if net_connect(s, _socket_host(host), port) != 0:
     net_close(s)
     ret NET_ERR
   ret s
@@ -308,7 +317,7 @@ fn tcp_listen(host:str, port:int, backlog:int) -> int:
   s:int = tcp_socket()
   if s < 0:
     ret NET_ERR
-  if net_bind(s, host, port) != 0:
+  if net_bind(s, _socket_host(host), port) != 0:
     net_close(s)
     ret NET_ERR
   if net_listen(s, backlog) != 0:
@@ -466,7 +475,7 @@ fn udp_connect(host:str, port:int) -> int:
   s:int = udp_socket()
   if s < 0:
     ret NET_ERR
-  if net_connect(s, host, port) != 0:
+  if net_connect(s, _socket_host(host), port) != 0:
     net_close(s)
     ret NET_ERR
   ret s
