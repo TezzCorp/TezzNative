@@ -85,7 +85,7 @@ Exit gate:
 
 ## Milestone 1: Conformance And Correctness Harness
 
-Status: started.
+Status: completed for the current stable-core surface.
 
 Goal: make compiler correctness measurable before deep backend work.
 
@@ -119,7 +119,7 @@ Immediate tasks:
    `tests/conformance/run.ps1`.
 5. Add CI jobs for stable-core checks.
 
-Started:
+Delivered:
 
 - Added the public `tests/conformance` corpus with stable-core valid and invalid
   cases for arithmetic, control flow, structs, type mismatches, and unknown
@@ -133,6 +133,17 @@ Started:
 - Expanded invalid and diagnostic-snippet coverage for unsafe address-of,
   unknown struct fields, named unknown values/modules/functions, and wrong
   function arity.
+- Added first-class parser valid/invalid suites for comments/literals, nested
+  blocks, struct/fixed-array syntax, bad indentation, missing block markers,
+  and unterminated strings.
+- Added first-class typecheck valid/invalid suites for function return/call
+  flow, pointer-array roundtrip, struct value flow, array index type mismatch,
+  return mismatch, and struct field assignment mismatch.
+- Reworked Windows and POSIX runners to execute stable-core, parser,
+  typecheck, diagnostics, and stdlib suites with deterministic suite-qualified
+  output and `CONFORMANCE_SUMMARY passed=26 failed=0`.
+- Added `docs/CONFORMANCE.md` describing the suite contract, commands, and
+  rules for adding new cases.
 
 ## Milestone 2: Native Backend Reliability
 

@@ -1,0 +1,7 @@
+struct Item:
+  count:int
+
+fn main() -> int:
+  item:Item
+  item.count = "many"
+  ret 0

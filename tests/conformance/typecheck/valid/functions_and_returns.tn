@@ -1,0 +1,12 @@
+fn add(a:int, b:int) -> int:
+  ret a + b
+
+fn choose(flag:int, a:int, b:int) -> int:
+  if flag != 0:
+    ret a
+  ret b
+
+fn main() -> int:
+  if add(choose(1, 2, 3), 4) != 6:
+    ret 1
+  ret 0

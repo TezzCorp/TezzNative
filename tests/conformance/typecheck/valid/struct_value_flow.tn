@@ -1,0 +1,14 @@
+struct Point:
+  x:int
+  y:int
+
+fn sum_point(p:Point) -> int:
+  ret p.x + p.y
+
+fn main() -> int:
+  p:Point
+  p.x = 11
+  p.y = 31
+  if sum_point(p) != 42:
+    ret 1
+  ret 0

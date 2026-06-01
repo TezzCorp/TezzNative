@@ -1,0 +1,14 @@
+fn main() -> int:
+  values:[int;3]
+  values[0] = 10
+  values[1] = 20
+  values[2] = 30
+
+  p:*int
+  unsafe:
+    p = &values[0]
+    p[1] = p[1] + 2
+
+  if values[1] != 22:
+    ret 1
+  ret 0

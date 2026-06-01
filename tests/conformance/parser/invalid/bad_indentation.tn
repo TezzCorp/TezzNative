@@ -1,0 +1,4 @@
+fn main() -> int:
+  x:int = 1
+    y:int = 2
+  ret x

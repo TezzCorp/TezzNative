@@ -3,6 +3,9 @@ set -u
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TEZZC="${1:-}"
+if [[ -n "$TEZZC" && "$TEZZC" == */* && -e "$TEZZC" ]]; then
+  TEZZC="$(cd "$(dirname "$TEZZC")" && pwd)/$(basename "$TEZZC")"
+fi
 if [[ -z "$TEZZC" ]]; then
   if [[ -x "$ROOT/TezzNative-language/bin/tezzc-linux-x64" ]]; then
     TEZZC="$ROOT/TezzNative-language/bin/tezzc-linux-x64"
@@ -13,11 +16,8 @@ if [[ -z "$TEZZC" ]]; then
   fi
 fi
 
-VALID_DIR="$ROOT/tests/conformance/valid"
-INVALID_DIR="$ROOT/tests/conformance/invalid"
-DIAG_DIR="$ROOT/tests/conformance/diagnostics"
-STDLIB_DIR="$ROOT/tests/conformance/stdlib"
-failed=0
+FAILED=0
+PASSED=0
 
 run_check() {
   local path="$1"
@@ -28,60 +28,98 @@ run_check() {
   return "$rc"
 }
 
-for file in "$VALID_DIR"/*.tn; do
-  output="$(run_check "$file")"
-  rc=$?
-  if [[ "$rc" -eq 0 ]]; then
-    echo "OK valid/$(basename "$file")"
-  else
-    echo "FAIL valid/$(basename "$file") exit=$rc"
-    printf '  %s\n' "$output"
-    failed=$((failed + 1))
-  fi
-done
+trim_trailing_newlines() {
+  local value="$1"
+  while [[ "$value" == *$'\n' ]]; do
+    value="${value%$'\n'}"
+  done
+  printf '%s' "$value"
+}
 
-if [[ -d "$STDLIB_DIR" ]]; then
-  for file in "$STDLIB_DIR"/*.tn; do
+run_valid_suite() {
+  local suite="$1"
+  local rel_dir="$2"
+  local dir="$ROOT/tests/conformance/$rel_dir"
+  [[ -d "$dir" ]] || return
+
+  for file in "$dir"/*.tn; do
     [[ -e "$file" ]] || continue
+    local name display output rc
+    name="$(basename "$file")"
+    if [[ "$rel_dir" == "$suite" || "$rel_dir" == "$suite/"* ]]; then
+      display="$rel_dir/$name"
+    else
+      display="$suite/$rel_dir/$name"
+    fi
     output="$(run_check "$file")"
     rc=$?
     if [[ "$rc" -eq 0 ]]; then
-      echo "OK stdlib/$(basename "$file")"
+      echo "OK $display"
+      PASSED=$((PASSED + 1))
     else
-      echo "FAIL stdlib/$(basename "$file") exit=$rc"
+      echo "FAIL $display exit=$rc"
       printf '  %s\n' "$output"
-      failed=$((failed + 1))
+      FAILED=$((FAILED + 1))
     fi
   done
-fi
+}
 
-for file in "$INVALID_DIR"/*.tn; do
-  output="$(run_check "$file")"
-  rc=$?
-  if [[ "$rc" -ne 0 ]]; then
-    diag="$DIAG_DIR/$(basename "${file%.tn}").diag.txt"
-    if [[ -f "$diag" ]]; then
-      expected="$(tr -d '\r' < "$diag")"
-      if [[ "$output" != *"$expected"* ]]; then
-        echo "FAIL invalid/$(basename "$file") diagnostic mismatch"
-        echo "  expected snippet: $expected"
-        printf '  %s\n' "$output"
-        failed=$((failed + 1))
+run_invalid_suite() {
+  local suite="$1"
+  local rel_dir="$2"
+  local rel_diag="$3"
+  local dir="$ROOT/tests/conformance/$rel_dir"
+  local diag_dir="$ROOT/tests/conformance/$rel_diag"
+  [[ -d "$dir" ]] || return
+
+  for file in "$dir"/*.tn; do
+    [[ -e "$file" ]] || continue
+    local name base display output rc diag expected
+    name="$(basename "$file")"
+    base="${name%.tn}"
+    if [[ "$rel_dir" == "$suite" || "$rel_dir" == "$suite/"* ]]; then
+      display="$rel_dir/$name"
+    else
+      display="$suite/$rel_dir/$name"
+    fi
+    output="$(run_check "$file")"
+    rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+      diag="$diag_dir/$base.diag.txt"
+      if [[ -f "$diag" ]]; then
+        expected="$(trim_trailing_newlines "$(tr -d '\r' < "$diag")")"
+        if [[ "$output" != *"$expected"* ]]; then
+          echo "FAIL $display diagnostic mismatch"
+          echo "  expected snippet: $expected"
+          printf '  %s\n' "$output"
+          FAILED=$((FAILED + 1))
+        else
+          echo "INVALID_OK $display diagnostic=matched"
+          PASSED=$((PASSED + 1))
+        fi
       else
-        echo "INVALID_OK $(basename "$file") diagnostic=matched"
+        echo "INVALID_OK $display"
+        PASSED=$((PASSED + 1))
       fi
     else
-      echo "INVALID_OK $(basename "$file")"
+      echo "FAIL $display unexpectedly passed"
+      printf '  %s\n' "$output"
+      FAILED=$((FAILED + 1))
     fi
-  else
-    echo "FAIL invalid/$(basename "$file") unexpectedly passed"
-    printf '  %s\n' "$output"
-    failed=$((failed + 1))
-  fi
-done
+  done
+}
 
-echo "CONFORMANCE_SUMMARY failed=$failed"
-if [[ "$failed" -ne 0 ]]; then
+run_valid_suite "stable-core" "valid"
+run_valid_suite "parser" "parser/valid"
+run_valid_suite "typecheck" "typecheck/valid"
+run_valid_suite "stdlib" "stdlib"
+
+run_invalid_suite "diagnostics" "invalid" "diagnostics"
+run_invalid_suite "parser" "parser/invalid" "diagnostics/parser"
+run_invalid_suite "typecheck" "typecheck/invalid" "diagnostics/typecheck"
+
+echo "CONFORMANCE_SUMMARY passed=$PASSED failed=$FAILED"
+if [[ "$FAILED" -ne 0 ]]; then
   exit 1
 fi
 

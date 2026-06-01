@@ -1,0 +1,3 @@
+fn main() -> int:
+  value:str = "missing end
+  ret 0

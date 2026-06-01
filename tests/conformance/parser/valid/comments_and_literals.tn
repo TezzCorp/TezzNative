@@ -1,0 +1,14 @@
+// Parser smoke for comments, blank lines, literals, and expression grouping.
+
+fn main() -> int:
+  text:str = "tezz"
+  n:int = len(text)
+  value:int = (40 + 2) * 2
+
+  if n != 4:
+    ret 1
+
+  if value == 84:
+    ret 0
+
+  ret 2

@@ -1,0 +1,17 @@
+struct Pair:
+  left:int
+  right:int
+
+fn main() -> int:
+  p:Pair
+  p.left = 7
+  p.right = 9
+
+  values:[int;3]
+  values[0] = p.left
+  values[1] = p.right
+  values[2] = values[0] + values[1]
+
+  if values[2] != 16:
+    ret 1
+  ret 0

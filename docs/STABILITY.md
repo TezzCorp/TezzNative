@@ -25,10 +25,13 @@ These features are the first compatibility target:
 - Module imports from the local project and standard library
 - `tezzc check`, `tezzc run`, and bytecode-backed development workflows
 
-The stable-core conformance gate now includes fixed arrays/indexing,
-`sizeof`/`alignof`, named unknown value/module/function diagnostics,
-struct-field diagnostics, function-arity diagnostics, and unsafe
-pointer/address-of coverage.
+The stable-core conformance gate now includes 26 Windows/Linux checked cases
+across flat stable-core, parser, typecheck, diagnostics, and stdlib-import
+suites. Coverage includes fixed arrays/indexing, `sizeof`/`alignof`, comments
+and literals, nested blocks, function calls/returns, pointer-array roundtrip,
+struct value flow, named unknown value/module/function diagnostics,
+struct-field diagnostics, function-arity diagnostics, parser rejection cases,
+and unsafe pointer/address-of coverage.
 
 ## Beta Surfaces
 

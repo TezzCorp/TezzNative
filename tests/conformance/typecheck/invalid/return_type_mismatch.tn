@@ -1,0 +1,5 @@
+fn answer() -> int:
+  ret "forty-two"
+
+fn main() -> int:
+  ret answer()

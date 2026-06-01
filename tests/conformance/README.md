@@ -6,16 +6,24 @@ easy to diagnose.
 
 ## Layout
 
-- `valid/` contains programs that must pass `tezzc check`.
-- `invalid/` contains programs that must fail `tezzc check`.
-- `diagnostics/` contains expected diagnostic snippets for invalid programs.
+- `valid/` contains stable-core programs that must pass `tezzc check`.
+- `parser/valid` and `parser/invalid` contain parser-focused acceptance and
+  rejection fixtures.
+- `typecheck/valid` and `typecheck/invalid` contain semantic/type-system
+  acceptance and rejection fixtures.
+- `invalid/` contains legacy stable-core programs that must fail `tezzc check`.
+- `diagnostics/` contains expected diagnostic snippets for invalid programs,
+  including parser and typecheck subdirectories.
 - `stdlib/` contains stable standard-library import smoke programs.
 - `native/` contains native-backend smoke programs.
 - `abi/` contains starter C ABI layout and signature fixtures.
 
-The stable-core corpus currently covers arithmetic/control flow, structs,
-fixed arrays, indexing, `sizeof`/`alignof`, unsafe pointer operations, common
-type errors, unknown names/fields, wrong call arity, and unsafe diagnostics.
+The stable-core runner currently gates 26 cases across flat stable-core,
+parser, typecheck, diagnostics, and stdlib-import suites. It covers
+arithmetic/control flow, comments/literals, nested blocks, structs, fixed
+arrays, indexing, `sizeof`/`alignof`, unsafe pointer operations, function
+calls/returns, common type errors, unknown names/fields, wrong call arity,
+parser errors, and unsafe diagnostics.
 
 ## Runner
 
@@ -38,9 +46,9 @@ On Linux or WSL:
 bash tests/conformance/run.sh ./TezzNative-language/bin/tezzc-linux-x64
 ```
 
-The runner checks diagnostic snippets when `diagnostics/<test-name>.diag.txt`
-exists. The next step is to expand these snippets into full normalized
-snapshots.
+The runner checks diagnostic snippets when a matching `.diag.txt` file exists.
+Parser diagnostics live under `diagnostics/parser`; type-checker diagnostics
+live under `diagnostics/typecheck`.
 
 Native smoke tests cover executable hello output, loops/math, deterministic
 `math` helpers, strings and string transforms, struct-array field access, raw,

@@ -42,8 +42,10 @@ than the full repository surface.
 See `docs/STABILITY.md` for the full stability map.
 See `docs/PLATFORM_SUPPORT.md` for target support and
 `docs/STDLIB_INVENTORY.md` for module maturity. C ABI rules are documented in
-`docs/C_ABI.md`. Release integrity and privacy policies are documented in
-`docs/RELEASE_ENGINEERING.md`, `docs/TELEMETRY_PRIVACY.md`, and `SECURITY.md`.
+`docs/C_ABI.md`. Conformance and benchmark rules are documented in
+`docs/CONFORMANCE.md` and `docs/BENCHMARKS.md`. Release integrity and privacy
+policies are documented in `docs/RELEASE_ENGINEERING.md`,
+`docs/TELEMETRY_PRIVACY.md`, and `SECURITY.md`.
 
 ## Quick Example
 
@@ -123,12 +125,12 @@ On Linux or WSL:
 bash tests/conformance/run.sh ./TezzNative-language/bin/tezzc-linux-x64
 ```
 
-Invalid conformance tests may also have diagnostic snippets under
-`tests/conformance/diagnostics/`. The current gate covers typed mismatches,
-unknown values, unknown modules/functions, wrong arity, unsafe operations, and
-unknown struct fields. GitHub Actions runs the same stable-core corpus,
-including stable stdlib import smoke tests, against the published Windows and
-Linux SDK packages.
+The current gate covers flat stable-core, parser, typecheck, diagnostics, and
+stdlib-import suites. Invalid conformance tests may also have diagnostic
+snippets under `tests/conformance/diagnostics/`, including parser and typecheck
+subdirectories. GitHub Actions runs the same stable-core corpus against the
+published Windows and Linux SDK packages. See `docs/CONFORMANCE.md` for the
+suite contract.
 
 The native backend smoke lane builds and runs small executable programs for
 hello output, loops/math, math module helpers, strings and transforms, structs,

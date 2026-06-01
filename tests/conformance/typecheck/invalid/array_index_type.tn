@@ -1,0 +1,5 @@
+fn main() -> int:
+  values:[int;2]
+  bad:str = "0"
+  values[bad] = 1
+  ret 0
