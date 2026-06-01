@@ -34,6 +34,8 @@ $DefaultInclude = @(
   "download/tezznative-sdk.zip.sha256",
   "download/tezznative-sdk-linux.tar.gz",
   "download/tezznative-sdk-linux.tar.gz.sha256",
+  "download/tezzc-linux-x64.gz",
+  "download/tezzc-linux-x64.gz.sha256",
   "download/install.ps1",
   "download/install.sh",
   "download/install.cmd",

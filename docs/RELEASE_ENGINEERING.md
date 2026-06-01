@@ -11,6 +11,8 @@ Each public SDK release must publish:
 - `download/tezznative-sdk.zip.sha256`
 - `download/tezznative-sdk-linux.tar.gz`
 - `download/tezznative-sdk-linux.tar.gz.sha256`
+- `download/tezzc-linux-x64.gz`
+- `download/tezzc-linux-x64.gz.sha256`
 - `download/release_manifest.json`
 - `download/release_manifest.json.sha256`
 - `registry.tnx`
@@ -45,6 +47,7 @@ match.
 - Rebuild Windows and Linux SDK archives.
 - Build the Linux direct compiler with `TN_STATIC=1` so hosted runners do not
   depend on the WSL/build-host glibc version.
+- Publish the gzip-compressed Linux direct compiler for hosted CI bootstrap.
 - Generate archive `.sha256` files.
 - Generate and verify `release_manifest.json`.
 - Run stable conformance, native smoke, ABI, and release-security checks.

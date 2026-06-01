@@ -271,10 +271,33 @@ jobs:
             [[ "$(head -c 4 "$file" | od -An -tx1 | tr -d ' \n')" == "7f454c46" ]]
           }
 
+          compiler_gz_urls=(
+            "https://tn.tezzcorp.com/download/tezzc-linux-x64.gz?v=${cache_key}"
+          )
+          compiler=""
+          for compiler_gz_url in "${compiler_gz_urls[@]}"; do
+            if fetch_artifact "$compiler_gz_url" tezzc-linux-x64.gz "compressed Linux compiler" 180; then
+              if gzip -t tezzc-linux-x64.gz; then
+                gzip -dc tezzc-linux-x64.gz > tezzc-linux-x64
+                if is_elf tezzc-linux-x64; then
+                  chmod +x tezzc-linux-x64
+                  compiler="./tezzc-linux-x64"
+                  break
+                fi
+                echo "Compressed Linux compiler did not expand to an ELF binary" >&2
+              else
+                echo "Compressed Linux compiler is not a gzip archive" >&2
+              fi
+            fi
+          done
+          if [[ -n "$compiler" ]]; then
+            echo "TEZZC=$compiler" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
           compiler_urls=(
             "https://tn.tezzcorp.com/download/sdk/bin/tezzc-linux-x64?v=${cache_key}"
           )
-          compiler=""
           for compiler_url in "${compiler_urls[@]}"; do
             if fetch_artifact "$compiler_url" tezzc-linux-x64 "Linux compiler" 60; then
               if is_elf tezzc-linux-x64; then
@@ -289,7 +312,6 @@ jobs:
             fi
           done
           if [[ -n "$compiler" ]]; then
-            "$compiler" version || true
             echo "TEZZC=$compiler" >> "$GITHUB_ENV"
             exit 0
           fi
@@ -333,7 +355,6 @@ jobs:
             exit 1
           fi
           chmod +x "$compiler"
-          "$compiler" version || true
           echo "TEZZC=$compiler" >> "$GITHUB_ENV"
 
       - name: Run stable-core conformance
