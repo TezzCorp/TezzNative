@@ -20,64 +20,134 @@ jobs:
           if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
             $PSNativeCommandUseErrorActionPreference = $false
           }
+          $ProgressPreference = "SilentlyContinue"
           $cacheKey = if ($env:GITHUB_SHA) { $env:GITHUB_SHA } else { [guid]::NewGuid().ToString("N") }
-          $compilerUrls = @(
-            "https://tn.tezzcorp.com/download/sdk/bin/tezzc-windows-x64.exe?v=$cacheKey",
-            "https://tn.tezzcorp.com/download/sdk/bin/tezzc.exe?v=$cacheKey"
-          )
-          $directCompiler = $false
-          foreach ($compilerUrl in $compilerUrls) {
-            for ($attempt = 1; $attempt -le 4; $attempt++) {
-              Remove-Item -LiteralPath tezzc.exe -Force -ErrorAction SilentlyContinue
-              Write-Host "Downloading compiler attempt $attempt from $compilerUrl"
-              & curl.exe -4 -fL --retry 1 --retry-delay 3 --connect-timeout 20 --max-time 120 -A "TezzNative-GitHub-Actions" -o tezzc.exe $compilerUrl
-              $curlExit = $LASTEXITCODE
-              if ($curlExit -eq 0 -and (Test-Path -LiteralPath tezzc.exe)) {
-                $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path -LiteralPath tezzc.exe).Path)
-                if ($bytes.Length -gt 1024 -and $bytes[0] -eq 0x4D -and $bytes[1] -eq 0x5A) {
-                  $directCompiler = $true
-                  break
+
+          function Save-Url {
+            param(
+              [string]$Url,
+              [string]$OutFile,
+              [int]$TimeoutSec = 90
+            )
+
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
+              try {
+                Write-Host "Downloading attempt $attempt from $Url"
+                Invoke-WebRequest `
+                  -UseBasicParsing `
+                  -Headers @{ "User-Agent" = "TezzNative-GitHub-Actions" } `
+                  -TimeoutSec $TimeoutSec `
+                  -Uri $Url `
+                  -OutFile $OutFile
+                if ((Test-Path -LiteralPath $OutFile) -and (Get-Item -LiteralPath $OutFile).Length -gt 0) {
+                  return $true
                 }
+              } catch {
+                Write-Warning "Download attempt $attempt failed: $($_.Exception.Message)"
               }
-              Write-Warning "Compiler download attempt $attempt failed with curl exit $curlExit"
-              Start-Sleep -Seconds (5 * $attempt)
+              Start-Sleep -Seconds (3 * $attempt)
             }
-            if ($directCompiler) {
-              break
-            }
+            return $false
           }
-          if ($directCompiler) {
-            $compilerPath = (Resolve-Path -LiteralPath tezzc.exe).Path
-            "TEZZC=$compilerPath" | Out-File -FilePath $env:GITHUB_ENV -Append
-            return
+
+          function Assert-Sha256 {
+            param(
+              [string]$Path,
+              [string]$Expected,
+              [string]$Label
+            )
+
+            if ([string]::IsNullOrWhiteSpace($Expected)) {
+              Write-Warning "No expected checksum available for $Label"
+              return
+            }
+            $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToUpperInvariant()
+            if ($actual -ne $Expected.ToUpperInvariant()) {
+              throw "$Label checksum mismatch. Expected $Expected got $actual"
+            }
+            Write-Host "$Label SHA-256 verified: $actual"
+          }
+
+          function Test-MzBinary {
+            param([string]$Path)
+            if (-not (Test-Path -LiteralPath $Path)) {
+              return $false
+            }
+            $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $Path).Path)
+            return ($bytes.Length -gt 1024 -and $bytes[0] -eq 0x4D -and $bytes[1] -eq 0x5A)
+          }
+
+          $manifest = $null
+          try {
+            $manifest = Invoke-RestMethod `
+              -UseBasicParsing `
+              -Headers @{ "User-Agent" = "TezzNative-GitHub-Actions" } `
+              -TimeoutSec 45 `
+              -Uri "https://tn.tezzcorp.com/download/release_manifest.json?v=$cacheKey"
+          } catch {
+            Write-Warning "Release manifest download failed: $($_.Exception.Message)"
+          }
+
+          function Get-ManifestHash {
+            param([string]$Path)
+            if (-not $manifest -or -not $manifest.artifacts) {
+              return ""
+            }
+            $artifact = $manifest.artifacts | Where-Object { $_.path -eq $Path } | Select-Object -First 1
+            if ($artifact) {
+              return [string]$artifact.sha256
+            }
+            return ""
+          }
+
+          $compilerCandidates = @(
+            @{ Url = "https://tn.tezzcorp.com/download/sdk/bin/tezzc-windows-x64.exe?v=$cacheKey"; Path = "download/sdk/bin/tezzc-windows-x64.exe" },
+            @{ Url = "https://tn.tezzcorp.com/download/sdk/bin/tezzc.exe?v=$cacheKey"; Path = "download/sdk/bin/tezzc.exe" }
+          )
+          foreach ($candidate in $compilerCandidates) {
+            if (Save-Url -Url $candidate.Url -OutFile "tezzc.exe" -TimeoutSec 75) {
+              if (Test-MzBinary -Path "tezzc.exe") {
+                Assert-Sha256 -Path "tezzc.exe" -Expected (Get-ManifestHash -Path $candidate.Path) -Label "Windows compiler"
+                $compilerPath = (Resolve-Path -LiteralPath tezzc.exe).Path
+                "TEZZC=$compilerPath" | Out-File -FilePath $env:GITHUB_ENV -Append
+                return
+              }
+              Write-Warning "Downloaded compiler is not a Windows executable"
+            }
           }
 
           $sdkUrls = @(
-            "https://tn.tezzcorp.com/api/download_request.php?artifact=windows-sdk&source=github-actions&v=$cacheKey",
-            "https://tn.tezzcorp.com/download/tezznative-sdk.zip?v=$cacheKey"
+            "https://tn.tezzcorp.com/download/tezznative-sdk.zip?v=$cacheKey",
+            "https://tn.tezzcorp.com/api/download_request.php?artifact=windows-sdk&source=github-actions&v=$cacheKey"
           )
           $downloaded = $false
           foreach ($sdkUrl in $sdkUrls) {
-            for ($attempt = 1; $attempt -le 4; $attempt++) {
-              Remove-Item -LiteralPath tezznative-sdk.zip -Force -ErrorAction SilentlyContinue
-              Write-Host "Downloading SDK attempt $attempt from $sdkUrl"
-              & curl.exe -4 -fL --retry 1 --retry-delay 3 --connect-timeout 20 --max-time 240 -A "TezzNative-GitHub-Actions" -o tezznative-sdk.zip $sdkUrl
-              $curlExit = $LASTEXITCODE
-              if ($curlExit -eq 0 -and (Test-Path -LiteralPath tezznative-sdk.zip)) {
-                $downloaded = $true
-                break
-              }
-              Write-Warning "SDK download attempt $attempt failed with curl exit $curlExit"
-              Start-Sleep -Seconds (5 * $attempt)
-            }
-            if ($downloaded) {
+            if (Save-Url -Url $sdkUrl -OutFile "tezznative-sdk.zip" -TimeoutSec 150) {
+              $downloaded = $true
               break
             }
           }
           if (-not $downloaded) {
             throw "Unable to download TezzNative SDK from API or static fallback"
           }
+
           $zipPath = (Resolve-Path -LiteralPath tezznative-sdk.zip).Path
+          $expectedZip = Get-ManifestHash -Path "download/tezznative-sdk.zip"
+          if ([string]::IsNullOrWhiteSpace($expectedZip)) {
+            try {
+              $shaText = Invoke-WebRequest `
+                -UseBasicParsing `
+                -Headers @{ "User-Agent" = "TezzNative-GitHub-Actions" } `
+                -TimeoutSec 45 `
+                -Uri "https://tn.tezzcorp.com/download/tezznative-sdk.zip.sha256?v=$cacheKey"
+              $expectedZip = (($shaText.Content.Trim() -split "\s+")[0]).ToUpperInvariant()
+            } catch {
+              Write-Warning "SDK checksum sidecar download failed: $($_.Exception.Message)"
+            }
+          }
+          Assert-Sha256 -Path $zipPath -Expected $expectedZip -Label "Windows SDK ZIP"
+
           $bytes = [System.IO.File]::ReadAllBytes($zipPath)
           if ($bytes.Length -lt 4 -or $bytes[0] -ne 0x50 -or $bytes[1] -ne 0x4B) {
             $previewLength = [Math]::Min(4, $bytes.Length)

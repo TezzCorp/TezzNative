@@ -603,6 +603,8 @@ Delivered:
   and verification.
 - Added a GitHub `release-security` workflow that verifies a generated manifest
   and proves tampered artifacts fail verification.
+- Hardened the Windows GitHub conformance download path to use bounded
+  PowerShell HTTPS downloads and manifest/sidecar SHA-256 verification.
 - Hardened Windows and Linux install scripts on `tn.tezzcorp.com` so SDK
   archives are checked against published `.sha256` files before extraction.
 - Published `download/release_manifest.json` and
