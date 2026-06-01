@@ -1,0 +1,55 @@
+name: release-security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  manifest-fixture:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify release manifest tooling
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $site = Join-Path $env:RUNNER_TEMP "tn-site"
+          New-Item -ItemType Directory -Force -Path (Join-Path $site "download/sdk/bin") | Out-Null
+          New-Item -ItemType Directory -Force -Path (Join-Path $site "download/sdk/lib") | Out-Null
+          Copy-Item README.md (Join-Path $site "download/tezznative-sdk.zip")
+          Copy-Item README.md (Join-Path $site "download/tezznative-sdk-linux.tar.gz")
+          Copy-Item version.json (Join-Path $site "download/sdk/version.json")
+          Copy-Item tezz.mod (Join-Path $site "download/sdk/tezz.mod")
+          Copy-Item tezz.lock (Join-Path $site "download/sdk/tezz.lock")
+          Copy-Item lib/std.tn (Join-Path $site "download/sdk/lib/std.tn")
+          Copy-Item lib/io.tn (Join-Path $site "download/sdk/lib/io.tn")
+          Copy-Item lib/net.tn (Join-Path $site "download/sdk/lib/net.tn")
+          Set-Content -Path (Join-Path $site "download/install.ps1") -Value "# install fixture" -Encoding ASCII
+          Set-Content -Path (Join-Path $site "download/install.sh") -Value "# install fixture" -Encoding ASCII
+          Set-Content -Path (Join-Path $site "download/install.cmd") -Value "@echo off" -Encoding ASCII
+          Set-Content -Path (Join-Path $site "registry.tnx") -Value "registry fixture" -Encoding ASCII
+          Set-Content -Path (Join-Path $site "download/sdk/registry.tnx") -Value "registry fixture" -Encoding ASCII
+          Set-Content -Path (Join-Path $site "download/sdk/bin/tezzc.exe") -Value "compiler fixture" -Encoding ASCII
+          Set-Content -Path (Join-Path $site "download/sdk/bin/tezzc-windows-x64.exe") -Value "compiler fixture" -Encoding ASCII
+          Set-Content -Path (Join-Path $site "download/sdk/bin/tezzc-linux-x64") -Value "compiler fixture" -Encoding ASCII
+          $shaZip = (Get-FileHash -Algorithm SHA256 -Path (Join-Path $site "download/tezznative-sdk.zip")).Hash.ToUpperInvariant()
+          $shaTar = (Get-FileHash -Algorithm SHA256 -Path (Join-Path $site "download/tezznative-sdk-linux.tar.gz")).Hash.ToUpperInvariant()
+          Set-Content -Path (Join-Path $site "download/tezznative-sdk.zip.sha256") -Value "$shaZip  tezznative-sdk.zip" -Encoding ASCII
+          Set-Content -Path (Join-Path $site "download/tezznative-sdk-linux.tar.gz.sha256") -Value "$shaTar  tezznative-sdk-linux.tar.gz" -Encoding ASCII
+          $manifest = Join-Path $site "download/release_manifest.json"
+          .\tools\release\build_release_manifest.ps1 -SiteRoot $site -OutFile $manifest -BaseUrl "https://example.invalid"
+          .\tools\release\verify_release_manifest.ps1 -SiteRoot $site -ManifestPath $manifest
+          Add-Content -Path (Join-Path $site "download/sdk/lib/net.tn") -Value "tamper"
+          $failed = $false
+          try {
+            .\tools\release\verify_release_manifest.ps1 -SiteRoot $site -ManifestPath $manifest
+          } catch {
+            $failed = $true
+          }
+          if (-not $failed) {
+            throw "Tampered artifact unexpectedly passed release manifest verification"
+          }

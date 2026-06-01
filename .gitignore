@@ -18,15 +18,20 @@ benchmarks/results/**
 !.github/
 !.github/workflows/
 !.github/workflows/conformance.yml
+!.github/workflows/release-security.yml
 !tests/
 !tests/conformance/
 !tests/conformance/**
 !tezznative-vscode/
 !tezznative-vscode/**
+!tools/
+!tools/release/
+!tools/release/**
 
 # Allow specific files
 !README.md
 !LICENSE.txt
+!SECURITY.md
 !version.json
 !tezz.mod
 !tezz.lock

@@ -569,6 +569,8 @@ Started:
 
 ## Milestone 9: Security And Release Engineering
 
+Status: completed for the current release surface.
+
 Goal: make releases reproducible and safer to install.
 
 Required work:
@@ -587,6 +589,24 @@ Release gate:
 - Every public binary has version metadata, checksum, and release notes.
 - Site download pages and GitHub releases show the same version.
 - Install scripts fail closed when checksums do not match.
+
+Delivered:
+
+- Added `SECURITY.md` with private vulnerability reporting and supported
+  release-surface policy.
+- Added `docs/RELEASE_ENGINEERING.md` with the public artifact list,
+  manifest commands, installer checksum rule, and release checklist.
+- Added `docs/TELEMETRY_PRIVACY.md` documenting that compiler/runtime use is
+  local and that portal install/update events are best-effort and minimal.
+- Added `tools/release/build_release_manifest.ps1` and
+  `tools/release/verify_release_manifest.ps1` for SHA-256 manifest generation
+  and verification.
+- Added a GitHub `release-security` workflow that verifies a generated manifest
+  and proves tampered artifacts fail verification.
+- Hardened Windows and Linux install scripts on `tn.tezzcorp.com` so SDK
+  archives are checked against published `.sha256` files before extraction.
+- Published `download/release_manifest.json` and
+  `download/release_manifest.json.sha256` beside the SDK archives.
 
 ## CI Matrix
 

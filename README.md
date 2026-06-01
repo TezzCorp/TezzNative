@@ -41,7 +41,9 @@ than the full repository surface.
 
 See `docs/STABILITY.md` for the full stability map.
 See `docs/PLATFORM_SUPPORT.md` for target support and
-`docs/STDLIB_INVENTORY.md` for module maturity.
+`docs/STDLIB_INVENTORY.md` for module maturity. Release integrity and privacy
+policies are documented in `docs/RELEASE_ENGINEERING.md`,
+`docs/TELEMETRY_PRIVACY.md`, and `SECURITY.md`.
 
 ## Quick Example
 
@@ -173,6 +175,15 @@ powershell -ExecutionPolicy Bypass -File .\benchmarks\run.ps1
 
 Use `-IncludeExternal` to run the Python and C comparison fixtures when those
 toolchains are available.
+
+Release manifests can be generated and verified with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\release\build_release_manifest.ps1
+powershell -ExecutionPolicy Bypass -File .\tools\release\verify_release_manifest.ps1
+```
+
+Installers must verify archive SHA-256 files before extraction.
 
 On Linux or WSL:
 

@@ -51,6 +51,8 @@ A target should not move to Primary until:
 - stdlib stable module smoke tests pass.
 - install and uninstall flows are tested.
 - package checksums and version metadata are published.
+- release manifests verify every public SDK archive before install scripts
+  extract them.
 
 ## Immediate Improvements
 
