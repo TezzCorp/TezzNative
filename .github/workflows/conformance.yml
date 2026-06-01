@@ -135,7 +135,7 @@ jobs:
 
   linux-stable-core:
     runs-on: ubuntu-22.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -145,28 +145,77 @@ jobs:
         run: |
           set -euo pipefail
           cache_key="${GITHUB_SHA:-$(date +%s)}"
+          ua="TezzNative-GitHub-Actions"
+
+          fetch_artifact() {
+            local url="$1"
+            local output="$2"
+            local label="$3"
+            local max_time="$4"
+
+            rm -f "$output"
+            echo "Downloading ${label} with curl from ${url}"
+            if curl --http1.1 -fL --retry 2 --retry-all-errors --retry-delay 5 \
+              --connect-timeout 25 --max-time "$max_time" \
+              -A "$ua" \
+              -o "$output" \
+              "$url"; then
+              if [[ -s "$output" ]]; then
+                return 0
+              fi
+              echo "${label} download produced an empty file" >&2
+            fi
+
+            rm -f "$output"
+            echo "Retrying ${label} over IPv4"
+            if curl -4 --http1.1 -fL --retry 1 --retry-all-errors --retry-delay 5 \
+              --connect-timeout 25 --max-time "$max_time" \
+              -A "$ua" \
+              -o "$output" \
+              "$url"; then
+              if [[ -s "$output" ]]; then
+                return 0
+              fi
+              echo "${label} IPv4 download produced an empty file" >&2
+            fi
+
+            if command -v wget >/dev/null 2>&1; then
+              rm -f "$output"
+              echo "Retrying ${label} with wget"
+              if wget --tries=2 --timeout="$max_time" --header="User-Agent: ${ua}" \
+                -O "$output" \
+                "$url"; then
+                if [[ -s "$output" ]]; then
+                  return 0
+                fi
+                echo "${label} wget download produced an empty file" >&2
+              fi
+            fi
+
+            return 1
+          }
+
+          is_elf() {
+            local file="$1"
+            [[ -s "$file" ]] || return 1
+            [[ "$(head -c 4 "$file" | od -An -tx1 | tr -d ' \n')" == "7f454c46" ]]
+          }
+
           compiler_urls=(
             "https://tn.tezzcorp.com/download/sdk/bin/tezzc-linux-x64?v=${cache_key}"
           )
           compiler=""
           for compiler_url in "${compiler_urls[@]}"; do
-            for attempt in 1 2 3 4; do
-              rm -f tezzc-linux-x64
-              echo "Downloading Linux compiler attempt ${attempt} from ${compiler_url}"
-              if curl -4 -fL --retry 1 --retry-delay 3 --connect-timeout 20 --max-time 120 \
-                -A "TezzNative-GitHub-Actions" \
-                -o tezzc-linux-x64 \
-                "${compiler_url}"; then
-                if [[ -s tezzc-linux-x64 ]]; then
-                  chmod +x tezzc-linux-x64
-                  compiler="./tezzc-linux-x64"
-                  break
-                fi
+            if fetch_artifact "$compiler_url" tezzc-linux-x64 "Linux compiler" 60; then
+              if is_elf tezzc-linux-x64; then
+                chmod +x tezzc-linux-x64
+                compiler="./tezzc-linux-x64"
+                break
               fi
-              sleep $((5 * attempt))
-            done
-            if [[ -n "$compiler" ]]; then
-              break
+              echo "Downloaded Linux compiler is not an ELF binary; trying the next source" >&2
+              file tezzc-linux-x64 || true
+              head -c 96 tezzc-linux-x64 || true
+              echo
             fi
           done
           if [[ -n "$compiler" ]]; then
@@ -176,35 +225,27 @@ jobs:
           fi
 
           sdk_urls=(
-            "https://tn.tezzcorp.com/api/download_request.php?artifact=linux-sdk&source=github-actions&v=${cache_key}"
             "https://tn.tezzcorp.com/download/tezznative-sdk-linux.tar.gz?v=${cache_key}"
+            "https://tn.tezzcorp.com/api/download_request.php?artifact=linux-sdk&source=github-actions&v=${cache_key}"
           )
           downloaded=0
           for sdk_url in "${sdk_urls[@]}"; do
-            for attempt in 1 2 3 4; do
-              rm -f tezznative-sdk-linux.tar.gz
-              echo "Downloading Linux SDK attempt ${attempt} from ${sdk_url}"
-              if curl -4 -fL --retry 1 --retry-delay 3 --connect-timeout 20 --max-time 240 \
-                -A "TezzNative-GitHub-Actions" \
-                -o tezznative-sdk-linux.tar.gz \
-                "${sdk_url}"; then
+            if fetch_artifact "$sdk_url" tezznative-sdk-linux.tar.gz "Linux SDK" 180; then
+              if gzip -t tezznative-sdk-linux.tar.gz; then
                 downloaded=1
                 break
               fi
-              sleep $((5 * attempt))
-            done
-            if [[ "$downloaded" -eq 1 ]]; then
-              break
+              echo "Downloaded Linux SDK is not a gzip archive; trying the next source" >&2
+              file tezznative-sdk-linux.tar.gz || true
+              head -c 96 tezznative-sdk-linux.tar.gz || true
+              echo
             fi
           done
           if [[ "$downloaded" -ne 1 ]]; then
-            echo "Unable to download TezzNative Linux SDK from API or static fallback" >&2
+            echo "Unable to download TezzNative Linux SDK from direct, API, or static fallback" >&2
             exit 1
           fi
-          if ! gzip -t tezznative-sdk-linux.tar.gz; then
-            echo "Downloaded Linux SDK is not a gzip archive" >&2
-            exit 1
-          fi
+
           mkdir -p tezznative-sdk
           tar -xzf tezznative-sdk-linux.tar.gz -C tezznative-sdk
           find tezznative-sdk -type f -name 'tezzc*' -print
@@ -214,6 +255,11 @@ jobs:
           fi
           if [[ -z "$compiler" ]]; then
             echo "tezzc compiler not found in Linux SDK archive" >&2
+            exit 1
+          fi
+          if ! is_elf "$compiler"; then
+            echo "SDK compiler is not an ELF binary: ${compiler}" >&2
+            file "$compiler" || true
             exit 1
           fi
           chmod +x "$compiler"
