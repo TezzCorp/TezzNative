@@ -1,0 +1,38 @@
+import "net"
+
+fn main() -> int:
+  if net.init() != 0:
+    ret 1
+
+  bad:int = net.tcp_socket()
+  if bad < 0:
+    net.cleanup()
+    ret 2
+  bad_rc:int = net.bind(bad, "192.0.2.99", 0)
+  net.close(bad)
+  if bad_rc == 0:
+    net.cleanup()
+    ret 3
+
+  good:int = net.tcp_socket()
+  if good < 0:
+    net.cleanup()
+    ret 4
+  good_rc:int = net.bind(good, "127.0.0.1", 0)
+  net.close(good)
+  if good_rc != 0:
+    net.cleanup()
+    ret 5
+
+  any:int = net.tcp_socket()
+  if any < 0:
+    net.cleanup()
+    ret 6
+  any_rc:int = net.bind(any, "0.0.0.0", 0)
+  net.close(any)
+  net.cleanup()
+  if any_rc != 0:
+    ret 7
+
+  say "net-ipv4-literal"
+  ret 0

@@ -249,6 +249,10 @@ Started:
 - Added native smoke gates for 8-argument call/stack-argument handling on
   Windows/Linux x64, covering integer, string, and nested-call argument
   patterns that are common in stdlib service APIs.
+- Added shared direct-native IPv4 literal host parsing for Windows/Linux x64
+  `net.bind` and `net.connect` lowering. A new smoke gate proves invalid remote
+  literal binds fail while `127.0.0.1` and `0.0.0.0` binds succeed; DNS-backed
+  socket names and public-network HTTP remain the next networking gates.
 
 ## Milestone 3: Standard Library Hardening
 
@@ -358,8 +362,10 @@ Started:
   `http_server_serve_route_once` route helper. `http_write_response` and the
   route helper now pass a concrete empty header string for the no-extra-headers
   case, avoiding nullable stack-argument behavior in nested native calls.
-  DNS-backed sockets and public-network HTTP execution remain the next
-  networking hardening gates.
+- Added Windows/Linux native smoke for IPv4 literal socket bind host handling
+  so direct-native `net.bind` no longer collapses every host string to loopback.
+  DNS-backed sockets, IPv4 literal connect coverage, and public-network HTTP
+  execution remain the next networking hardening gates.
 
 ## Milestone 4: Developer Experience
 
