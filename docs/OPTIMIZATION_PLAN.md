@@ -131,7 +131,8 @@ Started:
 - Expanded valid stable-core coverage for fixed arrays, indexing,
   `sizeof`/`alignof`, and unsafe pointer/address-of workflows.
 - Expanded invalid and diagnostic-snippet coverage for unsafe address-of,
-  unknown struct fields, and wrong function arity.
+  unknown struct fields, named unknown values/modules/functions, and wrong
+  function arity.
 
 ## Milestone 2: Native Backend Reliability
 
@@ -370,6 +371,15 @@ Compiler diagnostics:
 - Include expected vs actual type.
 - Include one actionable help message when possible.
 - Keep diagnostics deterministic for snapshot testing.
+
+Started:
+
+- Replaced generic untyped RHS failures in value contexts with named
+  `unknown name` diagnostics.
+- Named unknown module and module-function call failures, so import/call
+  mistakes identify the exact missing symbol.
+- Expanded wrong-arity diagnostics for normal and module calls with expected
+  and actual argument counts while keeping deterministic snippet gates.
 
 Tooling:
 

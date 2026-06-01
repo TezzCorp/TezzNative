@@ -1,0 +1,4 @@
+import "net"
+
+fn main() -> int:
+  ret net.not_a_function()

@@ -31,7 +31,7 @@ than the full repository surface.
 | Area | Status | Notes |
 | --- | --- | --- |
 | Core syntax | Stable (gated) | Functions, variables, control flow, structs, arrays, imports, `sizeof`/`alignof`, and unsafe pointer blocks |
-| Static type checking | Stable/Beta (gated core) | Type mismatch, unknown name/field, arity, and unsafe diagnostics are snippet checked; richer help is still improving |
+| Static type checking | Stable/Beta (gated core) | Type mismatch, named unknown name/module/function, arity, and unsafe diagnostics are snippet checked; richer help is still improving |
 | Native executable flow | Beta (gated x64) | Windows/Linux SDKs build and run hello, loops/math module, many-argument calls, strings/transforms, structs, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable paths, vectors, arenas, process run/output, time clock/sleep/UTC/local-date helpers, deterministic net/HTTP URL parsing, Windows/Linux x64 TCP loopback sockets, and local HTTP client/server loopback |
 | Bytecode run flow | Stable/Beta | Useful for development and compatibility |
 | C ABI / extern calls | Beta (gated starter) | Header/ABI dump checks cover pointers, arrays, nested structs, scalar mixes, and extern signatures |
@@ -122,9 +122,11 @@ bash tests/conformance/run.sh ./TezzNative-language/bin/tezzc-linux-x64
 ```
 
 Invalid conformance tests may also have diagnostic snippets under
-`tests/conformance/diagnostics/`. GitHub Actions runs the same stable-core
-corpus, including stable stdlib import smoke tests, against the published
-Windows and Linux SDK packages.
+`tests/conformance/diagnostics/`. The current gate covers typed mismatches,
+unknown values, unknown modules/functions, wrong arity, unsafe operations, and
+unknown struct fields. GitHub Actions runs the same stable-core corpus,
+including stable stdlib import smoke tests, against the published Windows and
+Linux SDK packages.
 
 The native backend smoke lane builds and runs small executable programs for
 hello output, loops/math, math module helpers, strings and transforms, structs,

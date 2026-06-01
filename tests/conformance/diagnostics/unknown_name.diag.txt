@@ -1,1 +1,1 @@
-rhs has no type
+unknown name 'missing_symbol'

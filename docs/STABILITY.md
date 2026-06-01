@@ -26,8 +26,9 @@ These features are the first compatibility target:
 - `tezzc check`, `tezzc run`, and bytecode-backed development workflows
 
 The stable-core conformance gate now includes fixed arrays/indexing,
-`sizeof`/`alignof`, struct-field diagnostics, function-arity diagnostics, and
-unsafe pointer/address-of coverage.
+`sizeof`/`alignof`, named unknown value/module/function diagnostics,
+struct-field diagnostics, function-arity diagnostics, and unsafe
+pointer/address-of coverage.
 
 ## Beta Surfaces
 
