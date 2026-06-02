@@ -1,0 +1,47 @@
+import "math"
+
+fn near(actual:float, expected:float, eps:float) -> int:
+  diff:float = actual - expected
+  if diff < 0.0:
+    diff = 0.0 - diff
+  if diff <= eps:
+    ret 1
+  ret 0
+
+fn main() -> int:
+  q:int = 0
+  r:int = 0
+  div_rc:int = 0
+  unsafe:
+    div_rc = math.divmod(9, 0, &q, &r)
+  if div_rc != 0 - 1:
+    ret 1
+  unsafe:
+    div_rc = math.divmod(9, 2, 0 as *int, &r)
+  if div_rc != 0 - 1:
+    ret 2
+
+  smooth_low:float = math.smoothstep(1.0, 1.0, 0.5)
+  if near(smooth_low, 0.0, 0.000001) == 0:
+    ret 3
+  smooth_edge:float = math.smoothstep(1.0, 1.0, 1.0)
+  if near(smooth_edge, 1.0, 0.000001) == 0:
+    ret 4
+
+  q2:float = math.atan2(1.0, 0.0 - 1.0)
+  if q2 < 2.0 || q2 > 3.2:
+    ret 5
+  q3:float = math.atan2(0.0 - 1.0, 0.0 - 1.0)
+  if q3 > 0.0 - 2.0 || q3 < 0.0 - 3.2:
+    ret 6
+
+  asin_one:float = math.asin(1.0)
+  half_pi:float = math.PI() * 0.5
+  if near(asin_one, half_pi, 0.08) == 0:
+    ret 7
+  acos_one:float = math.acos(1.0)
+  if near(acos_one, 0.0, 0.08) == 0:
+    ret 8
+
+  say "stdlib-math-edges"
+  ret 0

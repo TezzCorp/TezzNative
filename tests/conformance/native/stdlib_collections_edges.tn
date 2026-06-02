@@ -1,0 +1,104 @@
+import "arena"
+import "str"
+import "vec"
+
+fn require_eq(actual:str, expected:str, code:int) -> int:
+  if actual == 0:
+    ret code
+  same:int = 0
+  unsafe:
+    same = strcmp(actual, expected)
+  if same != 0:
+    ret code
+  ret 0
+
+fn main() -> int:
+  result:int = 0
+
+  unchanged:str = str.str_replace_first("abc", "", "x")
+  result = require_eq(unchanged, "abc", 1)
+  unsafe:
+    if unchanged != 0:
+      free(unchanged)
+  if result != 0:
+    ret result
+
+  null_vec:*Vec
+  unsafe:
+    null_vec = 0 as *Vec
+  value:int = 10
+  fill_rc:int = 0
+  unsafe:
+    fill_rc = vec.vec_fill(null_vec, (&value) as *char, 1)
+  if fill_rc != 0 - 1:
+    ret 2
+  if vec.vec_reserve(null_vec, 4) != 0 - 1:
+    ret 3
+
+  v:*Vec = vec.ivec_new()
+  if v == 0:
+    ret 4
+  unsafe:
+    if vec.vec_fill(v, (&value) as *char, 3) != 0:
+      vec.vec_free(v)
+      ret 5
+  if vec.vec_len(v) != 3:
+    vec.vec_free(v)
+    ret 6
+  if vec.vec_reserve(v, 64) != 0:
+    vec.vec_free(v)
+    ret 7
+  if vec.vec_cap(v) < 64:
+    vec.vec_free(v)
+    ret 8
+  vec.vec_free(v)
+
+  a:*Arena = arena.arena_new(64)
+  if a == 0:
+    ret 9
+  bad_align:*char = arena.arena_alloc_aligned(a, 8, 3)
+  if bad_align != 0:
+    arena.arena_free(a)
+    ret 10
+  first:*char = arena.arena_alloc(a, 8)
+  if first == 0:
+    arena.arena_free(a)
+    ret 11
+  if arena.arena_release(a, arena.arena_used(a) + 8) != 0 - 1:
+    arena.arena_free(a)
+    ret 12
+  mark:int = arena.arena_mark(a)
+  second:*char = arena.arena_alloc_aligned(a, 8, 16)
+  if second == 0:
+    arena.arena_free(a)
+    ret 13
+  if arena.arena_release(a, mark) != 0:
+    arena.arena_free(a)
+    ret 14
+  arena.arena_free(a)
+
+  backing:[char;32]
+  wrap:*Arena
+  unsafe:
+    wrap = arena.arena_from_buf(&backing[0], 32)
+  if wrap == 0:
+    ret 15
+  wrapped:*char = arena.arena_alloc(wrap, 4)
+  if wrapped == 0:
+    arena.arena_free(wrap)
+    ret 16
+  unsafe:
+    wrapped[0] = 79 as char
+    wrapped[1] = 75 as char
+    wrapped[2] = 0 as char
+  wrapped_text:str
+  unsafe:
+    wrapped_text = wrapped as str
+  result = require_eq(wrapped_text, "OK", 17)
+  if result != 0:
+    arena.arena_free(wrap)
+    ret result
+  arena.arena_free(wrap)
+
+  say "stdlib-collections-edges"
+  ret 0

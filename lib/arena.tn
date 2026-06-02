@@ -60,6 +60,8 @@ fn arena_alloc(a:*Arena, n:int) -> *char:
 fn arena_alloc_aligned(a:*Arena, n:int, align_to:int) -> *char:
   if a == 0 || n <= 0 || align_to <= 0:
     ret 0 as *char
+  if (align_to & (align_to - 1)) != 0:
+    ret 0 as *char
   pos:int = (*a).pos
   mask:int = align_to - 1
   aligned:int = (pos + mask) & (0 - align_to)
@@ -141,7 +143,7 @@ fn arena_mark(a:*Arena) -> int:
 fn arena_release(a:*Arena, mark:int) -> int:
   if a == 0 || mark < 0:
     ret 0 - 1
-  if mark > (*a).cap:
+  if mark > (*a).pos:
     ret 0 - 1
   (*a).pos = mark
   ret 0

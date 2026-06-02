@@ -17,13 +17,13 @@ trust in the stable core.
 
 | Module | Purpose | Next Hardening Step |
 | --- | --- | --- |
-| `std` | Common prelude and helpers | Keep imports predictable; consider separating experimental imports later. |
+| `std` | Common prelude and helpers | Import smoke is gated; keep imports predictable and consider separating experimental imports later. |
 | `io` | Files, paths, streams, basic OS IO | Raw file read/write, File wrapper open/write/read-line/write-line/flush/seek/tell/close, BigFile chunk reads, StreamWriter flush/close behavior, portable `file_size_bytes`, file exists/delete/rename, directory exists/make/remove, failed-open/null guards, EOF behavior, portable path helpers, direct `dir_list`, raw/public recursive listing and glob, and process run/output capture are native-smoke gated on Windows/Linux x64. VM/runtime gates cover sorted recursive listing and raw glob filters. |
-| `str` | String helpers | Native search/prefix/suffix plus trim/case/slice/replace/repeat/pad/parse smoke is gated; add broader edge-case tests. |
-| `math` | Numeric helpers | Native integer, float, divmod, aggregate, and dot-product smoke is gated; add trigonometry/log/edge-case tests. |
-| `time` | Time and sleep helpers | Import smoke plus native clock/sleep/UTC/local-date smoke are gated on Windows/Linux x64; add timezone offset and parsing helpers next. |
-| `vec` | Dynamic vector utilities | Native integer vector push/get/set/pop/free smoke is gated; add generic insert/remove/find tests. |
-| `arena` | Arena allocation helpers | Native allocation/alignment/strdup/mark/release/reset smoke is gated; add wrapped-buffer tests. |
+| `str` | String helpers | Native search/prefix/suffix plus trim/case/slice/replace/repeat/pad/parse smoke is gated; empty `str_replace_first` behavior is edge-gated. |
+| `math` | Numeric helpers | Native integer, float, divmod, aggregate, dot-product, divide-by-zero/null-output, `smoothstep`, and quadrant `atan2` smoke is gated. |
+| `time` | Time and sleep helpers | Import smoke plus native clock/sleep/UTC/local-date smoke are gated on Windows/Linux x64; ownership of `date_now` backend output remains backend-defined. |
+| `vec` | Dynamic vector utilities | Native integer vector push/get/set/pop/free smoke is gated; reserve/fill null guards and reserve growth are edge-gated. |
+| `arena` | Arena allocation helpers | Native allocation/alignment/strdup/mark/release/reset smoke is gated; wrapped buffers, invalid alignment, and future-mark release failures are edge-gated. |
 
 ## Beta Modules
 
@@ -73,9 +73,9 @@ A module can move toward Stable Candidate only when:
 
 ## Immediate Improvements
 
-1. Add deeper module smoke tests for `io`, `str`, `math`, `time`, `vec`, and
-   `arena`; first native `io`/`str`/`math`/`time`/`vec`/`arena` coverage is now
-   gated, including chunked stream IO.
+1. Keep adding deeper edge smoke tests as APIs graduate; the current stable
+   candidate slice has native `io`/`str`/`math`/`time`/`vec`/`arena` coverage,
+   including chunked stream IO and focused math/string/vector/arena edge gates.
 2. Document fallback behavior for `gpu`, `npu`, `tls`, and GUI modules.
 3. Reduce default prelude risk by separating stable and experimental imports.
 4. Add examples for the stable candidate modules.

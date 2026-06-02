@@ -53,7 +53,10 @@ live under `diagnostics/typecheck`.
 Native smoke tests cover executable hello output, loops/math, deterministic
 `math` helpers, strings and string transforms, struct-array field access, raw,
 wrapped, line-oriented, and chunked stream file IO, directory lifecycle,
-portable path helpers, vectors, arenas, and time clock/sleep/UTC-date helpers:
+portable path helpers, vectors, arenas, and time clock/sleep/UTC-date helpers.
+Focused stdlib edge fixtures also gate math divide/null behavior, string
+empty-replace behavior, vector reserve/fill guards, and arena alignment/release
+guards.
 
 ```powershell
 .\tests\conformance\run-native-smoke.ps1

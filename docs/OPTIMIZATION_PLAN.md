@@ -298,7 +298,7 @@ Completed exit gate:
 
 ## Milestone 3: Standard Library Hardening
 
-Status: started.
+Status: completed for the current stable-candidate stdlib slice.
 
 Goal: make the stable standard library small, documented, and testable.
 
@@ -412,6 +412,29 @@ Started:
 - Added Windows/Linux native smoke for keep-alive HTTP response reads covering
   fixed `Content-Length`, chunked bodies with extensions/trailers, and
   comma-separated `Transfer-Encoding` tokens.
+- Added `docs/STDLIB_CORE.md` as the public stable-candidate stdlib contract
+  for ownership, failure behavior, platform notes, and verification commands.
+- Hardened `math.divmod` null-output guards, `math.smoothstep` equal-edge
+  behavior, and `math.atan2` quadrant handling; added native edge gates for
+  divide-by-zero/null-output, smoothstep, inverse trig, and quadrant behavior.
+- Hardened `str.str_replace_first` for empty needles so it returns a duplicate
+  of the source instead of injecting the replacement at offset zero.
+- Hardened `vec.vec_reserve` and `vec.vec_fill` so null vectors fail with
+  `-1`, while zero-count fills remain a no-op for valid vectors.
+- Hardened `arena.arena_alloc_aligned` to reject non-power-of-two alignments
+  and `arena.arena_release` to reject future marks beyond current usage.
+- Added native edge fixtures for stable-candidate stdlib math and collections
+  behavior across Windows/Linux x64:
+  `stdlib_math_edges.tn` and `stdlib_collections_edges.tn`.
+
+Completed exit gate:
+
+- Stable-candidate stdlib modules have public ownership/failure/platform rules
+  in `docs/STDLIB_CORE.md`.
+- `std`, `io`, `str`, `math`, `time`, `vec`, and `arena` have import or native
+  smoke coverage; math/string/vector/arena edge behavior is now native gated.
+- The standard library maturity inventory and public status text are
+  synchronized with the gated surface.
 
 ## Milestone 4: Developer Experience
 

@@ -61,7 +61,8 @@ Current native smoke coverage includes hello output, loop/math lowering, string
 helpers and transforms, file IO, directory lifecycle/listing/glob, portable
 paths, vectors, arenas, time helpers, process output, many-argument calls,
 local TCP loopback, socket options, IPv4 literal bind hosts, localhost wrappers,
-local HTTP route helpers, and keep-alive HTTP response reads.
+local HTTP route helpers, keep-alive HTTP response reads, and stable-candidate
+stdlib edge fixtures for math, strings, vectors, and arenas.
 
 Native reliability cases build focused host-safe fixtures twice and compare the
 resulting executable SHA-256 hashes. They also assert that an unknown

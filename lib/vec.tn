@@ -191,7 +191,9 @@ fn vec_clear(v:*Vec) -> int:
 
 // Reserve at least min_cap elements
 fn vec_reserve(v:*Vec, min_cap:int) -> int:
-  if v == 0 || min_cap <= (*v).cap:
+  if v == 0:
+    ret 0 - 1
+  if min_cap <= (*v).cap:
     ret 0
   ret _vec_grow(v, min_cap)
 
@@ -220,7 +222,9 @@ fn vec_free(v:*Vec) -> int:
 
 // Extend vector with n copies of elem
 fn vec_fill(v:*Vec, src:*char, n:int) -> int:
-  if v == 0 || src == 0 || n <= 0:
+  if v == 0 || src == 0:
+    ret 0 - 1
+  if n <= 0:
     ret 0
   i:int = 0
   while i < n:

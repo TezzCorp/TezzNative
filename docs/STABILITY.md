@@ -47,8 +47,10 @@ These surfaces are useful today but need more conformance tests:
 - `io`, `str`, `math`, `vec`, `arena`, `time`; imports plus selected native
   executable smoke for raw/wrapped/line/stream file IO, directory lifecycle,
   direct `dir_list`, raw/public recursive listing and glob, portable paths,
-  many-argument calls, math helpers, string transforms, vectors, arenas, process
-  run/output capture, `time` clock/sleep/UTC/local-date helpers, deterministic
+  many-argument calls, math helpers, math edge behavior, string transforms,
+  empty-replace string behavior, vector reserve/fill guards, arena
+  alignment/release guards, process run/output capture, `time`
+  clock/sleep/UTC/local-date helpers, deterministic
   `net` URL, DNS, HTTP parser, route, auth/cookie, chunked response helpers,
   keep-alive HTTP response reads, socket options, IPv4 literal socket bind
   hosts, localhost TCP/UDP connect wrappers, and local HTTP client/server route

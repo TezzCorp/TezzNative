@@ -82,7 +82,7 @@ fn pow_int(base:int, exp:int) -> int:
   ret result
 
 fn divmod(a:int, b:int, out_q:*int, out_r:*int) -> int:
-  if b == 0:
+  if b == 0 || out_q == 0 || out_r == 0:
     ret 0 - 1
   unsafe:
     *out_q = a / b
@@ -196,6 +196,10 @@ fn lerp(a:float, b:float, t:float) -> float:
 
 // Smooth step (3t^2 - 2t^3)
 fn smoothstep(edge0:float, edge1:float, x:float) -> float:
+  if edge0 == edge1:
+    if x < edge0:
+      ret 0.0
+    ret 1.0
   t:float = clampf((x - edge0) / (edge1 - edge0), 0.0, 1.0)
   ret t * t * (3.0 - 2.0 * t)
 
@@ -230,40 +234,36 @@ fn tan(x:float) -> float:
     ret 1.0e15
   ret sin(x) / c
 
-// Atan2 via polynomial approximation
-fn atan2(y:float, x:float) -> float:
-  if x == 0.0:
-    if y > 0.0:
-      ret PI() * 0.5
-    if y < 0.0:
-      ret 0.0 - PI() * 0.5
-    ret 0.0
-  r:float = y / x
+fn _atan_poly_unit(r:float) -> float:
+  r2:float = r * r
+  ret r * (1.0 - r2 * (0.333333333 - r2 * (0.2 - r2 * (0.142857142 - r2 * 0.111111111))))
+
+fn _atan_ratio(r:float) -> float:
   a:float = r
   if a < 0.0:
     a = 0.0 - a
-  // Polynomial approximation for |r| <= 1
   if a <= 1.0:
-    r2:float = r * r
-    result:float = r * (1.0 - r2 * (0.333333333 - r2 * (0.2 - r2 * (0.142857142 - r2 * 0.111111111))))
-    if x < 0.0:
-      if y >= 0.0:
-        ret result + PI()
-      ret result - PI()
-    ret result
-  // For |r| > 1, use atan(r) = pi/2 - atan(1/r)
+    ret _atan_poly_unit(r)
   inv:float = 1.0 / r
-  r2:float = inv * inv
-  result2:float = inv * (1.0 - r2 * (0.333333333 - r2 * (0.2 - r2 * (0.142857142 - r2 * 0.111111111))))
+  reduced:float = _atan_poly_unit(inv)
   if r > 0.0:
-    base:float = PI() * 0.5
-    if x < 0.0:
-      base = PI() + PI() * 0.5
-    ret base - result2
-  base2:float = 0.0 - PI() * 0.5
+    ret PI() * 0.5 - reduced
+  ret (0.0 - PI() * 0.5) - reduced
+
+// Atan2 via polynomial approximation with quadrant-correct output.
+fn atan2(y:float, x:float) -> float:
+  if x > 0.0:
+    ret _atan_ratio(y / x)
   if x < 0.0:
-    base2 = 0.0 - PI() - PI() * 0.5
-  ret base2 + result2
+    result:float = _atan_ratio(y / x)
+    if y >= 0.0:
+      ret result + PI()
+    ret result - PI()
+  if y > 0.0:
+    ret PI() * 0.5
+  if y < 0.0:
+    ret 0.0 - PI() * 0.5
+  ret 0.0
 
 fn atan(x:float) -> float:
   ret atan2(x, 1.0)

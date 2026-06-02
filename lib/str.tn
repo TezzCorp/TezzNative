@@ -307,6 +307,10 @@ fn str_replace_first(s:str, from2:str, to2:str) -> str:
   source:str = s
   needle:str = from2
   replacement:str = to2
+  if source == 0 || needle == 0:
+    ret str_dup(source)
+  if _str_len(needle) == 0:
+    ret str_dup(source)
   idx:int = str_find(source, needle)
   if idx < 0:
     ret str_dup(source)

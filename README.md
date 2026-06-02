@@ -35,14 +35,15 @@ than the full repository surface.
 | Native executable flow | Beta (gated x64) | Windows/Linux SDKs build and run hello, loops/math module, many-argument calls, strings/transforms, structs, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable paths, vectors, arenas, process run/output, time clock/sleep/UTC/local-date helpers, deterministic net/HTTP URL parsing, Windows/Linux x64 TCP loopback sockets, IPv4 literal socket bind handling, localhost connect/bind wrappers, keep-alive HTTP response reads, local HTTP client/server loopback, reproducible native output fixtures, and fail-closed unsupported targets |
 | Bytecode run flow | Stable/Beta | Useful for development and compatibility |
 | C ABI / extern calls | Beta (gated starter) | Header/structured ABI dump checks cover pointers, arrays, nested structs, scalar mixes, field offsets, and extern signatures |
-| Stable stdlib candidates | Stable/Beta (smoke gated) | Core imports plus native math, string, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable path, vector, arena, process run/output capture, and `time` clock/sleep/UTC/local-date smoke |
+| Stable stdlib candidates | Stable/Beta (edge gated) | Core imports plus native math, string, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable path, vector, arena, process run/output capture, `time` clock/sleep/UTC/local-date smoke, and focused stdlib edge gates for math, strings, vectors, and arenas |
 | Networking/TLS/GUI/DB | Beta | `net` URL, DNS endpoint, HTTP parser, route, auth/cookie, chunked response helpers, keep-alive `Content-Length`/chunked response reads, Windows/Linux x64 TCP loopback send/recv, IPv4 literal bind hosts, localhost TCP/UDP connect wrappers, socket options, and local HTTP client/server route helpers are smoke gated; TLS, public-network HTTP, DNS-backed sockets, and wider backend matrix testing are still needed |
 | GPU/NPU/LLM/kernel modules | Experimental | API surface exists; backend support depends on runtime build |
 
 See `docs/STABILITY.md` for the full stability map.
 See `docs/PLATFORM_SUPPORT.md` for target support and
 `docs/STDLIB_INVENTORY.md` for module maturity. C ABI rules are documented in
-`docs/C_ABI.md`. Conformance and benchmark rules are documented in
+`docs/C_ABI.md`. Stable-candidate stdlib ownership and failure rules are
+documented in `docs/STDLIB_CORE.md`. Conformance and benchmark rules are documented in
 `docs/CONFORMANCE.md` and `docs/BENCHMARKS.md`. Public claim boundaries are
 documented in `docs/TRUST_BASELINE.md`. Native backend target scope and
 reliability gates are documented in `docs/NATIVE_BACKEND.md`. Release integrity
@@ -98,7 +99,9 @@ The public `lib/` directory includes modules for:
 - Acceleration surfaces: `simd`, `intrin`, `gpu`, `npu`
 
 Not every module has the same maturity level. Stable applications should start
-with the core modules and opt into experimental modules deliberately.
+with the core modules and opt into experimental modules deliberately. The
+stable-candidate stdlib contract, ownership rules, failure behavior, and
+verification commands are documented in `docs/STDLIB_CORE.md`.
 
 ## Tooling
 
@@ -139,7 +142,8 @@ hello output, loops/math, math module helpers, strings and transforms, structs,
 many-argument call handling,
 raw/wrapped/line/stream file IO, directory lifecycle, direct directory listing,
 raw/public glob filters, portable path helpers, vectors, arenas, time
-clock/sleep/UTC/local-date helpers, deterministic `net` URL/HTTP parsing,
+clock/sleep/UTC/local-date helpers, stdlib math/collections edge behavior,
+deterministic `net` URL/HTTP parsing,
 Windows/Linux x64 TCP loopback sockets, socket options, localhost socket
 wrappers, keep-alive HTTP response reads, and local HTTP client/server route
 helpers, plus IPv4 literal socket bind host handling:
