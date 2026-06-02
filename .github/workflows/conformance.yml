@@ -210,6 +210,13 @@ jobs:
           Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
           & .\tests\conformance\run.ps1 -Tezzc "$env:TEZZC"
 
+      - name: Run developer experience gate
+        shell: powershell
+        timeout-minutes: 5
+        run: |
+          Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+          & .\tests\conformance\run-dx.ps1 -Tezzc "$env:TEZZC"
+
       - name: Run ABI conformance
         shell: powershell
         timeout-minutes: 5
@@ -410,6 +417,11 @@ jobs:
         shell: bash
         timeout-minutes: 5
         run: bash tests/conformance/run.sh "$TEZZC"
+
+      - name: Run developer experience gate
+        shell: bash
+        timeout-minutes: 5
+        run: bash tests/conformance/run-dx.sh "$TEZZC"
 
       - name: Run ABI conformance
         shell: bash

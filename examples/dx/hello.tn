@@ -1,0 +1,5 @@
+import "std"
+
+fn main() -> int:
+  say "hello from TezzNative"
+  ret 0

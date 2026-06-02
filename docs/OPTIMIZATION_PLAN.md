@@ -438,6 +438,8 @@ Completed exit gate:
 
 ## Milestone 4: Developer Experience
 
+Status: completed for the current first-user workflow surface.
+
 Goal: make TezzNative feel good before users know it is young.
 
 Compiler diagnostics:
@@ -455,6 +457,21 @@ Started:
   mistakes identify the exact missing symbol.
 - Expanded wrong-arity diagnostics for normal and module calls with expected
   and actual argument counts while keeping deterministic snippet gates.
+- Added deterministic `help:` lines for common unknown-name, unknown-module,
+  wrong-arity, type-mismatch, unsafe, and missing-block-marker errors.
+- Added the public Windows/Linux DX runner:
+  `tests/conformance/run-dx.ps1` and `tests/conformance/run-dx.sh`.
+- Added DX fixtures for actionable diagnostics, formatter idempotence, lint
+  rule IDs, and lint suppression behavior.
+- Added curated first examples under `examples/dx` for hello, CLI-style flags,
+  file read/write, HTTP parsing, route matching, C extern calls, native builds,
+  and a beta TezzDB starter.
+- Added `docs/DEVELOPER_EXPERIENCE.md` with the DX contract and commands.
+- Promoted the TezzNative LSP source and VS Code snippets into the DX gate, and
+  removed aspirational default snippets that referenced experimental module
+  flows without matching public examples.
+- Added the DX gate to hosted Windows and Linux conformance CI.
+- Included examples and DX conformance files in the packaged SDK manifest.
 
 Tooling:
 
@@ -479,6 +496,14 @@ Adoption gate:
 
 - A new user can install, run, check, build, and read errors without needing
   private knowledge of the repo.
+
+Completed exit gate:
+
+- `DX_SUMMARY passed=19 failed=0` on Windows and Linux for the current SDK.
+- Public examples are checkable, `hello.tn` runs, and `native_build.tn` builds
+  and executes through `buildexe --verify`.
+- Editor snippets, LSP source, formatter, linter, and actionable diagnostics
+  are part of the public conformance story.
 
 ## Milestone 5: Ecosystem And Package Trust
 

@@ -1,0 +1,4 @@
+fn main() -> int:
+  unused_value:int = 0
+  say "lint-unused"
+  ret 0

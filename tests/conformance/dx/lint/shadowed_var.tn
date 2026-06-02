@@ -1,0 +1,6 @@
+fn main() -> int:
+  value:int = 0
+  if value == 0:
+    value:int = 1
+    say value
+  ret 0

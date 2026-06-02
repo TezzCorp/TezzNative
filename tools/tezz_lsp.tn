@@ -1,0 +1,876 @@
+// Experimental LSP server (stdio JSON-RPC)
+import "io"
+
+fn streq(a:str, b:str) -> int:
+  ret strcmp(a, b) == 0
+
+fn str_len(s:str) -> int:
+  ret len(s)
+
+fn str_join2(a:str, b:str) -> str:
+  if a == 0:
+    a = ""
+  if b == 0:
+    b = ""
+  al:int = len(a)
+  bl:int = len(b)
+  out:*char = (*char)malloc(al + bl + 1)
+  i:int = 0
+  while i < al:
+    out[i] = a[i]
+    i = i + 1
+  j:int = 0
+  while j < bl:
+    out[al + j] = b[j]
+    j = j + 1
+  out[al + bl] = 0 as char
+  ret out
+
+fn str_join3(a:str, b:str, c:str) -> str:
+  ab:str = str_join2(a, b)
+  out:str = str_join2(ab, c)
+  free(ab)
+  ret out
+
+fn str_dup(s:str) -> str:
+  if s == 0:
+    ret 0 as str
+  n:int = len(s)
+  out:*char = (*char)malloc(n + 1)
+  i:int = 0
+  while i < n:
+    out[i] = s[i]
+    i = i + 1
+  out[n] = 0 as char
+  ret out
+
+fn substr_dup(s:str, a:int, b:int) -> str:
+  if s == 0:
+    ret 0 as str
+  if b < a:
+    b = a
+  n:int = b - a
+  out:*char = (*char)malloc(n + 1)
+  i:int = 0
+  while i < n:
+    out[i] = s[a + i]
+    i = i + 1
+  out[n] = 0 as char
+  ret out
+
+fn starts_with(s:str, prefix:str) -> int:
+  if s == 0 || prefix == 0:
+    ret 0
+  i:int = 0
+  while prefix[i] != 0:
+    if s[i] != prefix[i]:
+      ret 0
+    i = i + 1
+  ret 1
+
+fn str_find(hay:str, needle:str) -> int:
+  if hay == 0 || needle == 0:
+    ret 0 - 1
+  n:int = len(needle)
+  if n == 0:
+    ret 0
+  i:int = 0
+  while hay[i] != 0:
+    j:int = 0
+    while needle[j] != 0 && hay[i + j] == needle[j]:
+      j = j + 1
+    if needle[j] == 0:
+      ret i
+    i = i + 1
+  ret 0 - 1
+
+fn is_space(c:int) -> int:
+  ret c == 32 || c == 9 || c == 10 || c == 13
+
+fn hex_val(c:int) -> int:
+  if c >= 48 && c <= 57:
+    ret c - 48
+  if c >= 65 && c <= 70:
+    ret 10 + (c - 65)
+  if c >= 97 && c <= 102:
+    ret 10 + (c - 97)
+  ret 0 - 1
+
+fn json_escape(s:str) -> str:
+  if s == 0:
+    ret 0 as str
+  n:int = len(s)
+  out:*char = (*char)malloc(n * 2 + 1)
+  i:int = 0
+  j:int = 0
+  while i < n:
+    c:int = s[i] as int
+    if c == 34:
+      out[j] = 92 as char
+      out[j + 1] = 34 as char
+      j = j + 2
+    else:
+      if c == 92:
+        out[j] = 92 as char
+        out[j + 1] = 92 as char
+        j = j + 2
+      else:
+        if c == 10:
+          out[j] = 92 as char
+          out[j + 1] = 110 as char
+          j = j + 2
+        else:
+          if c == 13:
+            out[j] = 92 as char
+            out[j + 1] = 114 as char
+            j = j + 2
+          else:
+            out[j] = s[i]
+            j = j + 1
+    i = i + 1
+  out[j] = 0 as char
+  ret out
+
+fn json_get_string(json:str, key:str) -> str:
+  if json == 0 || key == 0:
+    ret 0 as str
+  pat:str = str_join3("\"", key, "\"")
+  idx:int = str_find(json, pat)
+  if idx < 0:
+    free(pat)
+    ret 0 as str
+  i:int = idx + len(pat)
+  free(pat)
+  while json[i] != 0 && (json[i] == 58 as char || is_space(json[i] as int) != 0):
+    i = i + 1
+  if json[i] != 34 as char:
+    ret 0 as str
+  i = i + 1
+  start:int = i
+  while json[i] != 0:
+    if json[i] == 92 as char:
+      i = i + 2
+      continue
+    if json[i] == 34 as char:
+      break
+    i = i + 1
+  ret substr_dup(json, start, i)
+
+fn json_unescape(s:str) -> str:
+  if s == 0:
+    ret 0 as str
+  n:int = len(s)
+  out:*char = (*char)malloc(n + 1)
+  i:int = 0
+  j:int = 0
+  while i < n:
+    c:int = s[i] as int
+    if c == 92 && i + 1 < n:
+      n1:int = s[i + 1] as int
+      if n1 == 110:
+        out[j] = 10 as char
+        i = i + 2
+        j = j + 1
+        continue
+      if n1 == 114:
+        out[j] = 13 as char
+        i = i + 2
+        j = j + 1
+        continue
+      if n1 == 116:
+        out[j] = 9 as char
+        i = i + 2
+        j = j + 1
+        continue
+      if n1 == 34:
+        out[j] = 34 as char
+        i = i + 2
+        j = j + 1
+        continue
+      if n1 == 92:
+        out[j] = 92 as char
+        i = i + 2
+        j = j + 1
+        continue
+      if n1 == 117 && i + 5 < n:
+        h1:int = hex_val(s[i + 2] as int)
+        h2:int = hex_val(s[i + 3] as int)
+        h3:int = hex_val(s[i + 4] as int)
+        h4:int = hex_val(s[i + 5] as int)
+        if h1 >= 0 && h2 >= 0 && h3 >= 0 && h4 >= 0:
+          v:int = (h1 * 4096) + (h2 * 256) + (h3 * 16) + h4
+          if v < 256:
+            out[j] = v as char
+          else:
+            out[j] = 63 as char
+          i = i + 6
+          j = j + 1
+          continue
+    out[j] = s[i]
+    i = i + 1
+    j = j + 1
+  out[j] = 0 as char
+  ret out
+
+fn json_get_int(json:str, key:str) -> int:
+  if json == 0 || key == 0:
+    ret 0 - 1
+  pat:str = str_join3("\"", key, "\"")
+  idx:int = str_find(json, pat)
+  if idx < 0:
+    free(pat)
+    ret 0 - 1
+  i:int = idx + len(pat)
+  free(pat)
+  while json[i] != 0 && (json[i] == 58 as char || is_space(json[i] as int) != 0):
+    i = i + 1
+  sign:int = 1
+  if json[i] == 45 as char:
+    sign = 0 - 1
+    i = i + 1
+  n:int = 0
+  while json[i] != 0:
+    c:int = json[i] as int
+    if c < 48 || c > 57:
+      break
+    n = n * 10 + (c - 48)
+    i = i + 1
+  ret n * sign
+
+fn uri_to_path(uri:str) -> str:
+  if uri == 0:
+    ret 0 as str
+  start:int = 0
+  if starts_with(uri, "file:///") != 0:
+    start = 8
+  else:
+    if starts_with(uri, "file://") != 0:
+      start = 7
+  n:int = len(uri)
+  out:*char = (*char)malloc(n + 1)
+  i:int = start
+  j:int = 0
+  while i < n:
+    c:int = uri[i] as int
+    if c == 37 && i + 2 < n:
+      h1:int = hex_val(uri[i + 1] as int)
+      h2:int = hex_val(uri[i + 2] as int)
+      if h1 >= 0 && h2 >= 0:
+        v:int = h1 * 16 + h2
+        out[j] = v as char
+        i = i + 3
+        j = j + 1
+        continue
+    out[j] = uri[i]
+    i = i + 1
+    j = j + 1
+  out[j] = 0 as char
+  ret out
+
+fn hash32(s:str) -> int:
+  if s == 0:
+    ret 0
+  h:int = 2166136261
+  i:int = 0
+  while s[i] != 0:
+    h = h ^ (s[i] as int)
+    h = h * 16777619
+    h = h & 2147483647
+    i = i + 1
+  ret h
+
+fn temp_path_for_uri(uri:str) -> str:
+  mkdir("build")
+  mkdir("build/.lsp")
+  h:int = hash32(uri)
+  hs:str = int_to_str(h)
+  p1:str = str_join2("build/.lsp/", hs)
+  p2:str = str_join2(p1, ".tn")
+  free(hs)
+  free(p1)
+  ret p2
+
+fn int_to_str(x:int) -> str:
+  if x == 0:
+    ret "0"
+  neg:int = 0
+  n:int = x
+  if n < 0:
+    neg = 1
+    n = 0 - n
+  tmp:[char;32]
+  i:int = 0
+  while n > 0:
+    tmp[i] = (48 + (n % 10)) as char
+    n = n / 10
+    i = i + 1
+  if neg != 0:
+    tmp[i] = 45 as char
+    i = i + 1
+  tmp[i] = 0 as char
+  // reverse
+  a:int = 0
+  b:int = i - 1
+  while a < b:
+    c:char = tmp[a]
+    tmp[a] = tmp[b]
+    tmp[b] = c
+    a = a + 1
+    b = b - 1
+  ret str_dup(tmp)
+
+fn tezzc_path() -> str:
+  os:str = os_name()
+  if streq(os, "windows"):
+    ret ".\\build\\tezzc.exe"
+  ret "./build/tezzc"
+
+fn send_message(out:*File, json:str) -> int:
+  if out == 0 || json == 0:
+    ret 0 - 1
+  n:int = len(json)
+  ns:str = int_to_str(n)
+  header:str = str_join3("Content-Length: ", ns, "\r\n\r\n")
+  io.file_write(out, header, len(header))
+  io.file_write(out, json, n)
+  free(ns)
+  free(header)
+  ret 0
+
+fn read_message(inp:*File) -> str:
+  if inp == 0:
+    ret 0 as str
+  len_hdr:int = 0 - 1
+  while 1:
+    line:str = io.file_read_line(inp)
+    if line == 0:
+      ret 0 as str
+    if line[0] == 0 as char:
+      free(line)
+      break
+    if starts_with(line, "Content-Length:") != 0:
+      i:int = 15
+      while line[i] != 0 && is_space(line[i] as int) != 0:
+        i = i + 1
+      len_hdr = 0
+      while line[i] != 0:
+        c:int = line[i] as int
+        if c < 48 || c > 57:
+          break
+        len_hdr = len_hdr * 10 + (c - 48)
+        i = i + 1
+    free(line)
+  if len_hdr <= 0:
+    ret 0 as str
+  buf:*char = (*char)malloc(len_hdr + 1)
+  read:int = 0
+  while read < len_hdr:
+    n:int = io.file_read(inp, buf + read, len_hdr - read)
+    if n <= 0:
+      break
+    read = read + n
+  buf[read] = 0 as char
+  ret buf
+
+fn parse_error_line(line:str) -> str:
+  if line == 0:
+    ret 0 as str
+  if str_find(line, "tezzc error:") < 0:
+    ret 0 as str
+  // parse line: path:line:col: tezzc error: msg
+  i:int = 0
+  while line[i] != 0 && line[i] != 58 as char:
+    i = i + 1
+  if line[i] == 0 as char:
+    ret 0 as str
+  i = i + 1
+  l:int = 0
+  while line[i] != 0 && line[i] != 58 as char:
+    c:int = line[i] as int
+    if c < 48 || c > 57:
+      break
+    l = l * 10 + (c - 48)
+    i = i + 1
+  if line[i] != 58 as char:
+    ret 0 as str
+  i = i + 1
+  ccol:int = 0
+  while line[i] != 0 && line[i] != 58 as char:
+    c:int = line[i] as int
+    if c < 48 || c > 57:
+      break
+    ccol = ccol * 10 + (c - 48)
+    i = i + 1
+  msg_idx:int = str_find(line, "tezzc error:")
+  if msg_idx < 0:
+    ret 0 as str
+  msg_idx = msg_idx + 12
+  while line[msg_idx] == 32 as char:
+    msg_idx = msg_idx + 1
+  msg:str = substr_dup(line, msg_idx, len(line))
+  esc:str = json_escape(msg)
+  free(msg)
+
+  lstr:str = int_to_str(l - 1)
+  cstr:str = int_to_str(ccol - 1)
+  cstr2:str = int_to_str(ccol)
+  diag1:str = str_join3("{\"range\":{\"start\":{\"line\":", lstr, ",\"character\":")
+  diag2:str = str_join3(diag1, cstr, "},\"end\":{\"line\":")
+  diag3:str = str_join3(diag2, lstr, ",\"character\":")
+  diag4:str = str_join3(diag3, cstr2, "}},\"severity\":1,\"source\":\"tezzc\",\"message\":\"")
+  diag5:str = str_join3(diag4, esc, "\"}")
+  free(lstr)
+  free(cstr)
+  free(cstr2)
+  free(diag1)
+  free(diag2)
+  free(diag3)
+  free(diag4)
+  free(esc)
+  ret diag5
+
+fn diagnostics_from_output(out:str) -> str:
+  if out == 0:
+    ret str_dup("[]")
+  if str_find(out, "OK:") >= 0:
+    ret str_dup("[]")
+  list:str = out
+  i:int = 0
+  start:*char = list
+  first:int = 1
+  arr:str = str_dup("[")
+  while 1:
+    if list[i] == 0 || list[i] == 10:
+      list[i] = 0 as char
+      if start[0] != 0:
+        diag:str = parse_error_line(start)
+        if diag != 0:
+          if first == 0:
+            tmp:str = str_join2(arr, ",")
+            free(arr)
+            arr = tmp
+          first = 0
+          tmp2:str = str_join2(arr, diag)
+          free(arr)
+          free(diag)
+          arr = tmp2
+      if list[i] == 0:
+        break
+      start = list + i + 1
+    i = i + 1
+  tmp3:str = str_join2(arr, "]")
+  free(arr)
+  ret tmp3
+
+fn publish_diagnostics(outf:*File, uri:str, path:str) -> int:
+  if uri == 0 || path == 0:
+    ret 0 - 1
+  tezzc:str = tezzc_path()
+  cmd1:str = str_join3(tezzc, " check ", path)
+  out:str = proc_out(cmd1)
+  diags:str = diagnostics_from_output(out)
+  if out != 0:
+    free(out)
+  free(cmd1)
+  free(tezzc)
+
+  esc_uri:str = json_escape(uri)
+  msg1:str = str_join3("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"", esc_uri, "\",\"diagnostics\":")
+  msg2:str = str_join3(msg1, diags, "}}")
+  send_message(outf, msg2)
+  free(esc_uri)
+  free(diags)
+  free(msg1)
+  free(msg2)
+  ret 0
+
+fn publish_diagnostics_text(outf:*File, uri:str, text:str) -> int:
+  if uri == 0 || text == 0:
+    ret 0 - 1
+  tmp:str = temp_path_for_uri(uri)
+  io.write_all(tmp, text)
+  publish_diagnostics(outf, uri, tmp)
+  free(tmp)
+  ret 0
+
+fn publish_clear(outf:*File, uri:str) -> int:
+  if uri == 0:
+    ret 0 - 1
+  esc_uri:str = json_escape(uri)
+  msg1:str = str_join3("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"", esc_uri, "\",\"diagnostics\":[]}}")
+  send_message(outf, msg1)
+  free(esc_uri)
+  free(msg1)
+  ret 0
+
+fn is_ident_char(c:int) -> int:
+  if c >= 48 && c <= 57:
+    ret 1
+  if c >= 65 && c <= 90:
+    ret 1
+  if c >= 97 && c <= 122:
+    ret 1
+  if c == 95:
+    ret 1
+  ret 0
+
+fn offset_for_line_char(text:str, line:int, ch:int) -> int:
+  if text == 0:
+    ret 0
+  if line < 0:
+    line = 0
+  if ch < 0:
+    ch = 0
+  i:int = 0
+  cur_line:int = 0
+  while text[i] != 0 && cur_line < line:
+    if text[i] == 10 as char:
+      cur_line = cur_line + 1
+    i = i + 1
+  cur_ch:int = 0
+  while text[i] != 0 && text[i] != 10 as char && cur_ch < ch:
+    i = i + 1
+    cur_ch = cur_ch + 1
+  ret i
+
+fn symbol_at(text:str, line:int, ch:int) -> str:
+  if text == 0:
+    ret 0 as str
+  idx:int = offset_for_line_char(text, line, ch)
+  if idx > 0:
+    c0:int = text[idx] as int
+    if is_ident_char(c0) == 0:
+      c1:int = text[idx - 1] as int
+      if is_ident_char(c1) != 0:
+        idx = idx - 1
+  left:int = idx
+  while left > 0:
+    c:int = text[left - 1] as int
+    if is_ident_char(c) == 0:
+      break
+    left = left - 1
+  right:int = idx
+  while text[right] != 0:
+    c:int = text[right] as int
+    if is_ident_char(c) == 0:
+      break
+    right = right + 1
+  if right <= left:
+    ret 0 as str
+  ret substr_dup(text, left, right)
+
+fn trim_line_copy(line:str) -> str:
+  if line == 0:
+    ret 0 as str
+  a:int = 0
+  n:int = len(line)
+  while a < n && is_space(line[a] as int) != 0:
+    a = a + 1
+  b:int = n
+  while b > a && is_space(line[b - 1] as int) != 0:
+    b = b - 1
+  ret substr_dup(line, a, b)
+
+fn decl_name(line:str) -> str:
+  if line == 0:
+    ret 0 as str
+  t:str = trim_line_copy(line)
+  if t == 0 || t[0] == 0:
+    if t != 0:
+      free(t)
+    ret 0 as str
+  i:int = 0
+  if starts_with(t, "fn ") != 0:
+    i = 3
+  else:
+    if starts_with(t, "let ") != 0:
+      i = 4
+    else:
+      if starts_with(t, "struct ") != 0:
+        i = 7
+      else:
+        free(t)
+        ret 0 as str
+  while t[i] != 0 && is_space(t[i] as int) != 0:
+    i = i + 1
+  s:int = i
+  while t[i] != 0 && is_ident_char(t[i] as int) != 0:
+    i = i + 1
+  if i <= s:
+    free(t)
+    ret 0 as str
+  out:str = substr_dup(t, s, i)
+  free(t)
+  ret out
+
+fn line_text_at(text:str, line:int) -> str:
+  if text == 0:
+    ret 0 as str
+  if line < 0:
+    ret 0 as str
+  i:int = 0
+  cur:int = 0
+  start:int = 0
+  while text[i] != 0 && cur < line:
+    if text[i] == 10 as char:
+      cur = cur + 1
+      start = i + 1
+    i = i + 1
+  if cur != line:
+    ret 0 as str
+  j:int = start
+  while text[j] != 0 && text[j] != 10 as char:
+    j = j + 1
+  ret substr_dup(text, start, j)
+
+fn find_definition_line(text:str, sym:str) -> int:
+  if text == 0 || sym == 0 || sym[0] == 0:
+    ret 0 - 1
+  i:int = 0
+  start:int = 0
+  line:int = 0
+  while 1:
+    c:int = text[i] as int
+    if c == 0 || c == 10:
+      ln:str = substr_dup(text, start, i)
+      dn:str = decl_name(ln)
+      free(ln)
+      if dn != 0:
+        if streq(dn, sym) != 0:
+          free(dn)
+          ret line
+        free(dn)
+      if c == 0:
+        break
+      start = i + 1
+      line = line + 1
+    i = i + 1
+  ret 0 - 1
+
+fn path_for_uri(uri:str) -> str:
+  if uri == 0:
+    ret 0 as str
+  tmp:str = temp_path_for_uri(uri)
+  if tmp != 0 && path_exists(tmp) != 0:
+    ret tmp
+  if tmp != 0:
+    free(tmp)
+  ret uri_to_path(uri)
+
+fn send_result(out:*File, id:int, result_json:str) -> int:
+  if out == 0:
+    ret 0 - 1
+  id_s:str = int_to_str(id)
+  r0:str = str_join3("{\"jsonrpc\":\"2.0\",\"id\":", id_s, ",\"result\":")
+  r1:str = str_join3(r0, result_json, "}")
+  send_message(out, r1)
+  free(id_s)
+  free(r0)
+  free(r1)
+  ret 0
+
+fn send_definition_result(out:*File, id:int, uri:str, line:int) -> int:
+  if line < 0 || uri == 0:
+    ret send_result(out, id, "null")
+  esc_uri:str = json_escape(uri)
+  ls:str = int_to_str(line)
+  loc0:str = str_join3("[{\"uri\":\"", esc_uri, "\",\"range\":{\"start\":{\"line\":")
+  loc1:str = str_join3(loc0, ls, ",\"character\":0},\"end\":{\"line\":")
+  loc2:str = str_join3(loc1, ls, ",\"character\":1}}}]")
+  send_result(out, id, loc2)
+  free(esc_uri)
+  free(ls)
+  free(loc0)
+  free(loc1)
+  free(loc2)
+  ret 0
+
+fn send_hover_result(out:*File, id:int, text:str) -> int:
+  if text == 0 || text[0] == 0:
+    ret send_result(out, id, "null")
+  esc:str = json_escape(text)
+  h0:str = str_join3("{\"contents\":{\"kind\":\"plaintext\",\"value\":\"", esc, "\"}}")
+  send_result(out, id, h0)
+  free(esc)
+  free(h0)
+  ret 0
+
+fn send_completion_result(out:*File, id:int) -> int:
+  items:str = "{\"isIncomplete\":false,\"items\":["
+  i1:str = str_join2(items, "{\"label\":\"fn\",\"kind\":14,\"detail\":\"function\"},")
+  i2:str = str_join2(i1, "{\"label\":\"let\",\"kind\":14,\"detail\":\"variable\"},")
+  i3:str = str_join2(i2, "{\"label\":\"const let\",\"kind\":14,\"detail\":\"constant\"},")
+  i4:str = str_join2(i3, "{\"label\":\"ret\",\"kind\":14,\"detail\":\"return\"},")
+  i5:str = str_join2(i4, "{\"label\":\"if\",\"kind\":14,\"detail\":\"conditional\"},")
+  i6:str = str_join2(i5, "{\"label\":\"else\",\"kind\":14,\"detail\":\"conditional\"},")
+  i7:str = str_join2(i6, "{\"label\":\"for\",\"kind\":14,\"detail\":\"loop\"},")
+  i8:str = str_join2(i7, "{\"label\":\"while\",\"kind\":14,\"detail\":\"loop\"},")
+  i9:str = str_join2(i8, "{\"label\":\"switch\",\"kind\":14,\"detail\":\"control\"},")
+  i10:str = str_join2(i9, "{\"label\":\"case\",\"kind\":14,\"detail\":\"control\"},")
+  i11:str = str_join2(i10, "{\"label\":\"default\",\"kind\":14,\"detail\":\"control\"},")
+  i12:str = str_join2(i11, "{\"label\":\"break\",\"kind\":14,\"detail\":\"loop control\"},")
+  i13:str = str_join2(i12, "{\"label\":\"continue\",\"kind\":14,\"detail\":\"loop control\"},")
+  i14:str = str_join2(i13, "{\"label\":\"import\",\"kind\":14,\"detail\":\"module import\"},")
+  i15:str = str_join2(i14, "{\"label\":\"struct\",\"kind\":14,\"detail\":\"struct\"},")
+  i16:str = str_join2(i15, "{\"label\":\"enum\",\"kind\":14,\"detail\":\"enum\"},")
+  i17:str = str_join2(i16, "{\"label\":\"extern fn\",\"kind\":14,\"detail\":\"ffi function\"},")
+  i18:str = str_join2(i17, "{\"label\":\"static fn\",\"kind\":14,\"detail\":\"file-local function\"},")
+  i19:str = str_join2(i18, "{\"label\":\"unsafe\",\"kind\":14,\"detail\":\"unsafe block\"},")
+  i20:str = str_join2(i19, "{\"label\":\"kernel fn\",\"kind\":14,\"detail\":\"accelerator kernel\"},")
+  i21:str = str_join2(i20, "{\"label\":\"async\",\"kind\":14,\"detail\":\"async function\"},")
+  i22:str = str_join2(i21, "{\"label\":\"await\",\"kind\":14,\"detail\":\"await point\"},")
+  i23:str = str_join2(i22, "{\"label\":\"say\",\"kind\":3,\"detail\":\"print/output\"},")
+  i24:str = str_join2(i23, "{\"label\":\"input\",\"kind\":3,\"detail\":\"smart input\"},")
+  i25:str = str_join2(i24, "{\"label\":\"len\",\"kind\":3,\"detail\":\"length builtin\"},")
+  i26:str = str_join2(i25, "{\"label\":\"malloc\",\"kind\":3,\"detail\":\"heap alloc\"},")
+  i27:str = str_join2(i26, "{\"label\":\"free\",\"kind\":3,\"detail\":\"heap free\"},")
+  i28:str = str_join2(i27, "{\"label\":\"std\",\"kind\":9,\"detail\":\"core prelude module\"},")
+  i29:str = str_join2(i28, "{\"label\":\"io\",\"kind\":9,\"detail\":\"io module\"},")
+  i30:str = str_join2(i29, "{\"label\":\"net\",\"kind\":9,\"detail\":\"network module\"},")
+  i31:str = str_join2(i30, "{\"label\":\"tls\",\"kind\":9,\"detail\":\"tls module\"},")
+  i32:str = str_join2(i31, "{\"label\":\"tezzapi\",\"kind\":9,\"detail\":\"api framework module\"},")
+  i33:str = str_join2(i32, "{\"label\":\"tezzserve\",\"kind\":9,\"detail\":\"service framework module\"}]}")
+  send_result(out, id, i33)
+  free(i1)
+  free(i2)
+  free(i3)
+  free(i4)
+  free(i5)
+  free(i6)
+  free(i7)
+  free(i8)
+  free(i9)
+  free(i10)
+  free(i11)
+  free(i12)
+  free(i13)
+  free(i14)
+  free(i15)
+  free(i16)
+  free(i17)
+  free(i18)
+  free(i19)
+  free(i20)
+  free(i21)
+  free(i22)
+  free(i23)
+  free(i24)
+  free(i25)
+  free(i26)
+  free(i27)
+  free(i28)
+  free(i29)
+  free(i30)
+  free(i31)
+  free(i32)
+  free(i33)
+  ret 0
+
+fn main() -> int:
+  inp:*File = io.stdin_file()
+  out:*File = io.stdout_file()
+  for ;;:
+    msg:str = read_message(inp)
+    if msg == 0:
+      break
+    method:str = json_get_string(msg, "method")
+    id:int = json_get_int(msg, "id")
+    if method != 0 && streq(method, "initialize") != 0:
+      caps:str = "{\"capabilities\":{\"textDocumentSync\":1,\"hoverProvider\":true,\"definitionProvider\":true,\"completionProvider\":{\"resolveProvider\":false,\"triggerCharacters\":[\".\",\":\",\"\\\"\"]}}}"
+      idstr:str = int_to_str(id)
+      res1:str = str_join3("{\"jsonrpc\":\"2.0\",\"id\":", idstr, ",\"result\":")
+      res2:str = str_join3(res1, caps, "}")
+      send_message(out, res2)
+      free(idstr)
+      free(res1)
+      free(res2)
+    else:
+      if method != 0 && streq(method, "shutdown") != 0:
+        idstr2:str = int_to_str(id)
+        res12:str = str_join3("{\"jsonrpc\":\"2.0\",\"id\":", idstr2, ",\"result\":null}")
+        send_message(out, res12)
+        free(idstr2)
+        free(res12)
+      else:
+        if method != 0 && streq(method, "exit") != 0:
+          free(method)
+          free(msg)
+          break
+        if method != 0 && streq(method, "textDocument/definition") != 0:
+          uri_d:str = json_get_string(msg, "uri")
+          line_d:int = json_get_int(msg, "line")
+          char_d:int = json_get_int(msg, "character")
+          if uri_d != 0:
+            path_d:str = path_for_uri(uri_d)
+            src_d:str = io.read_all(path_d)
+            sym_d:str = symbol_at(src_d, line_d, char_d)
+            def_d:int = find_definition_line(src_d, sym_d)
+            send_definition_result(out, id, uri_d, def_d)
+            if src_d != 0:
+              free(src_d)
+            if sym_d != 0:
+              free(sym_d)
+            if path_d != 0:
+              free(path_d)
+            free(uri_d)
+          else:
+            send_result(out, id, "null")
+        if method != 0 && streq(method, "textDocument/hover") != 0:
+          uri_h:str = json_get_string(msg, "uri")
+          line_h:int = json_get_int(msg, "line")
+          char_h:int = json_get_int(msg, "character")
+          if uri_h != 0:
+            path_h:str = path_for_uri(uri_h)
+            src_h:str = io.read_all(path_h)
+            sym_h:str = symbol_at(src_h, line_h, char_h)
+            def_h:int = find_definition_line(src_h, sym_h)
+            hover_txt:str = 0 as str
+            if sym_h != 0:
+              h0:str = str_join2("symbol: ", sym_h)
+              hover_txt = h0
+              if def_h >= 0:
+                line_txt:str = line_text_at(src_h, def_h)
+                if line_txt != 0:
+                  h1:str = str_join3(h0, "\nsource: ", line_txt)
+                  free(hover_txt)
+                  hover_txt = h1
+                  free(line_txt)
+            send_hover_result(out, id, hover_txt)
+            if hover_txt != 0:
+              free(hover_txt)
+            if src_h != 0:
+              free(src_h)
+            if sym_h != 0:
+              free(sym_h)
+            if path_h != 0:
+              free(path_h)
+            free(uri_h)
+          else:
+            send_result(out, id, "null")
+        if method != 0 && streq(method, "textDocument/completion") != 0:
+          send_completion_result(out, id)
+        if method != 0 && (streq(method, "textDocument/didOpen") != 0 || streq(method, "textDocument/didSave") != 0 || streq(method, "textDocument/didChange") != 0):
+          uri:str = json_get_string(msg, "uri")
+          if uri != 0:
+            text_raw:str = 0 as str
+            if streq(method, "textDocument/didOpen") != 0 || streq(method, "textDocument/didChange") != 0:
+              text_raw = json_get_string(msg, "text")
+            if text_raw != 0:
+              text_dec:str = json_unescape(text_raw)
+              publish_diagnostics_text(out, uri, text_dec)
+              free(text_dec)
+              free(text_raw)
+            else:
+              path:str = uri_to_path(uri)
+              publish_diagnostics(out, uri, path)
+              free(path)
+            free(uri)
+        if method != 0 && streq(method, "textDocument/didClose") != 0:
+          uri2:str = json_get_string(msg, "uri")
+          if uri2 != 0:
+            publish_clear(out, uri2)
+            free(uri2)
+    if method != 0:
+      free(method)
+    free(msg)
+  ret 0

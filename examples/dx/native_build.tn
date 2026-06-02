@@ -1,0 +1,13 @@
+fn checksum(n:int) -> int:
+  i:int = 0
+  total:int = 0
+  while i <= n:
+    total = total + i
+    i = i + 1
+  ret total
+
+fn main() -> int:
+  if checksum(8) != 36:
+    ret 1
+  say "dx-native-build"
+  ret 0

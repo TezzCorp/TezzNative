@@ -1,0 +1,16 @@
+import "tezzdb"
+
+fn main() -> int:
+  db:*char = tezzdb.db_open("tezznative_example.db")
+  if db == 0:
+    ret 1
+  if tezzdb.db_table_create(db, "notes") < 0:
+    tezzdb.db_close(db)
+    ret 2
+  pk:int = tezzdb.db_insert(db, "notes", "{\"title\":\"first\"}")
+  if pk < 0:
+    tezzdb.db_close(db)
+    ret 3
+  tezzdb.db_close(db)
+  say "tezzdb row inserted"
+  ret 0

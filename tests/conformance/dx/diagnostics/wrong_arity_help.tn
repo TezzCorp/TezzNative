@@ -1,0 +1,7 @@
+fn join_pair(left:str, right:str) -> int:
+  if left == 0 || right == 0:
+    ret 0
+  ret len(left) + len(right)
+
+fn main() -> int:
+  ret join_pair("left")

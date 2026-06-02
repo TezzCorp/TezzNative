@@ -78,5 +78,6 @@ A module can move toward Stable Candidate only when:
    including chunked stream IO and focused math/string/vector/arena edge gates.
 2. Document fallback behavior for `gpu`, `npu`, `tls`, and GUI modules.
 3. Reduce default prelude risk by separating stable and experimental imports.
-4. Add examples for the stable candidate modules.
+4. Keep the curated `examples/dx` programs aligned with stable-candidate module
+   behavior and the developer-experience gate.
 5. Keep this inventory synchronized with `tezz.mod` and `lib/`.

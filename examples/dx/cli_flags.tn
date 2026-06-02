@@ -1,0 +1,12 @@
+fn flag_enabled(arg:str, name:str) -> int:
+  if arg == 0 || name == 0:
+    ret 0
+  if strcmp(arg, name) == 0:
+    ret 1
+  ret 0
+
+fn main() -> int:
+  arg:str = "--verbose"
+  if flag_enabled(arg, "--verbose") != 0:
+    say "verbose mode"
+  ret 0

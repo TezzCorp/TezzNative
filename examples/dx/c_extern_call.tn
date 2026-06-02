@@ -1,0 +1,6 @@
+@abi("c")
+extern fn puts(s:str) -> int
+
+fn main() -> int:
+  puts("hello from a C ABI call")
+  ret 0

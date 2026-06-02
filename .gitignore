@@ -15,6 +15,9 @@
 !benchmarks/**
 benchmarks/results/
 benchmarks/results/**
+!examples/
+!examples/dx/
+!examples/dx/**
 !.github/
 !.github/workflows/
 !.github/workflows/conformance.yml
@@ -25,6 +28,7 @@ benchmarks/results/**
 !tezznative-vscode/
 !tezznative-vscode/**
 !tools/
+!tools/tezz_lsp.tn
 !tools/release/
 !tools/release/**
 

@@ -1,0 +1,40 @@
+import "io"
+
+fn main() -> int:
+  path:str = "tezznative_example_file.txt"
+  data:str = "saved by TezzNative"
+  f:*File = io.open_w(path)
+  if f == 0:
+    ret 1
+  p:*char
+  unsafe:
+    p = data as *char
+  wrote:int = io.file_write(f, p, len(data))
+  if wrote != len(data):
+    ret 2
+  if io.file_close(f) != 0:
+    ret 3
+
+  in_file:*File = io.open_r(path)
+  if in_file == 0:
+    ret 4
+  buf:*char
+  unsafe:
+    buf = malloc(len(data) + 1)
+  if buf == 0:
+    ret 5
+  got:int = io.file_read(in_file, buf, len(data))
+  io.file_close(in_file)
+  unsafe:
+    buf[got] = 0 as char
+  text:str
+  unsafe:
+    text = buf as str
+  if strcmp(text, data) != 0:
+    unsafe:
+      free(buf)
+    ret 6
+  say text
+  unsafe:
+    free(buf)
+  ret 0

@@ -15,6 +15,7 @@ compiler regressions can be diagnosed quickly.
 | Typecheck invalid | `tests/conformance/typecheck/invalid` | Array index type errors, return value mismatch, and struct field assignment mismatch. |
 | Diagnostics | `tests/conformance/invalid` plus `tests/conformance/diagnostics` | Named unknown symbols, wrong arity, unsafe address-of, field errors, and stable diagnostic snippets. |
 | Stdlib import | `tests/conformance/stdlib` | Stable-candidate module import smoke. |
+| Developer experience | `tests/conformance/run-dx.*` plus `tests/conformance/dx` | Actionable diagnostics, formatter idempotence, lint rule IDs, examples, LSP source health, and VS Code snippet drift checks. |
 | Native smoke | `tests/conformance/run-native-smoke.*` | Native build, verify, run, and stdout comparison on Windows/Linux x64. |
 | Native reliability | `tests/conformance/run-native-reliability.*` | Byte-reproducible native output and fail-closed unsupported-target behavior. |
 
@@ -43,6 +44,24 @@ Both runners print suite-qualified result names and end with:
 CONFORMANCE_SUMMARY passed=26 failed=0
 ```
 
+Run the developer experience gate:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tests\conformance\run-dx.ps1
+```
+
+On Linux or WSL:
+
+```bash
+bash tests/conformance/run-dx.sh ./TezzNative-language/bin/tezzc-linux-x64
+```
+
+The DX runner ends with:
+
+```text
+DX_SUMMARY passed=19 failed=0
+```
+
 ## Rules For New Tests
 
 - A valid fixture must be small and deterministic.
@@ -50,6 +69,8 @@ CONFORMANCE_SUMMARY passed=26 failed=0
 - If a diagnostic snippet exists, it must be stable across Windows/Linux paths.
 - Runtime, native backend, ABI, benchmark, and stdlib expansion tests should
   stay in their dedicated suites instead of weakening the stable-core signal.
+- DX fixtures should prove first-user workflows and editor/tooling behavior
+  without depending on public network access or machine-specific paths.
 
 ## Native Backend Gates
 

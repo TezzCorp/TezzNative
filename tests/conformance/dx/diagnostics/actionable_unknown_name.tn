@@ -1,0 +1,5 @@
+fn main() -> int:
+  total:int = 4
+  if total > 0:
+    ret missing_total
+  ret 0

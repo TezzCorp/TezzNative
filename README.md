@@ -31,7 +31,7 @@ than the full repository surface.
 | Area | Status | Notes |
 | --- | --- | --- |
 | Core syntax | Stable (gated) | Functions, variables, control flow, structs, arrays, imports, `sizeof`/`alignof`, and unsafe pointer blocks |
-| Static type checking | Stable/Beta (gated core) | Type mismatch, named unknown name/module/function, arity, and unsafe diagnostics are snippet checked; richer help is still improving |
+| Static type checking | Stable/Beta (gated core) | Type mismatch, named unknown name/module/function, arity, and unsafe diagnostics are snippet checked; common errors now include actionable help lines |
 | Native executable flow | Beta (gated x64) | Windows/Linux SDKs build and run hello, loops/math module, many-argument calls, strings/transforms, structs, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable paths, vectors, arenas, process run/output, time clock/sleep/UTC/local-date helpers, deterministic net/HTTP URL parsing, Windows/Linux x64 TCP loopback sockets, IPv4 literal socket bind handling, localhost connect/bind wrappers, keep-alive HTTP response reads, local HTTP client/server loopback, reproducible native output fixtures, and fail-closed unsupported targets |
 | Bytecode run flow | Stable/Beta | Useful for development and compatibility |
 | C ABI / extern calls | Beta (gated starter) | Header/structured ABI dump checks cover pointers, arrays, nested structs, scalar mixes, field offsets, and extern signatures |
@@ -46,8 +46,9 @@ See `docs/PLATFORM_SUPPORT.md` for target support and
 documented in `docs/STDLIB_CORE.md`. Conformance and benchmark rules are documented in
 `docs/CONFORMANCE.md` and `docs/BENCHMARKS.md`. Public claim boundaries are
 documented in `docs/TRUST_BASELINE.md`. Native backend target scope and
-reliability gates are documented in `docs/NATIVE_BACKEND.md`. Release integrity
-and privacy policies are documented in `docs/RELEASE_ENGINEERING.md`,
+reliability gates are documented in `docs/NATIVE_BACKEND.md`. Developer
+experience gates are documented in `docs/DEVELOPER_EXPERIENCE.md`. Release
+integrity and privacy policies are documented in `docs/RELEASE_ENGINEERING.md`,
 `docs/TELEMETRY_PRIVACY.md`, and `SECURITY.md`.
 
 ## Quick Example
@@ -137,6 +138,20 @@ subdirectories. GitHub Actions runs the same stable-core corpus against the
 published Windows and Linux SDK packages. See `docs/CONFORMANCE.md` for the
 suite contract.
 
+The developer experience lane checks actionable diagnostics, formatter
+idempotence, lint rule IDs, curated examples, VS Code snippets, LSP source
+health, and the first run/build path:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tests\conformance\run-dx.ps1
+```
+
+On Linux or WSL:
+
+```bash
+bash tests/conformance/run-dx.sh ./TezzNative-language/bin/tezzc-linux-x64
+```
+
 The native backend smoke lane builds and runs small executable programs for
 hello output, loops/math, math module helpers, strings and transforms, structs,
 many-argument call handling,
@@ -208,7 +223,7 @@ The current priority is trust over feature count:
 2. Split stable, beta, and experimental standard library surfaces.
 3. Expand compiler, ABI, and runtime conformance tests.
 4. Harden x86_64 native builds before widening target claims.
-5. Improve diagnostics, package metadata, examples, and benchmarks.
+5. Keep expanding package metadata, examples, diagnostics, and benchmarks.
 
 See `docs/OPTIMIZATION_PLAN.md` for the working roadmap.
 

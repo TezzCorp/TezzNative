@@ -1,11 +1,35 @@
 {
+  "Main Function": {
+    "prefix": "main",
+    "body": [
+      "fn main() -> int:",
+      "\t$0",
+      "\tret 0"
+    ],
+    "description": "Program entry point"
+  },
   "Function Definition": {
     "prefix": "fn",
     "body": [
-      "fn ${1:name}(${2:params}) -> ${3:void}:",
+      "fn ${1:name}(${2:params}) -> ${3:int}:",
       "\t$0"
     ],
     "description": "Define a TezzNative function"
+  },
+  "Import Module": {
+    "prefix": "import",
+    "body": [
+      "import \"${1:std}\""
+    ],
+    "description": "Import a TezzNative module"
+  },
+  "Extern Function": {
+    "prefix": "extern",
+    "body": [
+      "@abi(\"c\")",
+      "extern fn ${1:name}(${2:params}) -> ${3:int}"
+    ],
+    "description": "Declare a C ABI function"
   },
   "Struct Definition": {
     "prefix": "struct",
@@ -32,44 +56,45 @@
     ],
     "description": "While loop block"
   },
-  "TezzServe WebSocket Setup": {
-    "prefix": "serve_ws",
+  "Unsafe Block": {
+    "prefix": "unsafe",
     "body": [
-      "tezzserve.serve_ws_upgrade(srv, \"${1:/ws}\", fn(sock:*Socket, req:*Request) -> int:",
+      "unsafe:",
+      "\t$0"
+    ],
+    "description": "Pointer and low-level operation block"
+  },
+  "File Read Write": {
+    "prefix": "file_rw",
+    "body": [
+      "import \"io\"",
+      "",
+      "fn main() -> int:",
+      "\tpath:str = \"${1:out.txt}\"",
+      "\tdata:str = \"${2:saved}\"",
+      "\tf:*File = io.open_w(path)",
+      "\tif f == 0:",
+      "\t\tret 1",
+      "\tp:*char",
       "\tunsafe:",
-      "\t\tsay \"WebSocket client connected!\"",
-      "\t\t$0",
-      "\tret 0",
-      ")"
+      "\t\tp = data as *char",
+      "\tio.file_write(f, p, len(data))",
+      "\tio.file_close(f)",
+      "\tret 0"
     ],
-    "description": "Register a TezzServe WebSocket upgrade endpoint"
+    "description": "Write a small file through the io module"
   },
-  "TezzDBQL Parameterized Query": {
-    "prefix": "db_query",
+  "HTTP Response Parse": {
+    "prefix": "http_parse",
     "body": [
-      "cur:*DBCursor = tezzdbql.db_query(db, \"SELECT * FROM ${1:users} WHERE ${2:age} = ?\", &params[0], ${3:1})"
+      "import \"net\"",
+      "",
+      "fn main() -> int:",
+      "\tresp:str = \"HTTP/1.1 200 OK\\nContent-Length: 2\\n\\nok\"",
+      "\tif net.http_status_code(resp) != 200:",
+      "\t\tret 1",
+      "\tret 0"
     ],
-    "description": "Execute a parameterized query in TezzDBQL"
-  },
-  "Text-to-Speech playback": {
-    "prefix": "tts",
-    "body": [
-      "eng:*TtsEngine = tts.tts_new()",
-      "tts.tts_speak(eng, \"${1:Hello, this is TezzNative systems language!}\")",
-      "tts.tts_free(eng)"
-    ],
-    "description": "Instantiate TTS engine and speak text"
-  },
-  "Speech-to-Text transcription": {
-    "prefix": "stt",
-    "body": [
-      "eng:*SttEngine = stt.stt_new()",
-      "stt.stt_load_model(eng, \"${1:whisper-tiny.tnw}\")",
-      "text:str = stt.stt_from_file(eng, \"${2:audio.wav}\")",
-      "say \"Transcript: \", text",
-      "free(text)",
-      "stt.stt_free(eng)"
-    ],
-    "description": "Transcribe audio file using Whisper-style model"
+    "description": "Parse a deterministic HTTP response"
   }
 }

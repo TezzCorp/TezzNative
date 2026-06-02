@@ -43,7 +43,9 @@ These surfaces are useful today but need more conformance tests:
   with starter layout coverage for field offsets, scalar mixes, arrays,
   pointers, by-value structs, and nested structs
 - Borrow/mutability diagnostics
-- `fmt` and `lint`
+- `fmt`, `lint`, LSP source, VS Code snippets, and curated examples are
+  checked by the public developer-experience gate; formatter/linter semantics
+  remain beta while the ruleset grows.
 - `io`, `str`, `math`, `vec`, `arena`, `time`; imports plus selected native
   executable smoke for raw/wrapped/line/stream file IO, directory lifecycle,
   direct `dir_list`, raw/public recursive listing and glob, portable paths,

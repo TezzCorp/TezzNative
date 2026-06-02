@@ -1,0 +1,16 @@
+import "net"
+
+fn main() -> int:
+  resp:str = "HTTP/1.1 200 OK\nContent-Type: text/plain\nContent-Length: 2\n\nok"
+  if net.http_status_code(resp) != 200:
+    ret 1
+  body:str = net.http_response_body(resp)
+  if body == 0:
+    ret 2
+  ok:int = strcmp(body, "ok")
+  unsafe:
+    free(body)
+  if ok != 0:
+    ret 3
+  say "http response parsed"
+  ret 0

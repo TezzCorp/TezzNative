@@ -1,0 +1,10 @@
+import "net"
+
+fn main() -> int:
+  req:str = "GET /health HTTP/1.1\nHost: localhost\n\n"
+  if net.http_route_request_match(req, "GET", "/health") != 1:
+    ret 1
+  if net.http_route_request_match(req, "POST", "/health") != 0:
+    ret 2
+  say "route matched"
+  ret 0
