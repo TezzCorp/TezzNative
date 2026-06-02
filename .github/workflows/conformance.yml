@@ -129,6 +129,17 @@ jobs:
             return ""
           }
 
+          $repoCompiler = Join-Path $PWD "ci\bootstrap\tezzc-windows-x64.exe"
+          if (Test-MzBinary -Path $repoCompiler) {
+            & $repoCompiler check tests\conformance\valid\basic_arithmetic.tn
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "Using repository bootstrap Windows compiler"
+              "TEZZC=$repoCompiler" | Out-File -FilePath $env:GITHUB_ENV -Append
+              return
+            }
+            Write-Warning "Repository bootstrap Windows compiler failed self-check; trying hosted SDK"
+          }
+
           $compilerCandidates = @(
             @{ Url = "https://tn.tezzcorp.com/download/sdk/bin/tezzc-windows-x64.exe?v=$cacheKey"; Path = "download/sdk/bin/tezzc-windows-x64.exe" },
             @{ Url = "https://tn.tezzcorp.com/download/sdk/bin/tezzc.exe?v=$cacheKey"; Path = "download/sdk/bin/tezzc.exe" }
@@ -318,6 +329,17 @@ jobs:
             chmod +x "$file"
             "$file" check tests/conformance/valid/basic_arithmetic.tn >/tmp/tezznative-compiler-self-check.log 2>&1
           }
+
+          repo_compiler="ci/bootstrap/tezzc-linux-x64"
+          if [[ -f "$repo_compiler" ]] && is_elf "$repo_compiler"; then
+            if compiler_self_check "$repo_compiler"; then
+              echo "Using repository bootstrap Linux compiler"
+              echo "TEZZC=$repo_compiler" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            echo "Repository bootstrap Linux compiler failed self-check; trying hosted SDK" >&2
+            cat /tmp/tezznative-compiler-self-check.log >&2 || true
+          fi
 
           compiler_gz_urls=(
             "https://tn.tezzcorp.com/download/tezzc-linux-x64.gz?v=${cache_key}"

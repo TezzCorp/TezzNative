@@ -232,7 +232,9 @@ See `docs/OPTIMIZATION_PLAN.md` for the working roadmap.
 The public repository intentionally tracks a clean distribution subset. Full
 compiler sources, generated binaries, installers, local deployment scripts, and
 site deployment data may exist in local development directories but are not part
-of this public Git surface unless explicitly added.
+of this public Git surface unless explicitly added. The small
+`ci/bootstrap/` compilers are tracked only to keep hosted conformance independent
+from temporary download-host availability.
 
 ## License
 

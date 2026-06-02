@@ -15,6 +15,9 @@
 !benchmarks/**
 benchmarks/results/
 benchmarks/results/**
+!ci/
+!ci/bootstrap/
+!ci/bootstrap/**
 !examples/
 !examples/dx/
 !examples/dx/**
