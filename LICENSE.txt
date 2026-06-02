@@ -2,7 +2,7 @@
                     TEZZCORP PRIVATE SOURCE LICENSE (TPSL v1.0)
 ================================================================================
 Copyright (c) 2026 TezzCorp Pvt Ltd. All Rights Reserved.
-Created and Designed by Rohit Pathak, Director of TezzCorp Pvt Ltd.
+Created and Designed by Rohit Pathak, Director and Founder of TezzCorp Pvt Ltd.
 
 This License governs the use of TezzNative-Language compiler, core tools, and 
 TezzLLM AI Engine (hereinafter referred to as the "Software") provided by 
