@@ -37,7 +37,8 @@ and unsafe pointer/address-of coverage.
 
 These surfaces are useful today but need more conformance tests:
 
-- Native executable generation
+- Native executable generation with Windows/Linux x64 native smoke and
+  reproducible-output reliability gates for the current primary target surface
 - C ABI interop, `extern fn`, C header generation, structured ABI dump/verify
   with starter layout coverage for field offsets, scalar mixes, arrays,
   pointers, by-value structs, and nested structs
@@ -95,7 +96,7 @@ risk. They should not be treated as guaranteed production APIs.
 - Add native executable stress tests for Windows and Linux x86_64 beyond the
   current hello, loop/math, math-module, string, struct, raw/wrapped/line/stream
   file IO, directory lifecycle, recursive listing, portable path, vector,
-  arena, process, and time smoke.
+  arena, process, time smoke, and deterministic-output reliability fixtures.
 - Add DNS-backed socket and public-network HTTP smoke tests before promoting
   networking.
 - Add module-level stdlib checks for stable and beta modules.

@@ -15,6 +15,8 @@ compiler regressions can be diagnosed quickly.
 | Typecheck invalid | `tests/conformance/typecheck/invalid` | Array index type errors, return value mismatch, and struct field assignment mismatch. |
 | Diagnostics | `tests/conformance/invalid` plus `tests/conformance/diagnostics` | Named unknown symbols, wrong arity, unsafe address-of, field errors, and stable diagnostic snippets. |
 | Stdlib import | `tests/conformance/stdlib` | Stable-candidate module import smoke. |
+| Native smoke | `tests/conformance/run-native-smoke.*` | Native build, verify, run, and stdout comparison on Windows/Linux x64. |
+| Native reliability | `tests/conformance/run-native-reliability.*` | Byte-reproducible native output and fail-closed unsupported-target behavior. |
 
 The current stable-core runner gates 26 checks across Windows and Linux:
 
@@ -48,3 +50,21 @@ CONFORMANCE_SUMMARY passed=26 failed=0
 - If a diagnostic snippet exists, it must be stable across Windows/Linux paths.
 - Runtime, native backend, ABI, benchmark, and stdlib expansion tests should
   stay in their dedicated suites instead of weakening the stable-core signal.
+
+## Native Backend Gates
+
+Native smoke cases live under `tests/conformance/native`. They build native
+executables with `buildexe`, verify the output format where supported, run the
+executable, and compare stdout when a `.stdout.txt` file exists.
+
+Current native smoke coverage includes hello output, loop/math lowering, string
+helpers and transforms, file IO, directory lifecycle/listing/glob, portable
+paths, vectors, arenas, time helpers, process output, many-argument calls,
+local TCP loopback, socket options, IPv4 literal bind hosts, localhost wrappers,
+local HTTP route helpers, and keep-alive HTTP response reads.
+
+Native reliability cases build focused host-safe fixtures twice and compare the
+resulting executable SHA-256 hashes. They also assert that an unknown
+`buildexe --target` exits non-zero and does not emit an artifact. This protects
+the Milestone 2 release gate for deterministic output and fail-closed target
+handling.

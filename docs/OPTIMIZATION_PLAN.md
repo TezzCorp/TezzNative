@@ -154,7 +154,7 @@ Delivered:
 
 ## Milestone 2: Native Backend Reliability
 
-Status: started.
+Status: completed for the current Windows/Linux x64 surface.
 
 Goal: make native builds dependable for a narrow target set before expanding.
 
@@ -279,6 +279,22 @@ Started:
   chunked framing instead of waiting for peer close/timeout. `tcp_request` now
   uses this path, `Transfer-Encoding` token matching handles comma-separated
   values, and native smoke gates keep-alive fixed-length and chunked responses.
+- Added `docs/NATIVE_BACKEND.md` as the public backend feature matrix and
+  reliability contract for the current primary targets.
+- Added Windows/Linux native reliability runners that build focused fixtures
+  twice, compare executable SHA-256 hashes, execute host-safe outputs, and
+  assert unsupported `buildexe --target` names fail closed without emitting an
+  artifact.
+- Promoted native reliability into hosted Windows and Linux conformance CI.
+
+Completed exit gate:
+
+- Native executable output is reproducible for focused stable fixtures on
+  Windows x64 and Linux x64.
+- Backend failures for unknown targets produce clear errors instead of silent
+  fallback.
+- Unsupported targets fail explicitly and are documented as outside the current
+  primary release promise.
 
 ## Milestone 3: Standard Library Hardening
 

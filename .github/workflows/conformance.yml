@@ -231,6 +231,13 @@ jobs:
           Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
           & .\tests\conformance\run-native-smoke.ps1 -Tezzc "$env:TEZZC"
 
+      - name: Run native reliability
+        shell: powershell
+        timeout-minutes: 5
+        run: |
+          Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+          & .\tests\conformance\run-native-reliability.ps1 -Tezzc "$env:TEZZC"
+
   linux-stable-core:
     runs-on: ubuntu-22.04
     timeout-minutes: 25
@@ -404,3 +411,8 @@ jobs:
         shell: bash
         timeout-minutes: 5
         run: bash tests/conformance/run-native-smoke.sh "$TEZZC"
+
+      - name: Run native reliability
+        shell: bash
+        timeout-minutes: 5
+        run: bash tests/conformance/run-native-reliability.sh "$TEZZC"

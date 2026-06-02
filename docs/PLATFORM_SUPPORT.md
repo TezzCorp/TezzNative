@@ -18,7 +18,7 @@ changes.
 | Target | Status | Notes |
 | --- | --- | --- |
 | Windows x64 | Primary | Main packaged SDK and installer target. Native executable flow is the first production hardening target. |
-| Linux x64 | Primary/Beta | Static SDK compiler archive and direct compiler download are published to avoid hosted-runner glibc drift. Stable-core, ABI header/dump/verify checks, benchmark fixture checks, and native executable smoke pass under WSL and GitHub Actions. |
+| Linux x64 | Primary/Beta | Static SDK compiler archive and direct compiler download are published to avoid hosted-runner glibc drift. Stable-core, ABI header/dump/verify checks, benchmark fixture checks, native executable smoke, and native reliability checks pass under WSL and GitHub Actions. |
 | macOS x64 | Planned | Listed as a target in metadata, but needs packaged toolchain validation. |
 | Linux ARM64 | Planned | Listed as a target in metadata, but not a release gate yet. |
 | macOS ARM64 | Planned | Listed as a target in metadata, but not a release gate yet. |
@@ -31,7 +31,7 @@ changes.
 | --- | --- | --- | --- | --- |
 | Core language | Primary | Primary | Planned | Stable-core conformance runs on Windows and Linux SDKs. |
 | Bytecode run | Primary | Preview | Planned | Compatibility path while native backend matures. |
-| Native executable | Primary/Beta | Primary/Beta | Planned | Hello, loop/math, many-argument calls, math-module, string, string-transform, struct-array, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable path, vector, arena, process run/output, time, deterministic net/HTTP parser, Windows/Linux TCP loopback, IPv4 literal socket bind hosts, localhost socket wrappers, keep-alive HTTP response reads, and local HTTP route smoke tests pass on the claimed x64 targets. |
+| Native executable | Primary/Beta | Primary/Beta | Planned | Hello, loop/math, many-argument calls, math-module, string, string-transform, struct-array, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable path, vector, arena, process run/output, time, deterministic net/HTTP parser, Windows/Linux TCP loopback, IPv4 literal socket bind hosts, localhost socket wrappers, keep-alive HTTP response reads, and local HTTP route smoke tests pass on the claimed x64 targets. Focused native fixtures are also byte-reproducibility gated on Windows/Linux x64, and unknown targets are fail-closed. |
 | Benchmark harness | Primary | Primary | Planned | Startup, numeric loop, string scan, and binary file IO fixtures are check-gated on Windows/Linux; optional Python, C, Node.js, Go, and Rust comparison fixtures run when local toolchains are available. |
 | Time/date runtime | Beta | Beta | Planned | `time` imports and native clock/sleep/UTC/local-date execution are gated on Windows/Linux x64. |
 | IO/path/process | Beta | Beta | Planned | Raw file read/write, File wrapper open/write/read-line/write-line/flush/seek/tell/close, BigFile chunk reads, StreamWriter flush/close behavior, portable `file_size_bytes`, file delete/rename, directory exists/make/remove, EOF/null guards, portable path helpers, direct `dir_list`, raw/public recursive listing and glob, and `proc_run`/`proc_out` have native smoke coverage on Windows/Linux x64. |
@@ -48,7 +48,7 @@ A target should not move to Primary until:
 
 - `tezzc check` passes the stable conformance corpus.
 - bytecode run smoke tests pass.
-- native smoke tests pass where native support is claimed.
+- native smoke and native reliability tests pass where native support is claimed.
 - stdlib stable module smoke tests pass.
 - install and uninstall flows are tested.
 - package checksums and version metadata are published.
@@ -62,4 +62,4 @@ A target should not move to Primary until:
    networking beyond Beta.
 3. Publish exact binary names, hashes, and sizes for every download.
 4. Add target-specific notes to docs and download pages.
-5. Fail unsupported targets clearly instead of silently falling back.
+5. Add macOS and ARM64 hosted gates before promoting those targets.

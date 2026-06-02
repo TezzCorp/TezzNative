@@ -32,7 +32,7 @@ than the full repository surface.
 | --- | --- | --- |
 | Core syntax | Stable (gated) | Functions, variables, control flow, structs, arrays, imports, `sizeof`/`alignof`, and unsafe pointer blocks |
 | Static type checking | Stable/Beta (gated core) | Type mismatch, named unknown name/module/function, arity, and unsafe diagnostics are snippet checked; richer help is still improving |
-| Native executable flow | Beta (gated x64) | Windows/Linux SDKs build and run hello, loops/math module, many-argument calls, strings/transforms, structs, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable paths, vectors, arenas, process run/output, time clock/sleep/UTC/local-date helpers, deterministic net/HTTP URL parsing, Windows/Linux x64 TCP loopback sockets, IPv4 literal socket bind handling, localhost connect/bind wrappers, keep-alive HTTP response reads, and local HTTP client/server loopback |
+| Native executable flow | Beta (gated x64) | Windows/Linux SDKs build and run hello, loops/math module, many-argument calls, strings/transforms, structs, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable paths, vectors, arenas, process run/output, time clock/sleep/UTC/local-date helpers, deterministic net/HTTP URL parsing, Windows/Linux x64 TCP loopback sockets, IPv4 literal socket bind handling, localhost connect/bind wrappers, keep-alive HTTP response reads, local HTTP client/server loopback, reproducible native output fixtures, and fail-closed unsupported targets |
 | Bytecode run flow | Stable/Beta | Useful for development and compatibility |
 | C ABI / extern calls | Beta (gated starter) | Header/structured ABI dump checks cover pointers, arrays, nested structs, scalar mixes, field offsets, and extern signatures |
 | Stable stdlib candidates | Stable/Beta (smoke gated) | Core imports plus native math, string, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable path, vector, arena, process run/output capture, and `time` clock/sleep/UTC/local-date smoke |
@@ -44,9 +44,10 @@ See `docs/PLATFORM_SUPPORT.md` for target support and
 `docs/STDLIB_INVENTORY.md` for module maturity. C ABI rules are documented in
 `docs/C_ABI.md`. Conformance and benchmark rules are documented in
 `docs/CONFORMANCE.md` and `docs/BENCHMARKS.md`. Public claim boundaries are
-documented in `docs/TRUST_BASELINE.md`. Release integrity and privacy policies
-are documented in `docs/RELEASE_ENGINEERING.md`, `docs/TELEMETRY_PRIVACY.md`,
-and `SECURITY.md`.
+documented in `docs/TRUST_BASELINE.md`. Native backend target scope and
+reliability gates are documented in `docs/NATIVE_BACKEND.md`. Release integrity
+and privacy policies are documented in `docs/RELEASE_ENGINEERING.md`,
+`docs/TELEMETRY_PRIVACY.md`, and `SECURITY.md`.
 
 ## Quick Example
 

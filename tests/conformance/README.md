@@ -65,6 +65,20 @@ On Linux or WSL:
 bash tests/conformance/run-native-smoke.sh ./TezzNative-language/bin/tezzc-linux-x64
 ```
 
+Native reliability tests build focused fixtures twice, compare executable
+SHA-256 hashes, run host-safe outputs, and prove unknown native targets fail
+closed without producing an artifact:
+
+```powershell
+.\tests\conformance\run-native-reliability.ps1
+```
+
+On Linux or WSL:
+
+```bash
+bash tests/conformance/run-native-reliability.sh ./TezzNative-language/bin/tezzc-linux-x64
+```
+
 ABI starter tests:
 
 ```powershell

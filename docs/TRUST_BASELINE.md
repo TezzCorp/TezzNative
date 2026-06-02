@@ -25,7 +25,7 @@ domain yet. The public message is:
 | Claim | Evidence |
 | --- | --- |
 | Stable-core syntax and common type errors are gated. | `docs/CONFORMANCE.md` and `tests/conformance/run.*` |
-| Windows/Linux x64 native smoke is gated for the current backend surface. | `tests/conformance/run-native-smoke.*` |
+| Windows/Linux x64 native smoke and reproducible output are gated for the current backend surface. | `docs/NATIVE_BACKEND.md`, `tests/conformance/run-native-smoke.*`, and `tests/conformance/run-native-reliability.*` |
 | Starter C ABI layout and extern signatures are checked. | `docs/C_ABI.md` and `tests/conformance/run-abi.*` |
 | Public benchmark fixtures are source-visible and repeatable. | `docs/BENCHMARKS.md` and `benchmarks/` |
 | Release downloads have SHA-256 metadata and a manifest. | `docs/RELEASE_ENGINEERING.md` and `download/release_manifest.json` |
