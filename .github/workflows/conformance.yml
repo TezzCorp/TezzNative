@@ -306,6 +306,12 @@ jobs:
             [[ "$(head -c 4 "$file" | od -An -tx1 | tr -d ' \n')" == "7f454c46" ]]
           }
 
+          compiler_self_check() {
+            local file="$1"
+            chmod +x "$file"
+            "$file" check tests/conformance/valid/basic_arithmetic.tn >/tmp/tezznative-compiler-self-check.log 2>&1
+          }
+
           compiler_gz_urls=(
             "https://tn.tezzcorp.com/download/tezzc-linux-x64.gz?v=${cache_key}"
           )
@@ -315,9 +321,13 @@ jobs:
               if gzip -t tezzc-linux-x64.gz; then
                 gzip -dc tezzc-linux-x64.gz > tezzc-linux-x64
                 if is_elf tezzc-linux-x64; then
-                  chmod +x tezzc-linux-x64
-                  compiler="./tezzc-linux-x64"
-                  break
+                  if compiler_self_check ./tezzc-linux-x64; then
+                    compiler="./tezzc-linux-x64"
+                    break
+                  fi
+                  echo "Compressed Linux compiler failed self-check; trying the next source" >&2
+                  cat /tmp/tezznative-compiler-self-check.log >&2 || true
+                  continue
                 fi
                 echo "Compressed Linux compiler did not expand to an ELF binary" >&2
               else
@@ -336,9 +346,13 @@ jobs:
           for compiler_url in "${compiler_urls[@]}"; do
             if fetch_artifact "$compiler_url" tezzc-linux-x64 "Linux compiler" 60; then
               if is_elf tezzc-linux-x64; then
-                chmod +x tezzc-linux-x64
-                compiler="./tezzc-linux-x64"
-                break
+                if compiler_self_check ./tezzc-linux-x64; then
+                  compiler="./tezzc-linux-x64"
+                  break
+                fi
+                echo "Downloaded Linux compiler failed self-check; trying the next source" >&2
+                cat /tmp/tezznative-compiler-self-check.log >&2 || true
+                continue
               fi
               echo "Downloaded Linux compiler is not an ELF binary; trying the next source" >&2
               file tezzc-linux-x64 || true
