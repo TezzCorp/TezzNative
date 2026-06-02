@@ -46,6 +46,7 @@ $DefaultInclude = @(
   "download/sdk/registry.tnx",
   "download/sdk/docs/BENCHMARKS.md",
   "download/sdk/docs/CONFORMANCE.md",
+  "download/sdk/docs/TRUST_BASELINE.md",
   "download/sdk/bin/tezzc.exe",
   "download/sdk/bin/tezzc-windows-x64.exe",
   "download/sdk/bin/tezzc-linux-x64",

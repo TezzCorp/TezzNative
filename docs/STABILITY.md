@@ -84,6 +84,8 @@ risk. They should not be treated as guaranteed production APIs.
 - Benchmark claims must include source-visible fixtures plus CSV/metadata output
   from the public harness; bytecode, native build, native run, and external
   language comparisons must remain separate.
+- Broad replacement claims must stay inside the boundaries documented in
+  `docs/TRUST_BASELINE.md`.
 
 ## Near-Term Hardening Checklist
 

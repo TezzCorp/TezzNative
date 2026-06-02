@@ -43,9 +43,10 @@ See `docs/STABILITY.md` for the full stability map.
 See `docs/PLATFORM_SUPPORT.md` for target support and
 `docs/STDLIB_INVENTORY.md` for module maturity. C ABI rules are documented in
 `docs/C_ABI.md`. Conformance and benchmark rules are documented in
-`docs/CONFORMANCE.md` and `docs/BENCHMARKS.md`. Release integrity and privacy
-policies are documented in `docs/RELEASE_ENGINEERING.md`,
-`docs/TELEMETRY_PRIVACY.md`, and `SECURITY.md`.
+`docs/CONFORMANCE.md` and `docs/BENCHMARKS.md`. Public claim boundaries are
+documented in `docs/TRUST_BASELINE.md`. Release integrity and privacy policies
+are documented in `docs/RELEASE_ENGINEERING.md`, `docs/TELEMETRY_PRIVACY.md`,
+and `SECURITY.md`.
 
 ## Quick Example
 

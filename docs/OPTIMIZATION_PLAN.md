@@ -63,7 +63,7 @@ damage trust.
 
 ## Milestone 0: Public Trust Baseline
 
-Status: started.
+Status: completed for the current public surface.
 
 Goal: make the public project story accurate, restrained, and useful.
 
@@ -76,12 +76,19 @@ Delivered:
 - Corrected public metadata and duplicated manifest entries.
 - Added the initial platform support matrix.
 - Added the initial standard library maturity inventory.
+- Added public conformance, C ABI, benchmark, release-engineering, telemetry,
+  and trust-baseline documents that tie claims to evidence.
+- Published website documentation pages for stability, roadmap, conformance,
+  C ABI, benchmarks, and the public trust baseline.
+- Published SDK release manifests and checksums so download/install claims can
+  be verified independently.
 
 Exit gate:
 
 - GitHub README describes the real 1.1.0 state.
 - Website has public stability and roadmap pages.
 - Stable, beta, and experimental labels are visible to new users.
+- Public replacement claims are bounded by `docs/TRUST_BASELINE.md`.
 
 ## Milestone 1: Conformance And Correctness Harness
 
