@@ -32,8 +32,22 @@ jobs:
 
             for ($attempt = 1; $attempt -le 3; $attempt++) {
               Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
+              if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+                Write-Host "Downloading attempt $attempt with curl from $Url"
+                & curl.exe --http1.1 -fL --retry 1 --retry-all-errors --retry-delay 3 `
+                  --connect-timeout 25 --max-time $TimeoutSec `
+                  -A "TezzNative-GitHub-Actions" `
+                  -o "$OutFile" `
+                  "$Url"
+                if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $OutFile) -and (Get-Item -LiteralPath $OutFile).Length -gt 0) {
+                  return $true
+                }
+                Write-Warning "curl download attempt $attempt failed with exit $LASTEXITCODE"
+              }
+
+              Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
               try {
-                Write-Host "Downloading attempt $attempt from $Url"
+                Write-Host "Downloading attempt $attempt with Invoke-WebRequest from $Url"
                 Invoke-WebRequest `
                   -UseBasicParsing `
                   -Headers @{ "User-Agent" = "TezzNative-GitHub-Actions" } `
@@ -44,7 +58,21 @@ jobs:
                   return $true
                 }
               } catch {
-                Write-Warning "Download attempt $attempt failed: $($_.Exception.Message)"
+                Write-Warning "Invoke-WebRequest download attempt $attempt failed: $($_.Exception.Message)"
+              }
+
+              Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
+              if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+                Write-Host "Downloading attempt $attempt with curl IPv4 from $Url"
+                & curl.exe -4 --http1.1 -fL --retry 1 --retry-all-errors --retry-delay 3 `
+                  --connect-timeout 25 --max-time $TimeoutSec `
+                  -A "TezzNative-GitHub-Actions" `
+                  -o "$OutFile" `
+                  "$Url"
+                if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $OutFile) -and (Get-Item -LiteralPath $OutFile).Length -gt 0) {
+                  return $true
+                }
+                Write-Warning "curl IPv4 download attempt $attempt failed with exit $LASTEXITCODE"
               }
               Start-Sleep -Seconds (3 * $attempt)
             }
