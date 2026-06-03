@@ -1,8 +1,8 @@
-# lock-meta v1 lines=45 payload=357B0114 key=none sig=none
+# lock-meta v1 lines=45 payload=0085B9CE key=none sig=none
 arena@0.1.0 7B42E28B https://tn.tezzcorp.com/download/sdk/lib/arena.tn
 color@0.1.0 10472682 https://tn.tezzcorp.com/download/sdk/lib/color.tn
 cyber@0.1.0 0E0374EE https://tn.tezzcorp.com/download/sdk/lib/cyber.tn
-data@0.1.0 3CC542C8 https://tn.tezzcorp.com/download/sdk/lib/data.tn
+data@0.1.0 02470332 https://tn.tezzcorp.com/download/sdk/lib/data.tn
 event@0.1.0 4AC5D736 https://tn.tezzcorp.com/download/sdk/lib/event.tn
 frame@0.1.0 210DC052 https://tn.tezzcorp.com/download/sdk/lib/frame.tn
 gpu@0.1.0 18C45656 https://tn.tezzcorp.com/download/sdk/lib/gpu.tn
@@ -11,11 +11,11 @@ gui_win@0.1.0 3FCB4390 https://tn.tezzcorp.com/download/sdk/lib/gui_win.tn
 intrin@0.1.0 4D2A6999 https://tn.tezzcorp.com/download/sdk/lib/intrin.tn
 io@0.1.0 0669EF63 https://tn.tezzcorp.com/download/sdk/lib/io.tn
 llm@0.1.0 207FE104 https://tn.tezzcorp.com/download/sdk/lib/llm.tn
-math@0.1.0 5FA03846 https://tn.tezzcorp.com/download/sdk/lib/math.tn
+math@0.1.0 5C1ECAA3 https://tn.tezzcorp.com/download/sdk/lib/math.tn
 net@0.1.0 6F504BA1 https://tn.tezzcorp.com/download/sdk/lib/net.tn
 nn@0.1.0 5613EA7E https://tn.tezzcorp.com/download/sdk/lib/nn.tn
 npu@0.1.0 39D27BD8 https://tn.tezzcorp.com/download/sdk/lib/npu.tn
-os@0.1.0 6727490F https://tn.tezzcorp.com/download/sdk/lib/os.tn
+os@0.1.0 24B1A8F5 https://tn.tezzcorp.com/download/sdk/lib/os.tn
 simd@0.1.0 2382C055 https://tn.tezzcorp.com/download/sdk/lib/simd.tn
 std@0.1.0 2A0177A2 https://tn.tezzcorp.com/download/sdk/lib/std.tn
 str@0.1.0 4DE809E3 https://tn.tezzcorp.com/download/sdk/lib/str.tn
@@ -25,7 +25,7 @@ task@0.1.0 41478EC5 https://tn.tezzcorp.com/download/sdk/lib/task.tn
 tensor@0.1.0 7169C46D https://tn.tezzcorp.com/download/sdk/lib/tensor.tn
 tezzapi@0.1.0 197FB499 https://tn.tezzcorp.com/download/sdk/lib/tezzapi.tn
 tezzdb@0.1.0 07A98226 https://tn.tezzcorp.com/download/sdk/lib/tezzdb.tn
-tezzdbql@0.1.0 1F50CE0F https://tn.tezzcorp.com/download/sdk/lib/tezzdbql.tn
+tezzdbql@0.1.0 6A7DAA10 https://tn.tezzcorp.com/download/sdk/lib/tezzdbql.tn
 tezzinstall@0.1.0 16F741BD https://tn.tezzcorp.com/download/sdk/lib/tezzinstall.tn
 tezzserve@0.1.0 3F77DED4 https://tn.tezzcorp.com/download/sdk/lib/tezzserve.tn
 tezzsetup@0.1.0 35AB2C87 https://tn.tezzcorp.com/download/sdk/lib/tezzsetup.tn

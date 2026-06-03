@@ -80,6 +80,32 @@ function Hash8-Text([string]$Text) {
   return Hash8-Bytes ([System.Text.Encoding]::ASCII.GetBytes($Text))
 }
 
+function Hash8-SourceFile([string]$Path) {
+  $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $Path).Path)
+  $h = 5381
+  $pendingCr = $false
+  foreach ($b in $bytes) {
+    if ($pendingCr) {
+      if ($b -eq 10) {
+        $h = ((($h -shl 5) + $h + 10) -band 0x7FFFFFFF)
+        $pendingCr = $false
+        continue
+      }
+      $h = ((($h -shl 5) + $h + 13) -band 0x7FFFFFFF)
+      $pendingCr = $false
+    }
+    if ($b -eq 13) {
+      $pendingCr = $true
+    } else {
+      $h = ((($h -shl 5) + $h + [int]$b) -band 0x7FFFFFFF)
+    }
+  }
+  if ($pendingCr) {
+    $h = ((($h -shl 5) + $h + 13) -band 0x7FFFFFFF)
+  }
+  return "{0:X8}" -f $h
+}
+
 function Read-LockEntries([string]$Path) {
   $rows = @()
   foreach ($line in Get-Content -LiteralPath $Path) {
@@ -309,7 +335,7 @@ Check "local-checksums" {
     if (-not (Test-Path -LiteralPath $libPath)) {
       throw "missing local package source lib/$($entry.Name).tn"
     }
-    $actual = Hash8-Bytes ([System.IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $libPath).Path))
+    $actual = Hash8-SourceFile $libPath
     if ($actual -ne $entry.Checksum) {
       throw "checksum mismatch for $($entry.Name): expected $($entry.Checksum) got $actual"
     }

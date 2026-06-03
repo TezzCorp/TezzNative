@@ -56,10 +56,11 @@ name@version CHECKSUM URL
 name@version URL CHECKSUM
 ```
 
-The package checksum is TezzNative's current deterministic 8-hex content hash
-used by `tools/tezz.tn` for package files. Release archives and installers use
-SHA-256 through `download/release_manifest.json`; both layers are gated, but
-they serve different scopes.
+The package checksum is TezzNative's current deterministic 8-hex source-byte
+hash used by `tools/tezz.tn` for package files, with `CRLF` normalized to
+`LF` so Windows/Linux checkouts verify the same package payload. Release
+archives and installers use SHA-256 through `download/release_manifest.json`;
+both layers are gated, but they serve different scopes.
 
 ## Generated Docs
 

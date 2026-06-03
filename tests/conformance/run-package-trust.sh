@@ -80,6 +80,10 @@ def hash8_bytes(data):
 def hash8_text(text):
     return hash8_bytes(text.encode("ascii"))
 
+def hash8_source_file(path):
+    with open(path, "rb") as f:
+        return hash8_bytes(f.read().replace(b"\r\n", b"\n"))
+
 def meta_line(rel, kind):
     path = os.path.join(repo, rel)
     with open(path, "r", encoding="ascii") as f:
@@ -224,8 +228,7 @@ def local_checksums():
         path = os.path.join(repo, "lib", entry["name"] + ".tn")
         if not os.path.exists(path):
             raise AssertionError(f"missing local package source lib/{entry['name']}.tn")
-        with open(path, "rb") as f:
-            actual = hash8_bytes(f.read())
+        actual = hash8_source_file(path)
         if actual != entry["checksum"]:
             raise AssertionError(f"checksum mismatch for {entry['name']}: expected {entry['checksum']} got {actual}")
 

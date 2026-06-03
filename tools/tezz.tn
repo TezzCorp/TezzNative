@@ -1111,6 +1111,42 @@ fn crc32_file(path:str) -> int:
   fclose(f)
   ret h
 
+fn crc32_source_file(path:str) -> int:
+  if path == 0 || path[0] == 0:
+    ret 0
+  data:str = io.read_all(path)
+  if data == 0:
+    ret 0
+  // Canonicalize source package newlines so lockfiles are stable on Windows/Linux.
+  h:int = 5381
+  pending_cr:int = 0
+  n:int = len(data)
+  i:int = 0
+  while i < n:
+    b:int = 0
+    unsafe:
+      b = data[i] as int
+    b = b & 255
+    consumed:int = 0
+    if pending_cr != 0:
+      if b == 10:
+        h = ((h << 5) + h + 10) & 2147483647
+        pending_cr = 0
+        consumed = 1
+      else:
+        h = ((h << 5) + h + 13) & 2147483647
+        pending_cr = 0
+    if consumed == 0:
+      if b == 13:
+        pending_cr = 1
+      else:
+        h = ((h << 5) + h + b) & 2147483647
+    i = i + 1
+  if pending_cr != 0:
+    h = ((h << 5) + h + 13) & 2147483647
+  free(data)
+  ret h
+
 fn print_usage() -> int:
   say "tezz <cmd> [args]"
   say "  --version | -V | version"
@@ -1909,7 +1945,7 @@ fn cmd_get() -> int:
       use_cache = 1
     else:
       want:int = parse_hex(checksum)
-      have:int = crc32_file(cache)
+      have:int = crc32_source_file(cache)
       if have == want:
         use_cache = 1
 
@@ -1940,7 +1976,7 @@ fn cmd_get() -> int:
       ret 0 - 1
     if checksum != 0:
       want2:int = parse_hex(checksum)
-      have2:int = crc32_file(tmp)
+      have2:int = crc32_source_file(tmp)
       if have2 != want2:
         say "checksum mismatch"
         remove(tmp)
@@ -1991,7 +2027,7 @@ fn cmd_get() -> int:
 
   // compute checksum if missing
   if checksum == 0:
-    have3:int = crc32_file(cache)
+    have3:int = crc32_source_file(cache)
     checksum = hex8(have3)
     own_checksum = 1
 
@@ -8246,7 +8282,7 @@ fn cmd_lock() -> int:
       free(dep_path)
       ret 0 - 1
     free(data)
-    crc:int = crc32_file(dep_path)
+    crc:int = crc32_source_file(dep_path)
     crc_hex:str = hex8(crc)
     crc_owned:int = 1
     if crc_hex == 0:
@@ -8408,7 +8444,7 @@ fn cmd_registry() -> int:
   i = 0
   while i < dep_n:
     dep_path:str = dep_module_path(root, names[i])
-    crc:int = crc32_file(dep_path)
+    crc:int = crc32_source_file(dep_path)
     crc_hex:str = hex8(crc)
 
     base2:str = base
@@ -8827,7 +8863,7 @@ fn cmd_verify() -> int:
                       bad = bad + 1
                     else:
                       want:int = parse_hex(checksum)
-                      have:int = crc32_file(use_path)
+                      have:int = crc32_source_file(use_path)
                       if have != want:
                         say "checksum mismatch:"
                         say namever
