@@ -580,6 +580,8 @@ Completed exit gate:
 
 ## Milestone 6: Python Bridge Strategy
 
+Status: completed for the current CPython extension scaffold surface.
+
 Goal: compete with Python by integrating with Python first.
 
 The fastest adoption path is not "replace Python today." It is:
@@ -603,6 +605,28 @@ Required capabilities:
 Success metric:
 
 - A Python developer can accelerate a hot function without writing C.
+
+Delivered:
+
+- Added `tezzc pyext <module.tn> [out_dir] [--module <name>]`.
+- Generated CPython wrapper C for exported ABI-safe functions.
+- Mapped `int`/`i64`, `u8`, `float`/`f64`, `void` returns, and borrowed
+  `*char`/`*u8` buffer parameters.
+- Added deterministic `pyext_manifest.tnx` output with wrapped/skipped
+  function status and skip reasons.
+- Added generated `setup.py`, ABI header, and ownership README output.
+- Added `tests/conformance/python_bridge/hot_math.tn`.
+- Added Windows and POSIX Python bridge conformance runners.
+- Added the Python bridge gate to GitHub Actions.
+- Added `docs/PYTHON_BRIDGE.md` as the public bridge contract.
+
+Completed exit gate:
+
+- `PYBRIDGE_SUMMARY passed=8 failed=0` on Windows and Linux.
+- The generated wrapper proves primitive conversion, borrowed buffer handling,
+  deterministic buffer release, skipped unsupported struct parameters, and
+  skipped `main`.
+- CI now gates the `pyext` command before ABI conformance.
 
 ## Milestone 7: C Replacement Strategy
 
@@ -809,7 +833,7 @@ TezzNative should only claim broad replacement readiness when:
 - Stable stdlib modules have docs and examples.
 - Package install/update/lock behavior is reproducible.
 - C ABI layout is tested.
-- Python extension interop exists or has a clear public milestone.
+- Python extension interop exists through the gated `tezzc pyext` scaffold.
 - Benchmarks are public and repeatable.
 
 Until then, the public message should stay focused:

@@ -235,6 +235,13 @@ jobs:
           Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
           & .\tests\conformance\run-package-trust.ps1 -Tezzc "$env:TEZZC"
 
+      - name: Run Python bridge gate
+        shell: powershell
+        timeout-minutes: 5
+        run: |
+          Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+          & .\tests\conformance\run-python-bridge.ps1 -Tezzc "$env:TEZZC"
+
       - name: Run ABI conformance
         shell: powershell
         timeout-minutes: 5
@@ -456,6 +463,11 @@ jobs:
         shell: bash
         timeout-minutes: 5
         run: bash tests/conformance/run-package-trust.sh "$TEZZC"
+
+      - name: Run Python bridge gate
+        shell: bash
+        timeout-minutes: 5
+        run: bash tests/conformance/run-python-bridge.sh "$TEZZC"
 
       - name: Run ABI conformance
         shell: bash

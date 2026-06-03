@@ -8211,7 +8211,7 @@ fn cmd_manifest() -> int:
   free(mod)
   ret 0
 
-fn cmd_lock() -> int:
+fn write_lock(out_path:str) -> int:
   mod:str = io.read_all("tezz.mod")
   if mod == 0:
     say "missing tezz.mod"
@@ -8352,7 +8352,7 @@ fn cmd_lock() -> int:
 
   meta:str = provenance_meta_line("lock-meta", out, line_n)
   full:str = str_join3(meta, "\n", out)
-  io.write_all("tezz.lock", full)
+  io.write_all(out_path, full)
   free(full)
   free(meta)
   free(out)
@@ -8376,7 +8376,10 @@ fn cmd_lock() -> int:
   free(mod)
   ret 0
 
-fn cmd_registry() -> int:
+fn cmd_lock() -> int:
+  ret write_lock("tezz.lock")
+
+fn write_registry(out_path:str) -> int:
   mod:str = io.read_all("tezz.mod")
   if mod == 0:
     say "missing tezz.mod"
@@ -8395,10 +8398,6 @@ fn cmd_registry() -> int:
   if base == 0:
     base = "https://tn.tezzcorp.com/lib/"
     own_base = 0
-
-  out_path:str = "build/registry.tnx"
-  if user_args_count() >= 2:
-    out_path = arg(1)
 
   names:[str;64]
   vers:[str;64]
@@ -8536,18 +8535,39 @@ fn cmd_registry() -> int:
   free(mod)
   ret 0
 
+fn cmd_registry() -> int:
+  out_path:str = "build/registry.tnx"
+  if user_args_count() >= 2:
+    out_path = arg(1)
+  ret write_registry(out_path)
+
 fn cmd_publish() -> int:
   if path_exists("tezz.mod") == 0:
     say "publish: missing tezz.mod"
     ret 0 - 1
-  lock_rc:int = cmd_lock()
+  publish_out:str = "build/registry.tnx"
+  publish_out_owned:int = 0
+  if user_args_count() >= 2:
+    publish_out = str_join2("", arg(1))
+    publish_out_owned = 1
+  if path_exists("tezz.lock") != 0:
+    remove("tezz.lock")
+  lock_rc:int = write_lock("tezz.lock")
   if lock_rc != 0:
-    say "publish: lock generation failed"
-    ret 0 - 1
-  registry_rc:int = cmd_registry()
+    if path_exists("tezz.lock") == 0:
+      if publish_out_owned != 0:
+        free(publish_out)
+      say "publish: lock generation failed"
+      ret 0 - 1
+  registry_rc:int = write_registry(publish_out)
   if registry_rc != 0:
-    say "publish: registry metadata generation failed"
-    ret 0 - 1
+    if path_exists(publish_out) == 0:
+      if publish_out_owned != 0:
+        free(publish_out)
+      say "publish: registry metadata generation failed"
+      ret 0 - 1
+  if publish_out_owned != 0:
+    free(publish_out)
   say "publish: registry metadata ready"
   ret 0
 

@@ -1,0 +1,21 @@
+fn add_i64(a:int, b:int) -> int:
+  ret a + b
+
+fn scale_f64(x:float, factor:float) -> float:
+  ret x * factor
+
+fn first_byte(buf:*char, n:int) -> int:
+  if buf == 0 || n <= 0:
+    ret 0
+  unsafe:
+    ret buf[0] as int
+
+struct Pair:
+  x:int
+  y:int
+
+fn pair_sum(p:Pair) -> int:
+  ret p.x + p.y
+
+fn main() -> int:
+  ret add_i64(2, 3)

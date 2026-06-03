@@ -35,6 +35,7 @@ than the full repository surface.
 | Native executable flow | Beta (gated x64) | Windows/Linux SDKs build and run hello, loops/math module, many-argument calls, strings/transforms, structs, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable paths, vectors, arenas, process run/output, time clock/sleep/UTC/local-date helpers, deterministic net/HTTP URL parsing, Windows/Linux x64 TCP loopback sockets, IPv4 literal socket bind handling, localhost connect/bind wrappers, keep-alive HTTP response reads, local HTTP client/server loopback, reproducible native output fixtures, and fail-closed unsupported targets |
 | Bytecode run flow | Stable/Beta | Useful for development and compatibility |
 | C ABI / extern calls | Beta (gated starter) | Header/structured ABI dump checks cover pointers, arrays, nested structs, scalar mixes, field offsets, and extern signatures |
+| Python bridge | Beta (gated scaffold) | `tezzc pyext` generates CPython wrapper C, ABI declarations, setup metadata, ownership docs, and deterministic wrapped/skipped manifests for primitive and buffer hot paths |
 | Package trust | Stable/Beta (gated first-party set) | `tezz init/add/remove/update/lock/publish/test/build --release`, SemVer package pins, lock/registry parity, package checksums, generated package inventory docs, and first-party package promotion rules are gated |
 | Stable stdlib candidates | Stable/Beta (edge gated) | Core imports plus native math, string, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable path, vector, arena, process run/output capture, `time` clock/sleep/UTC/local-date smoke, and focused stdlib edge gates for math, strings, vectors, and arenas |
 | Networking/TLS/GUI/DB | Beta | `net` URL, DNS endpoint, HTTP parser, route, auth/cookie, chunked response helpers, keep-alive `Content-Length`/chunked response reads, Windows/Linux x64 TCP loopback send/recv, IPv4 literal bind hosts, localhost TCP/UDP connect wrappers, socket options, and local HTTP client/server route helpers are smoke gated; TLS, public-network HTTP, DNS-backed sockets, and wider backend matrix testing are still needed |
@@ -119,6 +120,7 @@ The compiler and wrapper tooling are designed around a simple workflow:
 - `fmt`: format source
 - `lint`: run static lint rules
 - `cheader`, `abidump`, `abiverify`: inspect and verify C ABI surfaces
+- `pyext`: generate a CPython extension scaffold for ABI-safe hot functions
 
 The VS Code extension provides syntax highlighting, snippets, and editor
 integration for TezzNative files.

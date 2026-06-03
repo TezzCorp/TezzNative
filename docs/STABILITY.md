@@ -42,6 +42,11 @@ These surfaces are useful today but need more conformance tests:
 - C ABI interop, `extern fn`, C header generation, structured ABI dump/verify
   with starter layout coverage for field offsets, scalar mixes, arrays,
   pointers, by-value structs, and nested structs
+- Python bridge generation through `tezzc pyext`; the current scaffold is
+  gated for CPython wrapper emission, primitive conversion, borrowed buffer
+  parameters, setup metadata, ownership docs, and deterministic wrapped/skipped
+  manifests, but it is not yet a full Python packaging or runtime ownership
+  contract.
 - Borrow/mutability diagnostics
 - `fmt`, `lint`, LSP source, VS Code snippets, and curated examples are
   checked by the public developer-experience gate; formatter/linter semantics
