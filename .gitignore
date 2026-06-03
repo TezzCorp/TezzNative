@@ -31,6 +31,7 @@ benchmarks/results/**
 !tezznative-vscode/
 !tezznative-vscode/**
 !tools/
+!tools/tezz.tn
 !tools/tezz_lsp.tn
 !tools/release/
 !tools/release/**
@@ -40,8 +41,12 @@ benchmarks/results/**
 !LICENSE.txt
 !SECURITY.md
 !version.json
+!tezz
+!tezz.cmd
+!tezz.ps1
 !tezz.mod
 !tezz.lock
+!registry.tnx
 !.gitignore
 !.gitattributes
 

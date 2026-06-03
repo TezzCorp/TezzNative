@@ -16,6 +16,7 @@ compiler regressions can be diagnosed quickly.
 | Diagnostics | `tests/conformance/invalid` plus `tests/conformance/diagnostics` | Named unknown symbols, wrong arity, unsafe address-of, field errors, and stable diagnostic snippets. |
 | Stdlib import | `tests/conformance/stdlib` | Stable-candidate module import smoke. |
 | Developer experience | `tests/conformance/run-dx.*` plus `tests/conformance/dx` | Actionable diagnostics, formatter idempotence, lint rule IDs, examples, LSP source health, and VS Code snippet drift checks. |
+| Package trust | `tests/conformance/run-package-trust.*` | Public `tezz` launchers/tool source, SemVer package metadata, lock/registry parity, package checksums, generated package docs, and first-party package target docs. |
 | Native smoke | `tests/conformance/run-native-smoke.*` | Native build, verify, run, and stdout comparison on Windows/Linux x64. |
 | Native reliability | `tests/conformance/run-native-reliability.*` | Byte-reproducible native output and fail-closed unsupported-target behavior. |
 
@@ -62,6 +63,24 @@ The DX runner ends with:
 DX_SUMMARY passed=19 failed=0
 ```
 
+Run the package trust gate:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tests\conformance\run-package-trust.ps1 -Tezzc .\TezzNative-language\build\tezzc.exe
+```
+
+On Linux or WSL:
+
+```bash
+bash tests/conformance/run-package-trust.sh ./TezzNative-language/bin/tezzc-linux-x64
+```
+
+The package trust runner ends with:
+
+```text
+PACKAGE_TRUST_SUMMARY passed=12 failed=0
+```
+
 ## Rules For New Tests
 
 - A valid fixture must be small and deterministic.
@@ -71,6 +90,8 @@ DX_SUMMARY passed=19 failed=0
   stay in their dedicated suites instead of weakening the stable-core signal.
 - DX fixtures should prove first-user workflows and editor/tooling behavior
   without depending on public network access or machine-specific paths.
+- Package-trust fixtures should validate metadata, deterministic ordering, and
+  checksum/provenance behavior without requiring public network access.
 
 ## Native Backend Gates
 

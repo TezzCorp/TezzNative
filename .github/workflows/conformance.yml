@@ -228,6 +228,13 @@ jobs:
           Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
           & .\tests\conformance\run-dx.ps1 -Tezzc "$env:TEZZC"
 
+      - name: Run package trust gate
+        shell: powershell
+        timeout-minutes: 5
+        run: |
+          Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+          & .\tests\conformance\run-package-trust.ps1 -Tezzc "$env:TEZZC"
+
       - name: Run ABI conformance
         shell: powershell
         timeout-minutes: 5
@@ -444,6 +451,11 @@ jobs:
         shell: bash
         timeout-minutes: 5
         run: bash tests/conformance/run-dx.sh "$TEZZC"
+
+      - name: Run package trust gate
+        shell: bash
+        timeout-minutes: 5
+        run: bash tests/conformance/run-package-trust.sh "$TEZZC"
 
       - name: Run ABI conformance
         shell: bash

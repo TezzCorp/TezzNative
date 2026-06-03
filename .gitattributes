@@ -6,3 +6,7 @@ tezz.lock linguist-vendored=true
 
 # Treat TezzNative files as TezzNative directly
 *.tn linguist-language=TezzNative
+
+# Keep POSIX launchers and test runners executable by Linux shells.
+*.sh text eol=lf
+tezz text eol=lf

@@ -1,0 +1,104 @@
+#!/usr/bin/env sh
+SCRIPT="$0"
+if command -v readlink >/dev/null 2>&1; then
+  while [ -L "$SCRIPT" ]; do
+    LINK="$(readlink "$SCRIPT")"
+    case "$LINK" in
+      /*) SCRIPT="$LINK" ;;
+      *) SCRIPT="$(dirname "$SCRIPT")/$LINK" ;;
+    esac
+  done
+fi
+
+ROOT="$(cd "$(dirname "$SCRIPT")" && pwd)"
+PROBE="$ROOT/tools/probes/tls_connect_ex_probe.tn"
+TEZZC_ENV="${TEZZC:-}"
+TEZZC=""
+
+is_compiler_compatible() {
+  candidate="$1"
+  if [ ! -x "$candidate" ]; then
+    return 1
+  fi
+  if [ ! -f "$PROBE" ]; then
+    return 0
+  fi
+  "$candidate" check "$PROBE" >/dev/null 2>&1
+  return $?
+}
+
+pick_first_compatible() {
+  for candidate in "$@"; do
+    if is_compiler_compatible "$candidate"; then
+      TEZZC="$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+bootstrap_compiler() {
+  if [ ! -f "$ROOT/tools/build_core_strict.sh" ]; then
+    return 1
+  fi
+  echo "tezz: bootstrapping compiler from source..."
+  sh "$ROOT/tools/build_core_strict.sh"
+}
+
+if [ -n "${TEZZC_ENV:-}" ] && [ -x "$TEZZC_ENV" ]; then
+  if is_compiler_compatible "$TEZZC_ENV"; then
+    TEZZC="$TEZZC_ENV"
+  fi
+fi
+if [ -z "$TEZZC" ]; then
+  pick_first_compatible "$ROOT/bin/tezzc" "$ROOT/bin/tezzc-linux-x64" "$ROOT/build/tezzc" "$ROOT/tezzc" || true
+fi
+if [ -z "$TEZZC" ] && command -v tezzc >/dev/null 2>&1; then
+  c="$(command -v tezzc)"
+  if is_compiler_compatible "$c"; then
+    TEZZC="$c"
+  fi
+fi
+if [ -z "$TEZZC" ] && command -v tezzc-linux-x64 >/dev/null 2>&1; then
+  c="$(command -v tezzc-linux-x64)"
+  if is_compiler_compatible "$c"; then
+    TEZZC="$c"
+  fi
+fi
+
+if [ -z "$TEZZC" ]; then
+  bootstrap_compiler >/dev/null 2>&1 || true
+  pick_first_compatible "$ROOT/bin/tezzc" "$ROOT/bin/tezzc-linux-x64" "$ROOT/build/tezzc" "$ROOT/tezzc" || true
+fi
+
+if [ -z "$TEZZC" ] && [ -n "${TEZZC_ENV:-}" ] && [ -x "$TEZZC_ENV" ]; then
+  TEZZC="$TEZZC_ENV"
+fi
+if [ -z "$TEZZC" ]; then
+  for candidate in "$ROOT/bin/tezzc" "$ROOT/bin/tezzc-linux-x64" "$ROOT/build/tezzc" "$ROOT/tezzc"; do
+    if [ -x "$candidate" ]; then
+      TEZZC="$candidate"
+      break
+    fi
+  done
+fi
+if [ -z "$TEZZC" ] && command -v tezzc >/dev/null 2>&1; then
+  TEZZC="$(command -v tezzc)"
+fi
+if [ -z "$TEZZC" ] && command -v tezzc-linux-x64 >/dev/null 2>&1; then
+  TEZZC="$(command -v tezzc-linux-x64)"
+fi
+if [ ! -x "$TEZZC" ]; then
+  echo "tezz: compiler not found (expected bin/tezzc, a source build via tools/build_core_strict.sh, or PATH tezzc)."
+  exit 1
+fi
+TOOL="$ROOT/tools/tezz.tn"
+if [ ! -f "$TOOL" ]; then
+  echo "tezz: tools/tezz.tn not found next to launcher."
+  exit 1
+fi
+PATH="$ROOT/bin:$ROOT/build:$ROOT:$PATH"
+export PATH
+TEZZ_SDK_ROOT="$ROOT"
+export TEZZ_SDK_ROOT
+exec "$TEZZC" run --bc "$TOOL" -- "$@" --tezzc "$TEZZC" --sdk-root "$ROOT"

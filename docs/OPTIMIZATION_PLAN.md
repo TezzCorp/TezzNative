@@ -507,27 +507,37 @@ Completed exit gate:
 
 ## Milestone 5: Ecosystem And Package Trust
 
+Status: completed for the current first-party SDK package set.
+
 Goal: give users confidence that projects can be shared and reproduced.
 
 Package manager requirements:
 
-- `tezz init`
-- `tezz add`
-- `tezz remove`
-- `tezz update`
-- `tezz lock`
-- `tezz publish`
-- `tezz test`
-- `tezz build --release`
+- `tezz init` done for SemVer project scaffolds.
+- `tezz add` done as the first-class dependency install path.
+- `tezz remove` done with deterministic `tezz.mod`/`tezz.lock` rewrites.
+- `tezz update` done for explicit SDK update modes.
+- `tezz lock` done for deterministic lockfile generation.
+- `tezz publish` done for validated registry metadata generation.
+- `tezz test` done through the existing tooling/conformance lanes.
+- `tezz build --release` done for release-default builds with lock refresh.
 
 Registry requirements:
 
-- Semantic versions.
-- Lockfile checks.
-- Package checksums.
-- Package metadata validation.
-- Docs generated from package source.
-- Example and test requirements for first-party packages.
+- Semantic versions: `tezz.mod`, dependency pins, optional dependency pins,
+  `tezz.lock`, and `registry.tnx` now use `x.y.z` package versions.
+- Lockfile checks: Windows and POSIX package-trust runners verify lock metadata,
+  payload hash, deterministic ordering, URL provenance, and duplicate safety.
+- Package checksums: lock and registry entries are verified against local
+  `lib/*.tn` package sources using the same deterministic 8-hex package hash
+  used by `tools/tezz.tn`.
+- Package metadata validation: `tezz.mod`, `tezz.lock`, and `registry.tnx` are
+  checked together for name/version/url/checksum parity.
+- Docs generated from package source: the package-trust gate regenerates
+  `build/package_docs.generated.md` from `tezz.mod` and `tezz.lock`.
+- Example and test requirements: first-party package targets are documented in
+  `docs/PACKAGE_TRUST.md` with promotion rules for examples, tests, metadata,
+  and failure behavior.
 
 First-party package targets:
 
@@ -540,6 +550,33 @@ First-party package targets:
 - HTTP client/server polish.
 - Testing assertions.
 - Benchmark helpers.
+
+Delivered:
+
+- Promoted `tezz`, `tezz.cmd`, `tezz.ps1`, `tools/tezz.tn`, and
+  `registry.tnx` into the public repository surface.
+- Added first-class `tezz add`, `tezz remove`, and `tezz publish` command
+  handling in `tools/tezz.tn`.
+- Added `--release` handling to `tezz build` so release builds refresh the
+  dependency lock when project metadata is present.
+- Migrated first-party package metadata from `0.1` to `0.1.0` SemVer pins and
+  regenerated `tezz.lock` plus `registry.tnx` through the tool path.
+- Added Windows and POSIX package-trust conformance runners:
+  `tests/conformance/run-package-trust.ps1` and
+  `tests/conformance/run-package-trust.sh`.
+- Added `docs/PACKAGE_TRUST.md` as the public package trust contract.
+- Added package-trust checks to hosted Windows and Linux conformance CI.
+- Included package trust docs, launchers, tool source, registry, and package
+  runners in the release manifest surface.
+
+Completed exit gate:
+
+- `PACKAGE_TRUST_SUMMARY passed=12 failed=0` on Windows and Linux.
+- `tezz.mod`, `tezz.lock`, and `registry.tnx` have validated SemVer package
+  versions, deterministic metadata, and lock/registry parity.
+- Package checksums match the first-party SDK `lib/*.tn` package sources.
+- Package inventory docs are generated from source metadata instead of being
+  hand-maintained.
 
 ## Milestone 6: Python Bridge Strategy
 
