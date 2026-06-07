@@ -20,16 +20,19 @@ These features are the first compatibility target:
 - Source files using indentation-based blocks
 - `fn`, `let`, `const let`, `struct`, `enum`, `typedef`
 - `if`, `else`, `while`, C-style `for`, `switch`, `break`, `continue`, `ret`
-- Primitive aliases such as `int`, `float`, `char`, `str`, and `void`
+- Primitive aliases such as `int`, `float`, `char`, `str`, and `void`, plus
+  fixed-width integer types `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`,
+  and `u64`
 - Arrays, pointers, casts, indexing, field access, `sizeof`, and `alignof`
 - Module imports from the local project and standard library
 - `tezzc check`, `tezzc run`, and bytecode-backed development workflows
 
-The stable-core conformance gate now includes 26 Windows/Linux checked cases
+The stable-core conformance gate now includes 27 Windows/Linux checked cases
 across flat stable-core, parser, typecheck, diagnostics, and stdlib-import
-suites. Coverage includes fixed arrays/indexing, `sizeof`/`alignof`, comments
-and literals, nested blocks, function calls/returns, pointer-array roundtrip,
-struct value flow, named unknown value/module/function diagnostics,
+suites. Coverage includes fixed arrays/indexing, fixed-width integer parsing
+and type checking, `sizeof`/`alignof`, comments and literals, nested blocks,
+function calls/returns, pointer-array roundtrip, struct value flow, named
+unknown value/module/function diagnostics,
 struct-field diagnostics, function-arity diagnostics, parser rejection cases,
 and unsafe pointer/address-of coverage.
 
@@ -41,7 +44,8 @@ These surfaces are useful today but need more conformance tests:
   reproducible-output reliability gates for the current primary target surface
 - C ABI interop, `extern fn`, C header generation, structured ABI dump/verify
   with starter layout coverage for field offsets, scalar mixes, arrays,
-  pointers, by-value structs, and nested structs
+  pointers, by-value structs, nested structs, fixed-width integer C mappings,
+  and extern signatures
 - Python bridge generation through `tezzc pyext`; the current scaffold is
   gated for CPython wrapper emission, primitive conversion, borrowed buffer
   parameters, setup metadata, ownership docs, and deterministic wrapped/skipped
@@ -54,7 +58,8 @@ These surfaces are useful today but need more conformance tests:
 - `io`, `str`, `math`, `vec`, `arena`, `time`; imports plus selected native
   executable smoke for raw/wrapped/line/stream file IO, directory lifecycle,
   direct `dir_list`, raw/public recursive listing and glob, portable paths,
-  many-argument calls, math helpers, math edge behavior, string transforms,
+  many-argument calls, fixed-width integer truncation/load extension, math
+  helpers, math edge behavior, string transforms,
   empty-replace string behavior, vector reserve/fill guards, arena
   alignment/release guards, process run/output capture, `time`
   clock/sleep/UTC/local-date helpers, deterministic

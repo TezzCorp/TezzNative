@@ -1,0 +1,61 @@
+struct WidthBox:
+  s8:i8
+  s16:i16
+  s32:i32
+  s64:i64
+  u8v:u8
+  u16v:u16
+  u32v:u32
+  u64v:u64
+
+fn main() -> int:
+  s8:i8 = 255
+  s16:i16 = 65535
+  s32:i32 = 4294967295
+  u8v:u8 = 255
+  u16v:u16 = 65535
+  u32v:u32 = 4294967295
+
+  if s8 != 0 - 1:
+    ret 1
+  if s16 != 0 - 1:
+    ret 2
+  if s32 != 0 - 1:
+    ret 3
+  if u8v != 255:
+    ret 4
+  if u16v != 65535:
+    ret 5
+  if u32v != 4294967295:
+    ret 6
+
+  box:WidthBox = WidthBox{s8:255, s16:65535, s32:4294967295, s64:0 - 9, u8v:255, u16v:65535, u32v:4294967295, u64v:123456789}
+  if box.s8 != 0 - 1:
+    ret 7
+  if box.s16 != 0 - 1:
+    ret 8
+  if box.s32 != 0 - 1:
+    ret 9
+  if box.s64 != 0 - 9:
+    ret 10
+  if box.u8v != 255:
+    ret 11
+  if box.u16v != 65535:
+    ret 12
+  if box.u32v != 4294967295:
+    ret 13
+  if box.u64v != 123456789:
+    ret 14
+
+  arr:[i8;2] = [255 as i8, 7 as i8]
+  if arr[0] != 0 - 1:
+    ret 15
+  if arr[1] != 7:
+    ret 16
+
+  idx:u32 = 1
+  if arr[idx] != 7:
+    ret 17
+
+  say "int-widths"
+  ret 0

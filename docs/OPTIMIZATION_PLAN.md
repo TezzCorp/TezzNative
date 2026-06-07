@@ -630,19 +630,28 @@ Completed exit gate:
 
 ## Milestone 7: C Replacement Strategy
 
-Status: completed for the current starter ABI surface.
+Status: completed for the current starter ABI and fixed-width integer surface.
 
 Goal: earn trust from C developers with exact layout and ABI behavior.
 
-Required work:
+Delivered work:
 
-- Add integer width types: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`,
+- Added integer width types: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`,
   `u64`.
-- Document struct layout and alignment.
-- Add packed/aligned struct support if needed.
-- Add ABI tests for common C signatures.
-- Make `cheader`, `abidump`, and `abiverify` part of CI.
-- Add examples for calling C and being called from C.
+- Added fixed-width integer parsing, type checking, assignments/calls, casts,
+  struct fields, arrays, indexing, pointer arithmetic indexes, and conditions.
+- Added signed/unsigned narrow load behavior across IR VM, bytecode VM, C/CUDA
+  codegen, GAS, ARM64, and x64/x86 native codegen.
+- Fixed scalar promotion so narrow integer storage is not optimized into an
+  incorrect full-width register value.
+- Documented struct layout and alignment.
+- Added ABI tests for common C signatures.
+- Made `cheader`, `abidump`, and `abiverify` part of CI/local conformance.
+- Added examples for calling C and being called from C.
+
+Remaining beta work:
+
+- Add packed/aligned struct support if real C interop use cases require it.
 - Improve freestanding documentation and build flow.
 
 Success metric:
@@ -672,6 +681,13 @@ Started:
   compiler.
 - Added `docs/C_ABI.md` with the current layout contract, C type mapping,
   header/dump workflow, and C interop examples.
+- Added fixed-width integer ABI coverage in `AbiWidths`, including header
+  checks for `int8_t`/`uint32_t` style mappings and JSON checks for exact
+  field offsets, sizes, alignments, extern return types, and parameter types.
+- Added native/check conformance for integer-width truncation, signed
+  extension, unsigned extension, struct field loads, array loads, and `u32`
+  indexing in `tests/conformance/native/int_widths.tn` and
+  `tests/conformance/valid/integer_widths.tn`.
 
 ## Milestone 8: Benchmarks And Performance Proof
 

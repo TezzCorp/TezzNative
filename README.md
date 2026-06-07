@@ -34,7 +34,7 @@ than the full repository surface.
 | Static type checking | Stable/Beta (gated core) | Type mismatch, named unknown name/module/function, arity, and unsafe diagnostics are snippet checked; common errors now include actionable help lines |
 | Native executable flow | Beta (gated x64) | Windows/Linux SDKs build and run hello, loops/math module, many-argument calls, strings/transforms, structs, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable paths, vectors, arenas, process run/output, time clock/sleep/UTC/local-date helpers, deterministic net/HTTP URL parsing, Windows/Linux x64 TCP loopback sockets, IPv4 literal socket bind handling, localhost connect/bind wrappers, keep-alive HTTP response reads, local HTTP client/server loopback, reproducible native output fixtures, and fail-closed unsupported targets |
 | Bytecode run flow | Stable/Beta | Useful for development and compatibility |
-| C ABI / extern calls | Beta (gated starter) | Header/structured ABI dump checks cover pointers, arrays, nested structs, scalar mixes, field offsets, and extern signatures |
+| C ABI / extern calls | Beta (gated starter) | Header/structured ABI dump checks cover pointers, arrays, nested structs, scalar mixes, fixed-width integer C mappings, field offsets, and extern signatures |
 | Python bridge | Beta (gated scaffold) | `tezzc pyext` generates CPython wrapper C, ABI declarations, setup metadata, ownership docs, and deterministic wrapped/skipped manifests for primitive and buffer hot paths |
 | Package trust | Stable/Beta (gated first-party set) | `tezz init/add/remove/update/lock/publish/test/build --release`, SemVer package pins, lock/registry parity, package checksums, generated package inventory docs, and first-party package promotion rules are gated |
 | Stable stdlib candidates | Stable/Beta (edge gated) | Core imports plus native math, string, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable path, vector, arena, process run/output capture, `time` clock/sleep/UTC/local-date smoke, and focused stdlib edge gates for math, strings, vectors, and arenas |
@@ -85,7 +85,8 @@ TezzNative currently supports:
 - Indentation-based blocks
 - `fn`, `let`, `struct`, `enum`, `typedef`, `extern`, and `static`
 - `if`, `else`, `while`, C-style `for`, `switch`, `break`, `continue`, `ret`
-- Primitive types such as `int`, `float`, `char`, `str`, `void`
+- Primitive types such as `int`, `float`, `char`, `str`, `void`, and
+  fixed-width integers `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`
 - Pointers, arrays, casts, indexing, field access, `sizeof`, and `alignof`
 - `unsafe` blocks for pointer and low-level memory operations
 - C ABI-oriented attributes and extern declarations

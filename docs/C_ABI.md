@@ -6,6 +6,10 @@ machine-readable layout checks on Windows and Linux x64.
 ## Current Contract
 
 - `int` lowers to signed 64-bit integer (`int64_t` in generated C headers).
+- Fixed-width signed integers lower exactly: `i8` -> `int8_t`, `i16` ->
+  `int16_t`, `i32` -> `int32_t`, `i64` -> `int64_t`.
+- Fixed-width unsigned integers lower exactly: `u8` -> `uint8_t`, `u16` ->
+  `uint16_t`, `u32` -> `uint32_t`, `u64` -> `uint64_t`.
 - `float` lowers to 64-bit floating point (`double`).
 - `char` lowers to unsigned 8-bit integer (`uint8_t`).
 - `str` lowers to `uint8_t *`.
@@ -61,7 +65,8 @@ fn main() -> int:
 ```
 
 The current ABI tests cover pointer parameters, by-value struct parameters,
-fixed arrays inside structs, nested structs, scalar mixes, and `void` returns.
+fixed arrays inside structs, nested structs, scalar mixes, all fixed-width
+integer C mappings, and `void` returns.
 
 ## Being Called From C
 

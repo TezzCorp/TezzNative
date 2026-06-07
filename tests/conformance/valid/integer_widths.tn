@@ -1,0 +1,23 @@
+struct IntegerWidths:
+  s8:i8
+  s16:i16
+  s32:i32
+  s64:i64
+  u8v:u8
+  u16v:u16
+  u32v:u32
+  u64v:u64
+
+fn take_widths(a:i8, b:i16, c:i32, d:i64, e:u8, f:u16, g:u32, h:u64) -> u64:
+  ret h + g + f + e + d + c + b + a
+
+fn main() -> int:
+  w:IntegerWidths = IntegerWidths{s8:1, s16:2, s32:3, s64:4, u8v:5, u16v:6, u32v:7, u64v:8}
+  total:u64 = take_widths(w.s8, w.s16, w.s32, w.s64, w.u8v, w.u16v, w.u32v, w.u64v)
+  if total != 36:
+    ret 1
+  if sizeof(IntegerWidths) != 32:
+    ret 2
+  if alignof(IntegerWidths) != 8:
+    ret 3
+  ret 0

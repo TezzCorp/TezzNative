@@ -19,12 +19,23 @@ struct AbiTable:
   values:[int;3]
   head:AbiPair
 
+struct AbiWidths:
+  s8:i8
+  s16:i16
+  s32:i32
+  s64:i64
+  u8v:u8
+  u16v:u16
+  u32v:u32
+  u64v:u64
+
 @abi("c")
 extern fn abi_pair_sum(p:*AbiPair, factor:int) -> int
 extern fn abi_buffer_len(buf:AbiBuffer) -> int
 extern fn abi_packet_send(pkt:*AbiPacket) -> void
 extern fn abi_numbers_scale(n:AbiNumbers, out:*AbiNumbers) -> int
 extern fn abi_table_first(t:*AbiTable) -> int
+extern fn abi_widths_mix(w:AbiWidths, p:*AbiWidths, s:i32, u:u32) -> u64
 
 fn main() -> int:
   ret 0

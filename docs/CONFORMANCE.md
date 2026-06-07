@@ -8,7 +8,7 @@ compiler regressions can be diagnosed quickly.
 
 | Suite | Path | Purpose |
 | --- | --- | --- |
-| Stable core | `tests/conformance/valid` | Arithmetic, control flow, structs, arrays, indexing, `sizeof`, `alignof`, and unsafe pointer basics. |
+| Stable core | `tests/conformance/valid` | Arithmetic, control flow, structs, arrays, indexing, fixed-width integers, `sizeof`, `alignof`, and unsafe pointer basics. |
 | Parser valid | `tests/conformance/parser/valid` | Comments, literals, nested blocks, struct syntax, and fixed-array syntax. |
 | Parser invalid | `tests/conformance/parser/invalid` | Bad indentation, missing block markers, and unterminated strings. |
 | Typecheck valid | `tests/conformance/typecheck/valid` | Function calls/returns, pointer-array roundtrip, and struct value flow. |
@@ -18,12 +18,13 @@ compiler regressions can be diagnosed quickly.
 | Developer experience | `tests/conformance/run-dx.*` plus `tests/conformance/dx` | Actionable diagnostics, formatter idempotence, lint rule IDs, examples, LSP source health, and VS Code snippet drift checks. |
 | Package trust | `tests/conformance/run-package-trust.*` | Public `tezz` launchers/tool source, SemVer package metadata, lock/registry parity, package checksums, generated package docs, and first-party package target docs. |
 | Python bridge | `tests/conformance/run-python-bridge.*` plus `tests/conformance/python_bridge` | `tezzc pyext` command generation, CPython wrapper contents, primitive/buffer mapping, ownership docs, and wrapped/skipped manifests. |
+| C ABI | `tests/conformance/run-abi.*` plus `tests/conformance/abi` | C header emission, structured ABI dump/verify, struct layout, fixed-width integer mappings, and extern signatures. |
 | Native smoke | `tests/conformance/run-native-smoke.*` | Native build, verify, run, and stdout comparison on Windows/Linux x64. |
 | Native reliability | `tests/conformance/run-native-reliability.*` | Byte-reproducible native output and fail-closed unsupported-target behavior. |
 
-The current stable-core runner gates 26 checks across Windows and Linux:
+The current stable-core runner gates 27 checks across Windows and Linux:
 
-- 13 valid programs must pass `tezzc check`.
+- 14 valid programs must pass `tezzc check`.
 - 13 invalid programs must fail with deterministic diagnostic snippets.
 
 ## Commands
@@ -43,7 +44,7 @@ bash tests/conformance/run.sh ./TezzNative-language/bin/tezzc-linux-x64
 Both runners print suite-qualified result names and end with:
 
 ```text
-CONFORMANCE_SUMMARY passed=26 failed=0
+CONFORMANCE_SUMMARY passed=27 failed=0
 ```
 
 Run the developer experience gate:
@@ -120,10 +121,11 @@ executable, and compare stdout when a `.stdout.txt` file exists.
 
 Current native smoke coverage includes hello output, loop/math lowering, string
 helpers and transforms, file IO, directory lifecycle/listing/glob, portable
-paths, vectors, arenas, time helpers, process output, many-argument calls,
-local TCP loopback, socket options, IPv4 literal bind hosts, localhost wrappers,
-local HTTP route helpers, keep-alive HTTP response reads, and stable-candidate
-stdlib edge fixtures for math, strings, vectors, and arenas.
+paths, fixed-width integer truncation and signed/unsigned load extension,
+vectors, arenas, time helpers, process output, many-argument calls, local TCP
+loopback, socket options, IPv4 literal bind hosts, localhost wrappers, local
+HTTP route helpers, keep-alive HTTP response reads, and stable-candidate stdlib
+edge fixtures for math, strings, vectors, and arenas.
 
 Native reliability cases build focused host-safe fixtures twice and compare the
 resulting executable SHA-256 hashes. They also assert that an unknown

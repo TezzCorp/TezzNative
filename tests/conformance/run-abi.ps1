@@ -278,7 +278,18 @@ try {
       'int64_t values[3];',
       'AbiPair head;',
       '_Static_assert(sizeof(AbiTable) == 40, "ABI size mismatch for AbiTable");',
-      '_Static_assert(_Alignof(AbiTable) == 8, "ABI align mismatch for AbiTable");'
+      '_Static_assert(_Alignof(AbiTable) == 8, "ABI align mismatch for AbiTable");',
+      'typedef struct AbiWidths {',
+      'int8_t s8;',
+      'int16_t s16;',
+      'int32_t s32;',
+      'int64_t s64;',
+      'uint8_t u8v;',
+      'uint16_t u16v;',
+      'uint32_t u32v;',
+      'uint64_t u64v;',
+      '_Static_assert(sizeof(AbiWidths) == 32, "ABI size mismatch for AbiWidths");',
+      '_Static_assert(_Alignof(AbiWidths) == 8, "ABI align mismatch for AbiWidths");'
     )
 
     foreach ($snippet in $headerSnippets) {
@@ -320,11 +331,24 @@ try {
       if (-not (Assert-AbiField -Struct $table -FieldName "head" -Offset 24 -Size 16 -Align 8 -TypeShape "struct:AbiPair" -Label "AbiTable")) { $ok = $false }
     }
 
+    $widths = Assert-AbiStruct -Abi $abi -Name "AbiWidths" -Size 32 -Align 8
+    if (-not $widths) { $ok = $false } else {
+      if (-not (Assert-AbiField -Struct $widths -FieldName "s8" -Offset 0 -Size 1 -Align 1 -TypeShape "i8" -Label "AbiWidths")) { $ok = $false }
+      if (-not (Assert-AbiField -Struct $widths -FieldName "s16" -Offset 2 -Size 2 -Align 2 -TypeShape "i16" -Label "AbiWidths")) { $ok = $false }
+      if (-not (Assert-AbiField -Struct $widths -FieldName "s32" -Offset 4 -Size 4 -Align 4 -TypeShape "i32" -Label "AbiWidths")) { $ok = $false }
+      if (-not (Assert-AbiField -Struct $widths -FieldName "s64" -Offset 8 -Size 8 -Align 8 -TypeShape "i64" -Label "AbiWidths")) { $ok = $false }
+      if (-not (Assert-AbiField -Struct $widths -FieldName "u8v" -Offset 16 -Size 1 -Align 1 -TypeShape "u8" -Label "AbiWidths")) { $ok = $false }
+      if (-not (Assert-AbiField -Struct $widths -FieldName "u16v" -Offset 18 -Size 2 -Align 2 -TypeShape "u16" -Label "AbiWidths")) { $ok = $false }
+      if (-not (Assert-AbiField -Struct $widths -FieldName "u32v" -Offset 20 -Size 4 -Align 4 -TypeShape "u32" -Label "AbiWidths")) { $ok = $false }
+      if (-not (Assert-AbiField -Struct $widths -FieldName "u64v" -Offset 24 -Size 8 -Align 8 -TypeShape "u64" -Label "AbiWidths")) { $ok = $false }
+    }
+
     if (-not (Assert-AbiFunction -Abi $abi -Name "abi_pair_sum" -Extern $true -Ret "i64" -Params @("ptr(struct:AbiPair)", "i64"))) { $ok = $false }
     if (-not (Assert-AbiFunction -Abi $abi -Name "abi_buffer_len" -Extern $true -Ret "i64" -Params @("struct:AbiBuffer"))) { $ok = $false }
     if (-not (Assert-AbiFunction -Abi $abi -Name "abi_packet_send" -Extern $true -Ret "void" -Params @("ptr(struct:AbiPacket)"))) { $ok = $false }
     if (-not (Assert-AbiFunction -Abi $abi -Name "abi_numbers_scale" -Extern $true -Ret "i64" -Params @("struct:AbiNumbers", "ptr(struct:AbiNumbers)"))) { $ok = $false }
     if (-not (Assert-AbiFunction -Abi $abi -Name "abi_table_first" -Extern $true -Ret "i64" -Params @("ptr(struct:AbiTable)"))) { $ok = $false }
+    if (-not (Assert-AbiFunction -Abi $abi -Name "abi_widths_mix" -Extern $true -Ret "u64" -Params @("struct:AbiWidths", "ptr(struct:AbiWidths)", "i32", "u32"))) { $ok = $false }
 
     if (-not $ok) {
       $failed++

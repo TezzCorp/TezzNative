@@ -53,6 +53,7 @@ timing.
 | Executable format | Gated | Gated | PE/COFF and ELF verification run with `--verify`. |
 | Entrypoint/exit | Gated | Gated | Hello/native output smoke. |
 | Integer arithmetic and loops | Gated | Gated | Loop/math and benchmark fixture checks. |
+| Fixed-width integer loads | Gated | Gated | `i8/i16/i32` signed extension, `u8/u16/u32` zero extension, struct fields, arrays, and `u32` indexing are smoke gated. |
 | Stack arguments | Gated | Gated | 8-argument integer/string/nested-call fixtures. |
 | Struct/array fields | Gated | Gated | Struct-array native fixture. |
 | Globals and string data | Gated | Gated | String ops/transforms and hello output. |

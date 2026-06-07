@@ -114,7 +114,18 @@ for file in "$ABI_DIR"/*.tn; do
     'int64_t values[3];' \
     'AbiPair head;' \
     '_Static_assert(sizeof(AbiTable) == 40, "ABI size mismatch for AbiTable");' \
-    '_Static_assert(_Alignof(AbiTable) == 8, "ABI align mismatch for AbiTable");'; do
+    '_Static_assert(_Alignof(AbiTable) == 8, "ABI align mismatch for AbiTable");' \
+    'typedef struct AbiWidths {' \
+    'int8_t s8;' \
+    'int16_t s16;' \
+    'int32_t s32;' \
+    'int64_t s64;' \
+    'uint8_t u8v;' \
+    'uint16_t u16v;' \
+    'uint32_t u32v;' \
+    'uint64_t u64v;' \
+    '_Static_assert(sizeof(AbiWidths) == 32, "ABI size mismatch for AbiWidths");' \
+    '_Static_assert(_Alignof(AbiWidths) == 8, "ABI align mismatch for AbiWidths");'; do
     assert_contains "$header_text" "$snippet" "abi/$name cheader" || ok=0
   done
 
@@ -198,12 +209,23 @@ check_struct("AbiTable", 40, 8, [
     ("values", 0, 24, 8, "array(i64,3)"),
     ("head", 24, 16, 8, "struct:AbiPair"),
 ])
+check_struct("AbiWidths", 32, 8, [
+    ("s8", 0, 1, 1, "i8"),
+    ("s16", 2, 2, 2, "i16"),
+    ("s32", 4, 4, 4, "i32"),
+    ("s64", 8, 8, 8, "i64"),
+    ("u8v", 16, 1, 1, "u8"),
+    ("u16v", 18, 2, 2, "u16"),
+    ("u32v", 20, 4, 4, "u32"),
+    ("u64v", 24, 8, 8, "u64"),
+])
 
 check_fn("abi_pair_sum", "i64", ["ptr(struct:AbiPair)", "i64"])
 check_fn("abi_buffer_len", "i64", ["struct:AbiBuffer"])
 check_fn("abi_packet_send", "void", ["ptr(struct:AbiPacket)"])
 check_fn("abi_numbers_scale", "i64", ["struct:AbiNumbers", "ptr(struct:AbiNumbers)"])
 check_fn("abi_table_first", "i64", ["ptr(struct:AbiTable)"])
+check_fn("abi_widths_mix", "u64", ["struct:AbiWidths", "ptr(struct:AbiWidths)", "i32", "u32"])
 PY
   then
     ok=0
