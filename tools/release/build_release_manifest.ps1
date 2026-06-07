@@ -51,6 +51,7 @@ $DefaultInclude = @(
   "download/sdk/docs/CONFORMANCE.md",
   "download/sdk/docs/C_ABI.md",
   "download/sdk/docs/DEVELOPER_EXPERIENCE.md",
+  "download/sdk/docs/LLM_PRODUCTION_PATH.md",
   "download/sdk/docs/NATIVE_BACKEND.md",
   "download/sdk/docs/OPTIMIZATION_PLAN.md",
   "download/sdk/docs/PACKAGE_TRUST.md",
@@ -107,6 +108,7 @@ $DefaultInclude = @(
   "download/sdk/tests/conformance/run-native-smoke.ps1",
   "download/sdk/tests/conformance/run-native-smoke.sh",
   "download/sdk/tests/conformance/abi/starter_abi.tn",
+  "download/sdk/tests/conformance/stdlib/llm_core_f64.tn",
   "download/sdk/tests/conformance/valid/integer_widths.tn",
   "download/sdk/tests/conformance/native/int_widths.tn",
   "download/sdk/tests/conformance/native/int_widths.stdout.txt",
@@ -142,6 +144,7 @@ $DefaultInclude = @(
   "download/sdk/lib/vec.tn",
   "download/sdk/lib/arena.tn",
   "download/sdk/lib/net.tn",
+  "download/sdk/lib/llm_core.tn",
   "download/sdk/tools/tezz.tn",
   "download/sdk/tools/tezz_lsp.tn",
   "download/sdk/tezznative-vscode/snippets/snippets.json"

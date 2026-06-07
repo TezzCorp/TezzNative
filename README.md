@@ -39,7 +39,7 @@ than the full repository surface.
 | Package trust | Stable/Beta (gated first-party set) | `tezz init/add/remove/update/lock/publish/test/build --release`, SemVer package pins, lock/registry parity, package checksums, generated package inventory docs, and first-party package promotion rules are gated |
 | Stable stdlib candidates | Stable/Beta (edge gated) | Core imports plus native math, string, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable path, vector, arena, process run/output capture, `time` clock/sleep/UTC/local-date smoke, and focused stdlib edge gates for math, strings, vectors, and arenas |
 | Networking/TLS/GUI/DB | Beta | `net` URL, DNS endpoint, HTTP parser, route, auth/cookie, chunked response helpers, keep-alive `Content-Length`/chunked response reads, Windows/Linux x64 TCP loopback send/recv, IPv4 literal bind hosts, localhost TCP/UDP connect wrappers, socket options, and local HTTP client/server route helpers are smoke gated; TLS, public-network HTTP, DNS-backed sockets, and wider backend matrix testing are still needed |
-| GPU/NPU/LLM/kernel modules | Experimental | API surface exists; backend support depends on runtime build |
+| GPU/NPU/LLM/kernel modules | Experimental | `llm_core` now provides a gated f64 CPU transformer-primitive lane for tiny inference experiments; production LLM training/serving still needs dtype, tensor, model IO, GPU/NPU, and benchmark gates |
 
 See `docs/STABILITY.md` for the full stability map.
 See `docs/PLATFORM_SUPPORT.md` for target support and
@@ -52,7 +52,8 @@ reliability gates are documented in `docs/NATIVE_BACKEND.md`. Developer
 experience gates are documented in `docs/DEVELOPER_EXPERIENCE.md`. Release
 integrity and privacy policies are documented in `docs/RELEASE_ENGINEERING.md`,
 `docs/TELEMETRY_PRIVACY.md`, and `SECURITY.md`. Package trust rules are
-documented in `docs/PACKAGE_TRUST.md`.
+documented in `docs/PACKAGE_TRUST.md`. The LLM production-readiness boundary is
+documented in `docs/LLM_PRODUCTION_PATH.md`.
 
 ## Quick Example
 
@@ -100,7 +101,7 @@ The public `lib/` directory includes modules for:
 - Systems work: `sys`, `mmap`, `os`, `kernel`, `arduino`, `raspi`
 - Networking: `net`, `tls`, `tezzserve`, `tezzapi`
 - UI/application work: `gui`, `gui_win`, `tzgui`, `tzui`, `tnui`, `tezzui`
-- Data and AI experiments: `tezzdb`, `tensor`, `nn`, `llm`, `tokenizer`, `tts`, `stt`
+- Data and AI experiments: `tezzdb`, `tensor`, `nn`, `llm`, `llm_core`, `tokenizer`, `tts`, `stt`
 - Acceleration surfaces: `simd`, `intrin`, `gpu`, `npu`
 
 Not every module has the same maturity level. Stable applications should start

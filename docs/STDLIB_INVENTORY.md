@@ -35,6 +35,7 @@ trust in the stable core.
 | `tezzapi` | REST API framework | Add request/response validation examples. |
 | `tezzdb` | Embedded database | Add transaction, index, WAL, and recovery tests. |
 | `tezzdbql` | Query layer for TezzDB | Add parameterized query examples and tests. |
+| `llm_core` | f64 CPU transformer primitives | Add f32/f16/bf16/int8 lanes, tensor descriptors, model-load fixtures, GPU/NPU backend gates, and performance data before claiming production LLM support. |
 | `gui`, `gui_win` | Host GUI APIs | Add Windows-only examples and platform notes. |
 | `tzgui`, `tzui`, `tnui`, `tezzui`, `wm` | UI stacks | Clarify supported host path and maturity. |
 | `mmap`, `sys`, `task`, `event`, `frame` | Systems/runtime helpers | Add platform matrix and failure behavior. |
@@ -46,7 +47,7 @@ trust in the stable core.
 | `gpu` | GPU runtime hooks | Backend availability matrix and fallback tests. |
 | `npu` | NPU/model runtime hooks | Backend availability matrix and explicit unsupported behavior. |
 | `tensor` | Tensor math helpers | Numeric correctness tests and memory ownership docs. |
-| `nn`, `llm`, `tokenizer` | AI/LLM experiments | Stable model format, tests, and performance notes. |
+| `nn`, `llm`, `tokenizer` | AI/LLM experiments | Stable model format, tests, and performance notes; build on the gated `llm_core` primitive lane instead of untested backend assumptions. |
 | `tts`, `stt` | Speech experiments | Platform audio/runtime notes and examples. |
 | `kernel`, `os` | Freestanding/kernel work | Separate build docs and target matrix. |
 | `arduino`, `raspi` | Embedded board helpers | Board-specific build and flashing docs. |
@@ -81,3 +82,5 @@ A module can move toward Stable Candidate only when:
 4. Keep the curated `examples/dx` programs aligned with stable-candidate module
    behavior and the developer-experience gate.
 5. Keep this inventory synchronized with `tezz.mod` and `lib/`.
+6. Grow `llm_core` from f64 correctness primitives into dtype, model IO, and
+   backend-specific LLM gates before any production LLM claim.

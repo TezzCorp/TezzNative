@@ -27,14 +27,15 @@ These features are the first compatibility target:
 - Module imports from the local project and standard library
 - `tezzc check`, `tezzc run`, and bytecode-backed development workflows
 
-The stable-core conformance gate now includes 27 Windows/Linux checked cases
+The stable-core conformance gate now includes 28 Windows/Linux checked cases
 across flat stable-core, parser, typecheck, diagnostics, and stdlib-import
 suites. Coverage includes fixed arrays/indexing, fixed-width integer parsing
 and type checking, `sizeof`/`alignof`, comments and literals, nested blocks,
 function calls/returns, pointer-array roundtrip, struct value flow, named
 unknown value/module/function diagnostics,
 struct-field diagnostics, function-arity diagnostics, parser rejection cases,
-and unsafe pointer/address-of coverage.
+unsafe pointer/address-of coverage, and the first dtype-explicit f64
+`llm_core` import/correctness fixture.
 
 ## Beta Surfaces
 
@@ -73,6 +74,10 @@ These surfaces are useful today but need more conformance tests:
   cover sorted recursive directory listing and raw glob filters.
 - `net`, `tls`, `tezzserve`, `tezzapi`
 - `tezzdb` and `tezzdbql`
+- `llm_core`; f64 CPU transformer primitives for matmul, RMSNorm, softmax, and
+  RoPE are gated for import/type checking, bytecode execution, and current
+  Windows/Linux x64 native fallback behavior. This is a kernel foundation, not
+  a full production LLM training or serving contract.
 - GUI modules on supported host platforms
 
 ## Experimental Surfaces

@@ -1,0 +1,81 @@
+import "llm_core"
+
+fn near(actual:float, expected:float, eps:float) -> int:
+  diff:float = actual - expected
+  if diff < 0.0:
+    diff = 0.0 - diff
+  if diff <= eps:
+    ret 1
+  ret 0
+
+fn main() -> int:
+  a:[float;4]
+  b:[float;4]
+  out:[float;4]
+
+  a[0] = 1.0
+  a[1] = 2.0
+  a[2] = 3.0
+  a[3] = 4.0
+  b[0] = 5.0
+  b[1] = 6.0
+  b[2] = 7.0
+  b[3] = 8.0
+
+  if llm_core.matmul_f64(&out[0], &a[0], &b[0], 2, 2, 2) != 0:
+    ret 1
+  if near(out[0], 19.0, 1.0e-09) == 0:
+    ret 2
+  if near(out[1], 22.0, 1.0e-09) == 0:
+    ret 3
+  if near(out[2], 43.0, 1.0e-09) == 0:
+    ret 4
+  if near(out[3], 50.0, 1.0e-09) == 0:
+    ret 5
+
+  logits:[float;4]
+  probs:[float;4]
+  logits[0] = 1.0
+  logits[1] = 1.0
+  logits[2] = 0.0
+  logits[3] = 0.0
+  if llm_core.softmax_rows_f64(&probs[0], &logits[0], 2, 2) != 0:
+    ret 6
+  if near(probs[0] + probs[1], 1.0, 1.0e-09) == 0:
+    ret 7
+  if near(probs[2], 0.5, 1.0e-09) == 0:
+    ret 8
+  if near(probs[3], 0.5, 1.0e-09) == 0:
+    ret 9
+
+  x:[float;2]
+  norm:[float;2]
+  weight:[float;2]
+  x[0] = 3.0
+  x[1] = 4.0
+  weight[0] = 1.0
+  weight[1] = 1.0
+  if llm_core.rmsnorm_rows_f64(&norm[0], &x[0], &weight[0], 1, 2, 1.0e-09) != 0:
+    ret 10
+  rms:float = (norm[0] * norm[0] + norm[1] * norm[1]) / 2.0
+  if near(rms, 1.0, 1.0e-06) == 0:
+    ret 11
+
+  q:[float;4]
+  k:[float;4]
+  q[0] = 1.0
+  q[1] = 2.0
+  q[2] = 3.0
+  q[3] = 4.0
+  k[0] = 5.0
+  k[1] = 6.0
+  k[2] = 7.0
+  k[3] = 8.0
+  if llm_core.rope_f64(&q[0], &k[0], 0, 4, 10000.0) != 0:
+    ret 12
+  if near(q[0], 1.0, 1.0e-09) == 0 || near(q[3], 4.0, 1.0e-09) == 0:
+    ret 13
+  if near(k[0], 5.0, 1.0e-09) == 0 || near(k[3], 8.0, 1.0e-09) == 0:
+    ret 14
+
+  ret 0

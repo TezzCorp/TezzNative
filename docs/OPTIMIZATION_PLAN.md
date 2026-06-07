@@ -794,6 +794,55 @@ Delivered:
 - Published `download/release_manifest.json` and
   `download/release_manifest.json.sha256` beside the SDK archives.
 
+## Milestone 10: LLM Production Path
+
+Status: started for the first dtype-explicit kernel foundation.
+
+Goal: make TezzNative capable of honest small-model inference experiments first,
+then grow toward production LLM workloads only through tested dtype, tensor,
+model IO, backend, and benchmark gates.
+
+Current answer:
+
+- TezzNative cannot yet build, train, and serve a production-scale LLM from
+  scratch.
+- TezzNative can now host the first f64 CPU transformer primitive lane for
+  correctness experiments and backend validation.
+
+Delivered:
+
+- Added `lib/llm_core.tn` with explicit f64 transformer primitives:
+  `matmul_f64`, `rmsnorm_rows_f64`, `softmax_rows_f64`, and `rope_f64`.
+- Added scalar TezzNative fallbacks behind runtime builtin calls so unsupported
+  native backends fail back to a deterministic CPU path.
+- Added runtime/VM support for f64 primitive writes and memory tagging so
+  builtin outputs reload as floating-point values in bytecode paths.
+- Added Windows/Linux x64 native fallback mapping for the new runtime calls.
+- Promoted `llm_core` into first-party package metadata and registry locks.
+- Added `tests/conformance/stdlib/llm_core_f64.tn` for small matmul, softmax,
+  RMSNorm, and RoPE correctness.
+- Added `docs/LLM_PRODUCTION_PATH.md` to keep the public claim boundary honest.
+
+Next production gaps:
+
+1. Add f32 kernels with the same API shape.
+2. Add f16/bf16 storage lanes with f32 accumulation.
+3. Add int8/uint8 and lower-bit quantized matmul.
+4. Add tensor descriptors for dtype, shape, stride, device, and alignment.
+5. Add mmap/model-load fixtures for a tiny frozen checkpoint.
+6. Add tokenizer known-answer fixtures.
+7. Add KV-cache and streaming decode memory rules.
+8. Add GPU/NPU backend gates only where a real backend executes the kernels.
+9. Add latency, throughput, memory, and numerical accuracy benchmarks.
+10. Add a tiny end-to-end decoder fixture before claiming LLM inference support.
+
+Promotion rule:
+
+- `llm_core` can move toward stable only when dtype coverage, model IO,
+  tokenizer, backend fallback policy, and benchmark gates are source-visible.
+- Broad production LLM claims must remain blocked until the promotion rule is
+  satisfied.
+
 ## CI Matrix
 
 Minimum CI before claiming a stable release:

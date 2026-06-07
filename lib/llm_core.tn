@@ -1,0 +1,205 @@
+// llm_core: stable CPU fallback primitives for transformer inference.
+//
+// TezzNative `float` is ABI f64 today. These APIs are named f64 on purpose so
+// model code does not confuse them with f32/f16/bf16 lanes.
+
+import "math"
+
+extern fn tezz_ai_matmul_f64(out:*float, a:*float, b:*float, m:int, n:int, k:int) -> int
+extern fn tezz_ai_rmsnorm_rows_f64(out:*float, x:*float, weight:*float, rows:int, cols:int, eps:float) -> int
+extern fn tezz_ai_softmax_rows_f64(out:*float, x:*float, rows:int, cols:int) -> int
+extern fn tezz_ai_rope_f64(q:*float, k:*float, pos:int, dim:int, base:float) -> int
+
+fn f64_slot_bytes() -> int:
+  ret 8
+
+fn _valid_matmul(m:int, n:int, k:int) -> int:
+  if m <= 0 || n <= 0 || k <= 0:
+    ret 0
+  ret 1
+
+fn _valid_rows_cols(rows:int, cols:int) -> int:
+  if rows <= 0 || cols <= 0:
+    ret 0
+  ret 1
+
+fn matmul_f64_scalar(out:*float, a:*float, b:*float, m:int, n:int, k:int) -> int:
+  if out == 0 as *float || a == 0 as *float || b == 0 as *float:
+    ret 0 - 1
+  if _valid_matmul(m, n, k) == 0:
+    ret 0 - 1
+
+  row:int = 0
+  while row < m:
+    col:int = 0
+    while col < n:
+      acc:float = 0.0
+      p:int = 0
+      while p < k:
+        unsafe:
+          acc = acc + a[row * k + p] * b[p * n + col]
+        p = p + 1
+      unsafe:
+        out[row * n + col] = acc
+      col = col + 1
+    row = row + 1
+  ret 0
+
+fn matmul_f64(out:*float, a:*float, b:*float, m:int, n:int, k:int) -> int:
+  if out == 0 as *float || a == 0 as *float || b == 0 as *float:
+    ret 0 - 1
+  if _valid_matmul(m, n, k) == 0:
+    ret 0 - 1
+
+  rc:int = tezz_ai_matmul_f64(out, a, b, m, n, k)
+  if rc == 0:
+    ret 0
+  ret matmul_f64_scalar(out, a, b, m, n, k)
+
+fn rmsnorm_rows_f64_scalar(out:*float, x:*float, weight:*float, rows:int, cols:int, eps:float) -> int:
+  if out == 0 as *float || x == 0 as *float:
+    ret 0 - 1
+  if _valid_rows_cols(rows, cols) == 0:
+    ret 0 - 1
+  if eps <= 0.0:
+    eps = 1.0e-05
+
+  r:int = 0
+  while r < rows:
+    sum_sq:float = 0.0
+    c:int = 0
+    while c < cols:
+      v:float = 0.0
+      unsafe:
+        v = x[r * cols + c]
+      sum_sq = sum_sq + v * v
+      c = c + 1
+
+    inv:float = 1.0 / math.sqrt(sum_sq / (cols as float) + eps)
+    c = 0
+    while c < cols:
+      xv:float = 0.0
+      wv:float = 1.0
+      unsafe:
+        xv = x[r * cols + c]
+        if weight != 0 as *float:
+          wv = weight[c]
+        out[r * cols + c] = xv * inv * wv
+      c = c + 1
+    r = r + 1
+  ret 0
+
+fn rmsnorm_rows_f64(out:*float, x:*float, weight:*float, rows:int, cols:int, eps:float) -> int:
+  if out == 0 as *float || x == 0 as *float:
+    ret 0 - 1
+  if _valid_rows_cols(rows, cols) == 0:
+    ret 0 - 1
+
+  rc:int = tezz_ai_rmsnorm_rows_f64(out, x, weight, rows, cols, eps)
+  if rc == 0:
+    ret 0
+  ret rmsnorm_rows_f64_scalar(out, x, weight, rows, cols, eps)
+
+fn softmax_rows_f64_scalar(out:*float, x:*float, rows:int, cols:int) -> int:
+  if out == 0 as *float || x == 0 as *float:
+    ret 0 - 1
+  if _valid_rows_cols(rows, cols) == 0:
+    ret 0 - 1
+
+  r:int = 0
+  while r < rows:
+    maxv:float = 0.0
+    unsafe:
+      maxv = x[r * cols]
+    c:int = 1
+    while c < cols:
+      v:float = 0.0
+      unsafe:
+        v = x[r * cols + c]
+      if v > maxv:
+        maxv = v
+      c = c + 1
+
+    sum:float = 0.0
+    c = 0
+    while c < cols:
+      ev:float = 0.0
+      unsafe:
+        ev = math.exp(x[r * cols + c] - maxv)
+        out[r * cols + c] = ev
+      sum = sum + ev
+      c = c + 1
+
+    if sum <= 0.0:
+      uniform:float = 1.0 / (cols as float)
+      c = 0
+      while c < cols:
+        unsafe:
+          out[r * cols + c] = uniform
+        c = c + 1
+    else:
+      inv:float = 1.0 / sum
+      c = 0
+      while c < cols:
+        unsafe:
+          out[r * cols + c] = out[r * cols + c] * inv
+        c = c + 1
+    r = r + 1
+  ret 0
+
+fn softmax_rows_f64(out:*float, x:*float, rows:int, cols:int) -> int:
+  if out == 0 as *float || x == 0 as *float:
+    ret 0 - 1
+  if _valid_rows_cols(rows, cols) == 0:
+    ret 0 - 1
+
+  rc:int = tezz_ai_softmax_rows_f64(out, x, rows, cols)
+  if rc == 0:
+    ret 0
+  ret softmax_rows_f64_scalar(out, x, rows, cols)
+
+fn rope_f64_scalar(q:*float, k:*float, pos:int, dim:int, base:float) -> int:
+  if q == 0 as *float || k == 0 as *float:
+    ret 0 - 1
+  if dim <= 0 || (dim & 1) != 0:
+    ret 0 - 1
+  if pos == 0:
+    ret 0
+  if base <= 1.0:
+    base = 10000.0
+
+  log_base:float = math.log(base)
+  i:int = 0
+  while i < dim:
+    freq:float = math.exp((0.0 - log_base) * ((i as float) / (dim as float)))
+    angle:float = (pos as float) * freq
+    cc:float = math.cos(angle)
+    ss:float = math.sin(angle)
+    q0:float = 0.0
+    q1:float = 0.0
+    k0:float = 0.0
+    k1:float = 0.0
+    unsafe:
+      q0 = q[i]
+      q1 = q[i + 1]
+      k0 = k[i]
+      k1 = k[i + 1]
+      q[i] = q0 * cc - q1 * ss
+      q[i + 1] = q0 * ss + q1 * cc
+      k[i] = k0 * cc - k1 * ss
+      k[i + 1] = k0 * ss + k1 * cc
+    i = i + 2
+  ret 0
+
+fn rope_f64(q:*float, k:*float, pos:int, dim:int, base:float) -> int:
+  if q == 0 as *float || k == 0 as *float:
+    ret 0 - 1
+  if dim <= 0 || (dim & 1) != 0:
+    ret 0 - 1
+  if pos == 0:
+    ret 0
+
+  rc:int = tezz_ai_rope_f64(q, k, pos, dim, base)
+  if rc == 0:
+    ret 0
+  ret rope_f64_scalar(q, k, pos, dim, base)

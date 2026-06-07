@@ -8535,6 +8535,128 @@ fn write_registry(out_path:str) -> int:
   free(mod)
   ret 0
 
+fn append_buf_str(out:*char, w:int, s:str) -> int:
+  if out == 0 || s == 0:
+    ret w
+  j:int = 0
+  while s[j] != 0:
+    out[w] = s[j]
+    w = w + 1
+    j = j + 1
+  ret w
+
+fn write_registry_for_publish(out_path:str) -> int:
+  mod:str = io.read_all("tezz.mod")
+  if mod == 0:
+    say "missing tezz.mod"
+    ret 0 - 1
+
+  root:str = project_module_root(mod)
+  reglib:str = mod_get_value(mod, "registry_lib")
+  reg:str = 0 as str
+  base:str = reglib
+  own_base:int = 0
+  if base == 0:
+    reg = mod_get_value(mod, "registry")
+    if reg != 0:
+      base = url_dir(reg)
+      own_base = 1
+  if base == 0:
+    base = "https://tn.tezzcorp.com/lib/"
+    own_base = 0
+
+  ensure_dir("build")
+  cap:int = 262144
+  out:*char = (*char)malloc(cap)
+  if out == 0:
+    ret 0 - 1
+
+  w:int = 0
+  line_n:int = 0
+  i:int = 0
+  line:int = 0
+  while 1:
+    c:int = mod[i] as int
+    if c == 0 || c == 10:
+      end:int = i
+      s:int = line
+      while s < end && (mod[s] == 32 || mod[s] == 9):
+        s = s + 1
+      if starts_with_at(mod, s, "dep.") != 0:
+        s = s + 4
+        ns:int = s
+        while s < end && mod[s] != 32 && mod[s] != 9 && mod[s] != 61:
+          s = s + 1
+        ne:int = s
+        while s < end && mod[s] != 61:
+          s = s + 1
+        if s < end && mod[s] == 61:
+          s = s + 1
+          while s < end && (mod[s] == 32 || mod[s] == 9):
+            s = s + 1
+          vs:int = s
+          ve:int = end
+          while ve > vs && (mod[ve-1] == 32 || mod[ve-1] == 9 || mod[ve-1] == 13):
+            ve = ve - 1
+          name:str = substr_dup(mod, ns, ne)
+          ver:str = substr_dup(mod, vs, ve)
+          dep_path:str = dep_module_path(root, name)
+          crc:int = crc32_source_file(dep_path)
+          crc_hex:str = hex8(crc)
+          base2:str = base
+          own_base2:int = 0
+          bl:int = len(base)
+          if bl > 0 && base[bl-1] != 47:
+            base2 = str_join2(base, "/")
+            own_base2 = 1
+          url1:str = str_join2(base2, name)
+          url2:str = str_join2(url1, ".tn")
+
+          w = append_buf_str(out, w, name)
+          out[w] = 64 as char
+          w = w + 1
+          w = append_buf_str(out, w, ver)
+          out[w] = 32 as char
+          w = w + 1
+          w = append_buf_str(out, w, url2)
+          out[w] = 32 as char
+          w = w + 1
+          w = append_buf_str(out, w, crc_hex)
+          out[w] = 10 as char
+          w = w + 1
+          line_n = line_n + 1
+
+          free(name)
+          free(ver)
+          free(dep_path)
+          free(crc_hex)
+          free(url1)
+          free(url2)
+          if own_base2 != 0:
+            free(base2)
+      if c == 0:
+        break
+      line = i + 1
+    i = i + 1
+  out[w] = 0 as char
+
+  meta:str = provenance_meta_line("registry-meta", out, line_n)
+  full:str = str_join3(meta, "\n", out)
+  io.write_all(out_path, full)
+  free(full)
+  free(meta)
+  free(out)
+  if own_base != 0 && base != 0:
+    free(base)
+  if reglib != 0:
+    free(reglib)
+  if reg != 0:
+    free(reg)
+  if root != 0:
+    free(root)
+  free(mod)
+  ret 0
+
 fn cmd_registry() -> int:
   out_path:str = "build/registry.tnx"
   if user_args_count() >= 2:
@@ -8545,21 +8667,16 @@ fn cmd_publish() -> int:
   if path_exists("tezz.mod") == 0:
     say "publish: missing tezz.mod"
     ret 0 - 1
+  if path_exists("tezz.lock") == 0:
+    say "publish: missing tezz.lock (run: tezz lock)"
+    ret 0 - 1
+
   publish_out:str = "build/registry.tnx"
   publish_out_owned:int = 0
   if user_args_count() >= 2:
     publish_out = str_join2("", arg(1))
     publish_out_owned = 1
-  if path_exists("tezz.lock") != 0:
-    remove("tezz.lock")
-  lock_rc:int = write_lock("tezz.lock")
-  if lock_rc != 0:
-    if path_exists("tezz.lock") == 0:
-      if publish_out_owned != 0:
-        free(publish_out)
-      say "publish: lock generation failed"
-      ret 0 - 1
-  registry_rc:int = write_registry(publish_out)
+  registry_rc:int = write_registry_for_publish(publish_out)
   if registry_rc != 0:
     if path_exists(publish_out) == 0:
       if publish_out_owned != 0:

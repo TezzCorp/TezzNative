@@ -27,7 +27,7 @@ The gate covers:
 | `tezz remove <name>` | Gated | Removes the dependency from `tezz.mod`, rewrites `tezz.lock` with fresh metadata, and deletes the local `lib/<name>.tn` copy when present. |
 | `tezz update` | Gated | Keeps the SDK updater path explicit: `--check`, `--install`, `--reinstall`, and `--uninstall`. Package version updates should be expressed through `tezz add <name@version>` followed by `tezz lock`. |
 | `tezz lock` | Gated | Rebuilds `tezz.lock` from `tezz.mod` and local package sources in deterministic sorted order. |
-| `tezz publish [out_path]` | Gated | Regenerates `tezz.lock`, writes registry metadata, and reports `publish: registry metadata ready`. Uploading the registry is a release-site operation, not an implicit network side effect. |
+| `tezz publish [out_path]` | Gated | Requires an existing `tezz.lock`, writes registry metadata from `tezz.mod` and local package sources, and reports `publish: registry metadata ready`. Run `tezz lock` first when dependencies change. Uploading the registry is a release-site operation, not an implicit network side effect. |
 | `tezz test` | Gated | Keeps existing conformance, stdlib, tooling, runtime, and native lanes available from the tool. |
 | `tezz build --release` | Gated | Builds with release defaults and refreshes the dependency lock when `tezz.mod` exists. |
 

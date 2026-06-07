@@ -1,4 +1,4 @@
-# lock-meta v1 lines=45 payload=0085B9CE key=none sig=none
+# lock-meta v1 lines=46 payload=365003E3 key=none sig=none
 arena@0.1.0 7B42E28B https://tn.tezzcorp.com/download/sdk/lib/arena.tn
 color@0.1.0 10472682 https://tn.tezzcorp.com/download/sdk/lib/color.tn
 cyber@0.1.0 0E0374EE https://tn.tezzcorp.com/download/sdk/lib/cyber.tn
@@ -11,6 +11,7 @@ gui_win@0.1.0 3FCB4390 https://tn.tezzcorp.com/download/sdk/lib/gui_win.tn
 intrin@0.1.0 4D2A6999 https://tn.tezzcorp.com/download/sdk/lib/intrin.tn
 io@0.1.0 0669EF63 https://tn.tezzcorp.com/download/sdk/lib/io.tn
 llm@0.1.0 207FE104 https://tn.tezzcorp.com/download/sdk/lib/llm.tn
+llm_core@0.1.0 23B197A5 https://tn.tezzcorp.com/download/sdk/lib/llm_core.tn
 math@0.1.0 5C1ECAA3 https://tn.tezzcorp.com/download/sdk/lib/math.tn
 net@0.1.0 6F504BA1 https://tn.tezzcorp.com/download/sdk/lib/net.tn
 nn@0.1.0 5613EA7E https://tn.tezzcorp.com/download/sdk/lib/nn.tn
