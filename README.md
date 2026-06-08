@@ -39,7 +39,7 @@ than the full repository surface.
 | Package trust | Stable/Beta (gated first-party set) | `tezz init/add/remove/update/lock/publish/test/build --release`, SemVer package pins, lock/registry parity, package checksums, generated package inventory docs, and first-party package promotion rules are gated |
 | Stable stdlib candidates | Stable/Beta (edge gated) | Core imports plus native math, string, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable path, vector, arena, process run/output capture, `time` clock/sleep/UTC/local-date smoke, and focused stdlib edge gates for math, strings, vectors, and arenas |
 | Networking/TLS/GUI/DB | Beta | `net` URL, DNS endpoint, HTTP parser, route, auth/cookie, chunked response helpers, keep-alive `Content-Length`/chunked response reads, Windows/Linux x64 TCP loopback send/recv, IPv4 literal bind hosts, localhost TCP/UDP connect wrappers, socket options, and local HTTP client/server route helpers are smoke gated; TLS, public-network HTTP, DNS-backed sockets, and wider backend matrix testing are still needed |
-| GPU/NPU/LLM/kernel modules | Experimental | `llm_core` now provides a gated f64 CPU transformer-primitive lane for tiny inference experiments; production LLM training/serving still needs dtype, tensor, model IO, GPU/NPU, and benchmark gates |
+| GPU/NPU/LLM/kernel modules | Experimental | `llm_core` now provides gated f64 CPU transformer primitives plus signed int8-weight matmul for tiny inference experiments; production LLM training/serving still needs dtype, tensor, model IO, GPU/NPU, and benchmark gates |
 
 See `docs/STABILITY.md` for the full stability map.
 See `docs/PLATFORM_SUPPORT.md` for target support and

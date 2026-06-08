@@ -806,13 +806,16 @@ Current answer:
 
 - TezzNative cannot yet build, train, and serve a production-scale LLM from
   scratch.
-- TezzNative can now host the first f64 CPU transformer primitive lane for
-  correctness experiments and backend validation.
+- TezzNative can now host the first f64 CPU transformer primitive lane and a
+  signed int8-weight matmul lane for correctness experiments and backend
+  validation.
 
 Delivered:
 
 - Added `lib/llm_core.tn` with explicit f64 transformer primitives:
   `matmul_f64`, `rmsnorm_rows_f64`, `softmax_rows_f64`, and `rope_f64`.
+- Added `matmul_i8_f64` for signed int8 quantized weights, optional
+  per-output-column f64 scales, and f64 accumulation.
 - Added scalar TezzNative fallbacks behind runtime builtin calls so unsupported
   native backends fail back to a deterministic CPU path.
 - Added runtime/VM support for f64 primitive writes and memory tagging so
@@ -821,13 +824,16 @@ Delivered:
 - Promoted `llm_core` into first-party package metadata and registry locks.
 - Added `tests/conformance/stdlib/llm_core_f64.tn` for small matmul, softmax,
   RMSNorm, and RoPE correctness.
+- Added `tests/conformance/stdlib/llm_core_quant_i8.tn` for scaled,
+  unscaled, runtime, and scalar fallback int8 matmul correctness.
 - Added `docs/LLM_PRODUCTION_PATH.md` to keep the public claim boundary honest.
 
 Next production gaps:
 
 1. Add f32 kernels with the same API shape.
 2. Add f16/bf16 storage lanes with f32 accumulation.
-3. Add int8/uint8 and lower-bit quantized matmul.
+3. Extend quantized matmul to uint8, lower-bit packing, and calibration
+   metadata.
 4. Add tensor descriptors for dtype, shape, stride, device, and alignment.
 5. Add mmap/model-load fixtures for a tiny frozen checkpoint.
 6. Add tokenizer known-answer fixtures.

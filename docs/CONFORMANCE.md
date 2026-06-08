@@ -14,7 +14,7 @@ compiler regressions can be diagnosed quickly.
 | Typecheck valid | `tests/conformance/typecheck/valid` | Function calls/returns, pointer-array roundtrip, and struct value flow. |
 | Typecheck invalid | `tests/conformance/typecheck/invalid` | Array index type errors, return value mismatch, and struct field assignment mismatch. |
 | Diagnostics | `tests/conformance/invalid` plus `tests/conformance/diagnostics` | Named unknown symbols, wrong arity, unsafe address-of, field errors, and stable diagnostic snippets. |
-| Stdlib import | `tests/conformance/stdlib` | Stable-candidate module import smoke plus focused `llm_core` f64 primitive checking. |
+| Stdlib import | `tests/conformance/stdlib` | Stable-candidate module import smoke plus focused `llm_core` f64 and int8-quantized primitive checking. |
 | Developer experience | `tests/conformance/run-dx.*` plus `tests/conformance/dx` | Actionable diagnostics, formatter idempotence, lint rule IDs, examples, LSP source health, and VS Code snippet drift checks. |
 | Package trust | `tests/conformance/run-package-trust.*` | Public `tezz` launchers/tool source, SemVer package metadata, lock/registry parity, package checksums, generated package docs, and first-party package target docs. |
 | Python bridge | `tests/conformance/run-python-bridge.*` plus `tests/conformance/python_bridge` | `tezzc pyext` command generation, CPython wrapper contents, primitive/buffer mapping, ownership docs, and wrapped/skipped manifests. |
@@ -22,9 +22,9 @@ compiler regressions can be diagnosed quickly.
 | Native smoke | `tests/conformance/run-native-smoke.*` | Native build, verify, run, and stdout comparison on Windows/Linux x64. |
 | Native reliability | `tests/conformance/run-native-reliability.*` | Byte-reproducible native output and fail-closed unsupported-target behavior. |
 
-The current stable-core runner gates 28 checks across Windows and Linux:
+The current stable-core runner gates 29 checks across Windows and Linux:
 
-- 15 valid programs must pass `tezzc check`.
+- 16 valid programs must pass `tezzc check`.
 - 13 invalid programs must fail with deterministic diagnostic snippets.
 
 ## Commands
@@ -44,7 +44,7 @@ bash tests/conformance/run.sh ./TezzNative-language/bin/tezzc-linux-x64
 Both runners print suite-qualified result names and end with:
 
 ```text
-CONFORMANCE_SUMMARY passed=28 failed=0
+CONFORMANCE_SUMMARY passed=29 failed=0
 ```
 
 Run the developer experience gate:

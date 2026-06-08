@@ -1,0 +1,90 @@
+import "llm_core"
+
+fn near(actual:float, expected:float, eps:float) -> int:
+  diff:float = actual - expected
+  if diff < 0.0:
+    diff = 0.0 - diff
+  if diff <= eps:
+    ret 1
+  ret 0
+
+fn check_scaled(out:*float) -> int:
+  unsafe:
+    if near(out[0], 9.5, 1.0e-09) == 0:
+      ret 1
+    if near(out[1], 5.5, 1.0e-09) == 0:
+      ret 2
+    if near(out[2], 21.5, 1.0e-09) == 0:
+      ret 3
+    if near(out[3], 12.5, 1.0e-09) == 0:
+      ret 4
+  ret 0
+
+fn check_unscaled(out:*float) -> int:
+  unsafe:
+    if near(out[0], 19.0, 1.0e-09) == 0:
+      ret 1
+    if near(out[1], 22.0, 1.0e-09) == 0:
+      ret 2
+    if near(out[2], 43.0, 1.0e-09) == 0:
+      ret 3
+    if near(out[3], 50.0, 1.0e-09) == 0:
+      ret 4
+  ret 0
+
+fn main() -> int:
+  a:[float;4]
+  weights:[i8;4]
+  scales:[float;2]
+  out:[float;4]
+  scalar_out:[float;4]
+
+  a[0] = 1.0
+  a[1] = 2.0
+  a[2] = 3.0
+  a[3] = 4.0
+
+  weights[0] = 5 as i8
+  weights[1] = 6 as i8
+  weights[2] = 7 as i8
+  weights[3] = 8 as i8
+
+  scales[0] = 0.5
+  scales[1] = 0.25
+
+  if llm_core.matmul_i8_f64(&out[0], &a[0], &weights[0], &scales[0], 2, 2, 2) != 0:
+    ret 1
+  r:int = check_scaled(&out[0])
+  if r != 0:
+    ret 10 + r
+
+  if llm_core.matmul_i8_f64(&out[0], &a[0], &weights[0], 0 as *float, 2, 2, 2) != 0:
+    ret 20
+  r = check_unscaled(&out[0])
+  if r != 0:
+    ret 20 + r
+
+  if llm_core.matmul_i8_f64_scalar(&scalar_out[0], &a[0], &weights[0], &scales[0], 2, 2, 2) != 0:
+    ret 30
+  r = check_scaled(&scalar_out[0])
+  if r != 0:
+    ret 30 + r
+
+  weights[0] = 255 as i8
+  weights[1] = 2 as i8
+  weights[2] = 3 as i8
+  weights[3] = 252 as i8
+  scales[0] = 1.0
+  scales[1] = 0.5
+  if llm_core.matmul_i8_f64(&out[0], &a[0], &weights[0], &scales[0], 2, 2, 2) != 0:
+    ret 40
+  if near(out[0], 5.0, 1.0e-09) == 0:
+    ret 41
+  if near(out[1], 0.0 - 3.0, 1.0e-09) == 0:
+    ret 42
+  if near(out[2], 9.0, 1.0e-09) == 0:
+    ret 43
+  if near(out[3], 0.0 - 5.0, 1.0e-09) == 0:
+    ret 44
+
+  ret 0

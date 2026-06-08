@@ -109,6 +109,7 @@ $DefaultInclude = @(
   "download/sdk/tests/conformance/run-native-smoke.sh",
   "download/sdk/tests/conformance/abi/starter_abi.tn",
   "download/sdk/tests/conformance/stdlib/llm_core_f64.tn",
+  "download/sdk/tests/conformance/stdlib/llm_core_quant_i8.tn",
   "download/sdk/tests/conformance/valid/integer_widths.tn",
   "download/sdk/tests/conformance/native/int_widths.tn",
   "download/sdk/tests/conformance/native/int_widths.stdout.txt",

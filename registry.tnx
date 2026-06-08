@@ -1,4 +1,4 @@
-# registry-meta v1 lines=46 payload=02A30F63 key=none sig=none
+# registry-meta v1 lines=46 payload=4557F7EF key=none sig=none
 arena@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/arena.tn 7B42E28B
 color@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/color.tn 10472682
 cyber@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/cyber.tn 0E0374EE
@@ -11,7 +11,7 @@ gui_win@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/gui_win.tn 3FCB4390
 intrin@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/intrin.tn 4D2A6999
 io@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/io.tn 0669EF63
 llm@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/llm.tn 207FE104
-llm_core@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/llm_core.tn 23B197A5
+llm_core@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/llm_core.tn 6DE89F1C
 math@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/math.tn 5C1ECAA3
 net@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/net.tn 6F504BA1
 nn@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/nn.tn 5613EA7E
