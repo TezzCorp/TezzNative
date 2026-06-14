@@ -37,6 +37,7 @@ changes.
 | Time/date runtime | Beta | Beta | Planned | `time` imports and native clock/sleep/UTC/local-date execution are gated on Windows/Linux x64. |
 | IO/path/process | Beta | Beta | Planned | Raw file read/write, File wrapper open/write/read-line/write-line/flush/seek/tell/close, BigFile chunk reads, StreamWriter flush/close behavior, portable `file_size_bytes`, file delete/rename, directory exists/make/remove, EOF/null guards, portable path helpers, direct `dir_list`, raw/public recursive listing and glob, and `proc_run`/`proc_out` have native smoke coverage on Windows/Linux x64. |
 | Networking | Beta | Beta | Planned | URL parsing, DNS endpoint helpers, HTTP parser/routing/auth/cookie utilities, chunked response decoding, keep-alive `Content-Length`/chunked response reads, Windows/Linux x64 TCP loopback send/recv, IPv4 literal socket bind hosts, localhost TCP/UDP connect wrappers, socket timeout/blocking options, and local HTTP client/server route helpers are smoke gated. DNS-backed sockets and public-network HTTP tests are still needed. |
+| Actor runtime | Beta foundation | Beta foundation | Planned | Local in-process actor systems, mailbox matching, supervisor restarts, node metadata with fail-closed remote sends, hot version tags, and OTP-style app helpers are native-smoke gated. Real scheduler-backed actors, node-to-node transport, and versioned module replacement are planned runtime gates. |
 | TLS | Beta | Preview | Planned | Linux builds without OpenSSL development headers expose unsupported TLS stubs until linked with a TLS backend. |
 | GUI | Beta | Experimental | Planned | Windows host modules are the clearest path today. |
 | TezzDB | Beta | Preview | Planned | Needs database consistency and WAL tests. |
@@ -64,3 +65,5 @@ A target should not move to Primary until:
 3. Publish exact binary names, hashes, and sizes for every download.
 4. Add target-specific notes to docs and download pages.
 5. Add macOS and ARM64 hosted gates before promoting those targets.
+6. Add scheduler, remote actor transport, and service-scale benchmarks before
+   promoting actor runtime claims beyond Beta foundation.

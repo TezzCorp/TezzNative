@@ -1,0 +1,536 @@
+// actor module: local actor/mailbox and OTP-style supervision foundation.
+//
+// This is the stable API shape for TezzNative actor work. The current
+// implementation is deterministic and in-process; future native runtimes can
+// replace the internals with real schedulers, IOCP/io_uring, and distribution.
+
+let ACTOR_OK:int = 0
+
+let ACTOR_STOPPED:int = 0
+let ACTOR_ALIVE:int = 1
+
+let ACTOR_RESTART_NEVER:int = 0
+let ACTOR_RESTART_PERMANENT:int = 1
+let ACTOR_RESTART_TRANSIENT:int = 2
+let ACTOR_RESTART_TEMPORARY:int = 3
+
+let ACTOR_SUPERVISOR_RESTARTED:int = 1
+let ACTOR_SUPERVISOR_STOPPED:int = 0
+
+struct ActorMessage:
+  kind:int
+  tag:int
+  from:int
+  to:int
+  a:int
+  b:int
+  c:int
+  payload:str
+
+struct Actor:
+  id:int
+  alive:int
+  parent:int
+  restart_policy:int
+  restart_count:int
+  max_restarts:int
+  mailbox_len:int
+  handled:int
+  name:str
+  module_name:str
+  version:int
+
+struct ActorNode:
+  id:int
+  name:str
+  host:str
+  port:int
+  local:int
+
+struct ActorSystem:
+  actors:*Actor
+  messages:*ActorMessage
+  nodes:*ActorNode
+  actor_cap:int
+  mailbox_cap:int
+  node_cap:int
+  actor_count:int
+  node_count:int
+  next_actor_id:int
+  next_node_id:int
+  dropped:int
+  hot_version:int
+
+struct OtpApp:
+  system:*ActorSystem
+  root:int
+  name:str
+  started:int
+
+fn ok() -> int:
+  ret ACTOR_OK
+
+fn err() -> int:
+  ret 0 - 1
+
+fn any() -> int:
+  ret 0 - 1
+
+fn alive() -> int:
+  ret ACTOR_ALIVE
+
+fn stopped() -> int:
+  ret ACTOR_STOPPED
+
+fn restart_never() -> int:
+  ret ACTOR_RESTART_NEVER
+
+fn restart_permanent() -> int:
+  ret ACTOR_RESTART_PERMANENT
+
+fn restart_transient() -> int:
+  ret ACTOR_RESTART_TRANSIENT
+
+fn restart_temporary() -> int:
+  ret ACTOR_RESTART_TEMPORARY
+
+fn remote_unsupported() -> int:
+  ret 0 - 7
+
+fn _actor_at(sys:*ActorSystem, idx:int) -> *Actor:
+  if sys == 0 || idx < 0 || idx == (*sys).actor_cap || idx > (*sys).actor_cap:
+    ret 0 as *Actor
+  unsafe:
+    ret (*sys).actors + idx
+
+fn _msg_at(sys:*ActorSystem, actor_idx:int, msg_idx:int) -> *ActorMessage:
+  if sys == 0 || actor_idx < 0 || msg_idx < 0:
+    ret 0 as *ActorMessage
+  if actor_idx == (*sys).actor_cap || actor_idx > (*sys).actor_cap:
+    ret 0 as *ActorMessage
+  if msg_idx == (*sys).mailbox_cap || msg_idx > (*sys).mailbox_cap:
+    ret 0 as *ActorMessage
+  unsafe:
+    ret (*sys).messages + actor_idx * (*sys).mailbox_cap + msg_idx
+
+fn _node_at(sys:*ActorSystem, idx:int) -> *ActorNode:
+  if sys == 0 || idx < 0 || idx == (*sys).node_cap || idx > (*sys).node_cap:
+    ret 0 as *ActorNode
+  unsafe:
+    ret (*sys).nodes + idx
+
+fn _clear_msg(m:*ActorMessage) -> int:
+  if m == 0:
+    ret 0 - 1
+  (*m).kind = 0
+  (*m).tag = 0
+  (*m).from = 0
+  (*m).to = 0
+  (*m).a = 0
+  (*m).b = 0
+  (*m).c = 0
+  (*m).payload = 0 as str
+  ret ACTOR_OK
+
+fn _copy_msg(dst:*ActorMessage, src:*ActorMessage) -> int:
+  if dst == 0 || src == 0:
+    ret 0 - 1
+  (*dst).kind = (*src).kind
+  (*dst).tag = (*src).tag
+  (*dst).from = (*src).from
+  (*dst).to = (*src).to
+  (*dst).a = (*src).a
+  (*dst).b = (*src).b
+  (*dst).c = (*src).c
+  (*dst).payload = (*src).payload
+  ret ACTOR_OK
+
+fn system_new(actor_cap:int, mailbox_cap:int, node_cap:int) -> *ActorSystem:
+  if actor_cap <= 0:
+    actor_cap = 16
+  if mailbox_cap <= 0:
+    mailbox_cap = 32
+  if node_cap <= 0:
+    node_cap = 4
+
+  sys:*ActorSystem = (*ActorSystem)malloc(sizeof(ActorSystem))
+  if sys == 0:
+    ret 0 as *ActorSystem
+
+  (*sys).actors = (*Actor)malloc(sizeof(Actor) * actor_cap)
+  (*sys).messages = (*ActorMessage)malloc(sizeof(ActorMessage) * actor_cap * mailbox_cap)
+  (*sys).nodes = (*ActorNode)malloc(sizeof(ActorNode) * node_cap)
+  if (*sys).actors == 0 || (*sys).messages == 0 || (*sys).nodes == 0:
+    if (*sys).actors != 0:
+      free((*sys).actors)
+    if (*sys).messages != 0:
+      free((*sys).messages)
+    if (*sys).nodes != 0:
+      free((*sys).nodes)
+    free(sys)
+    ret 0 as *ActorSystem
+
+  (*sys).actor_cap = actor_cap
+  (*sys).mailbox_cap = mailbox_cap
+  (*sys).node_cap = node_cap
+  (*sys).actor_count = 0
+  (*sys).node_count = 0
+  (*sys).next_actor_id = 1
+  (*sys).next_node_id = 1
+  (*sys).dropped = 0
+  (*sys).hot_version = 1
+
+  i:int = 0
+  while i < actor_cap:
+    a:*Actor = _actor_at(sys, i)
+    (*a).id = 0
+    (*a).alive = ACTOR_STOPPED
+    (*a).parent = 0
+    (*a).restart_policy = ACTOR_RESTART_PERMANENT
+    (*a).restart_count = 0
+    (*a).max_restarts = 3
+    (*a).mailbox_len = 0
+    (*a).handled = 0
+    (*a).name = 0 as str
+    (*a).module_name = 0 as str
+    (*a).version = 1
+    i = i + 1
+
+  total:int = actor_cap * mailbox_cap
+  i = 0
+  while i < total:
+    unsafe:
+      _clear_msg((*sys).messages + i)
+    i = i + 1
+
+  ret sys
+
+fn system_free(sys:*ActorSystem) -> int:
+  if sys == 0:
+    ret 0 - 1
+  if (*sys).actors != 0:
+    free((*sys).actors)
+  if (*sys).messages != 0:
+    free((*sys).messages)
+  if (*sys).nodes != 0:
+    free((*sys).nodes)
+  free(sys)
+  ret ACTOR_OK
+
+fn find_index(sys:*ActorSystem, actor_id:int) -> int:
+  if sys == 0 || actor_id <= 0:
+    ret 0 - 1
+  i:int = 0
+  while i < (*sys).actor_count:
+    a:*Actor = _actor_at(sys, i)
+    if (*a).id == actor_id:
+      ret i
+    i = i + 1
+  ret 0 - 1
+
+fn spawn(sys:*ActorSystem, name:str) -> int:
+  if sys == 0 || (*sys).actor_count == (*sys).actor_cap || (*sys).actor_count > (*sys).actor_cap:
+    ret 0 - 1
+  idx:int = (*sys).actor_count
+  a:*Actor = _actor_at(sys, idx)
+  id:int = (*sys).next_actor_id
+  (*a).id = id
+  (*a).alive = ACTOR_ALIVE
+  (*a).parent = 0
+  (*a).restart_policy = ACTOR_RESTART_PERMANENT
+  (*a).restart_count = 0
+  (*a).max_restarts = 3
+  (*a).mailbox_len = 0
+  (*a).handled = 0
+  (*a).name = name
+  (*a).module_name = 0 as str
+  (*a).version = (*sys).hot_version
+  (*sys).actor_count = (*sys).actor_count + 1
+  (*sys).next_actor_id = (*sys).next_actor_id + 1
+  ret id
+
+fn is_alive(sys:*ActorSystem, actor_id:int) -> int:
+  idx:int = find_index(sys, actor_id)
+  if idx < 0:
+    ret 0
+  a:*Actor = _actor_at(sys, idx)
+  ret (*a).alive
+
+fn stop(sys:*ActorSystem, actor_id:int) -> int:
+  idx:int = find_index(sys, actor_id)
+  if idx < 0:
+    ret 0 - 1
+  a:*Actor = _actor_at(sys, idx)
+  (*a).alive = ACTOR_STOPPED
+  ret ACTOR_OK
+
+fn link_parent(sys:*ActorSystem, child_id:int, parent_id:int) -> int:
+  cidx:int = find_index(sys, child_id)
+  if cidx < 0:
+    ret 0 - 1
+  if parent_id != 0 && find_index(sys, parent_id) < 0:
+    ret 0 - 1
+  child:*Actor = _actor_at(sys, cidx)
+  (*child).parent = parent_id
+  ret ACTOR_OK
+
+fn set_restart_policy(sys:*ActorSystem, actor_id:int, policy:int, max_restarts:int) -> int:
+  idx:int = find_index(sys, actor_id)
+  if idx < 0:
+    ret 0 - 1
+  if max_restarts < 0:
+    max_restarts = 0
+  a:*Actor = _actor_at(sys, idx)
+  (*a).restart_policy = policy
+  (*a).max_restarts = max_restarts
+  ret ACTOR_OK
+
+fn send_from(sys:*ActorSystem, from_id:int, to_id:int, kind:int, tag:int, a0:int, b0:int, c0:int, payload:str) -> int:
+  idx:int = find_index(sys, to_id)
+  if idx < 0:
+    ret 0 - 1
+  actor:*Actor = _actor_at(sys, idx)
+  if (*actor).alive == ACTOR_STOPPED:
+    ret 0 - 1
+  cur_len:int = (*actor).mailbox_len
+  cap:int = (*sys).mailbox_cap
+  if cur_len == cap:
+    (*sys).dropped = (*sys).dropped + 1
+    ret 0 - 1
+  if cur_len > cap:
+    (*sys).dropped = (*sys).dropped + 1
+    ret 0 - 1
+  m:*ActorMessage = _msg_at(sys, idx, cur_len)
+  (*m).kind = kind
+  (*m).tag = tag
+  (*m).from = from_id
+  (*m).to = to_id
+  (*m).a = a0
+  (*m).b = b0
+  (*m).c = c0
+  (*m).payload = payload
+  (*actor).mailbox_len = cur_len + 1
+  ret ACTOR_OK
+
+fn send(sys:*ActorSystem, to_id:int, kind:int, tag:int, a0:int, b0:int, c0:int) -> int:
+  ret send_from(sys, 0, to_id, kind, tag, a0, b0, c0, 0 as str)
+
+fn send_text(sys:*ActorSystem, from_id:int, to_id:int, kind:int, tag:int, payload:str) -> int:
+  ret send_from(sys, from_id, to_id, kind, tag, 0, 0, 0, payload)
+
+fn mailbox_len(sys:*ActorSystem, actor_id:int) -> int:
+  idx:int = find_index(sys, actor_id)
+  if idx < 0:
+    ret 0
+  a:*Actor = _actor_at(sys, idx)
+  ret (*a).mailbox_len
+
+fn dropped_count(sys:*ActorSystem) -> int:
+  if sys == 0:
+    ret 0
+  ret (*sys).dropped
+
+fn mailbox_capacity(sys:*ActorSystem) -> int:
+  if sys == 0:
+    ret 0
+  ret (*sys).mailbox_cap
+
+fn _remove_msg_at(sys:*ActorSystem, actor_idx:int, msg_idx:int) -> int:
+  actor:*Actor = _actor_at(sys, actor_idx)
+  if actor == 0 || msg_idx < 0 || msg_idx >= (*actor).mailbox_len:
+    ret 0 - 1
+  i:int = msg_idx
+  while i < (*actor).mailbox_len - 1:
+    dst:*ActorMessage = _msg_at(sys, actor_idx, i)
+    src:*ActorMessage = _msg_at(sys, actor_idx, i + 1)
+    _copy_msg(dst, src)
+    i = i + 1
+  last:*ActorMessage = _msg_at(sys, actor_idx, (*actor).mailbox_len - 1)
+  _clear_msg(last)
+  (*actor).mailbox_len = (*actor).mailbox_len - 1
+  (*actor).handled = (*actor).handled + 1
+  ret ACTOR_OK
+
+fn receive(sys:*ActorSystem, actor_id:int, out:*ActorMessage) -> int:
+  idx:int = find_index(sys, actor_id)
+  if idx < 0 || out == 0:
+    ret 0 - 1
+  actor:*Actor = _actor_at(sys, idx)
+  if (*actor).mailbox_len <= 0:
+    ret 0 - 1
+  first:*ActorMessage = _msg_at(sys, idx, 0)
+  _copy_msg(out, first)
+  ret _remove_msg_at(sys, idx, 0)
+
+fn _matches(m:*ActorMessage, kind:int, tag:int, from_id:int) -> int:
+  if m == 0:
+    ret 0
+  any_code:int = 0 - 1
+  if kind != any_code && (*m).kind != kind:
+    ret 0
+  if tag != any_code && (*m).tag != tag:
+    ret 0
+  if from_id != any_code && (*m).from != from_id:
+    ret 0
+  ret 1
+
+fn receive_match(sys:*ActorSystem, actor_id:int, kind:int, tag:int, from_id:int, out:*ActorMessage) -> int:
+  idx:int = find_index(sys, actor_id)
+  if idx < 0 || out == 0:
+    ret 0 - 1
+  actor:*Actor = _actor_at(sys, idx)
+  i:int = 0
+  while i < (*actor).mailbox_len:
+    m:*ActorMessage = _msg_at(sys, idx, i)
+    if _matches(m, kind, tag, from_id) != 0:
+      _copy_msg(out, m)
+      ret _remove_msg_at(sys, idx, i)
+    i = i + 1
+  ret 0 - 1
+
+fn mark_failed(sys:*ActorSystem, actor_id:int) -> int:
+  idx:int = find_index(sys, actor_id)
+  if idx < 0:
+    ret 0 - 1
+  a:*Actor = _actor_at(sys, idx)
+  (*a).alive = ACTOR_STOPPED
+  if (*a).restart_policy == ACTOR_RESTART_NEVER || (*a).restart_policy == ACTOR_RESTART_TEMPORARY:
+    ret ACTOR_SUPERVISOR_STOPPED
+  if (*a).restart_count >= (*a).max_restarts:
+    ret ACTOR_SUPERVISOR_STOPPED
+  (*a).restart_count = (*a).restart_count + 1
+  (*a).alive = ACTOR_ALIVE
+  (*a).mailbox_len = 0
+  ret ACTOR_SUPERVISOR_RESTARTED
+
+fn supervise(sys:*ActorSystem, supervisor_id:int) -> int:
+  if sys == 0 || supervisor_id <= 0:
+    ret 0 - 1
+  restarted:int = 0
+  i:int = 0
+  while i < (*sys).actor_count:
+    a:*Actor = _actor_at(sys, i)
+    if (*a).parent == supervisor_id && (*a).alive == ACTOR_STOPPED:
+      if mark_failed(sys, (*a).id) == ACTOR_SUPERVISOR_RESTARTED:
+        restarted = restarted + 1
+    i = i + 1
+  ret restarted
+
+fn restart_count(sys:*ActorSystem, actor_id:int) -> int:
+  idx:int = find_index(sys, actor_id)
+  if idx < 0:
+    ret 0
+  a:*Actor = _actor_at(sys, idx)
+  ret (*a).restart_count
+
+fn node_add(sys:*ActorSystem, name:str, host:str, port:int, local:int) -> int:
+  if sys == 0 || (*sys).node_count == (*sys).node_cap || (*sys).node_count > (*sys).node_cap:
+    ret 0 - 1
+  idx:int = (*sys).node_count
+  n:*ActorNode = _node_at(sys, idx)
+  id:int = (*sys).next_node_id
+  (*n).id = id
+  (*n).name = name
+  (*n).host = host
+  (*n).port = port
+  (*n).local = local
+  (*sys).node_count = (*sys).node_count + 1
+  (*sys).next_node_id = (*sys).next_node_id + 1
+  ret id
+
+fn node_send(sys:*ActorSystem, node_id:int, from_id:int, to_id:int, kind:int, tag:int, a0:int) -> int:
+  if sys == 0 || node_id <= 0:
+    ret 0 - 1
+  i:int = 0
+  while i < (*sys).node_count:
+    n:*ActorNode = _node_at(sys, i)
+    if (*n).id == node_id:
+      if (*n).local != 0:
+        ret send_from(sys, from_id, to_id, kind, tag, a0, 0, 0, 0 as str)
+      ret 0 - 7
+    i = i + 1
+  ret 0 - 1
+
+fn set_module(sys:*ActorSystem, actor_id:int, module_name:str, version:int) -> int:
+  idx:int = find_index(sys, actor_id)
+  if idx < 0:
+    ret 0 - 1
+  a:*Actor = _actor_at(sys, idx)
+  (*a).module_name = module_name
+  (*a).version = version
+  ret ACTOR_OK
+
+fn hot_reload(sys:*ActorSystem, module_name:str, version:int) -> int:
+  if sys == 0 || module_name == 0 || version <= 0:
+    ret 0 - 1
+  updated:int = 0
+  (*sys).hot_version = version
+  i:int = 0
+  while i < (*sys).actor_count:
+    a:*Actor = _actor_at(sys, i)
+    if (*a).module_name != 0:
+      if strcmp((*a).module_name, module_name) == 0:
+        (*a).version = version
+        updated = updated + 1
+    i = i + 1
+  ret updated
+
+fn version_of(sys:*ActorSystem, actor_id:int) -> int:
+  idx:int = find_index(sys, actor_id)
+  if idx < 0:
+    ret 0
+  a:*Actor = _actor_at(sys, idx)
+  ret (*a).version
+
+fn app_new(name:str, actor_cap:int, mailbox_cap:int) -> *OtpApp:
+  app:*OtpApp = (*OtpApp)malloc(sizeof(OtpApp))
+  if app == 0:
+    ret 0 as *OtpApp
+  (*app).system = system_new(actor_cap, mailbox_cap, 4)
+  if (*app).system == 0:
+    free(app)
+    ret 0 as *OtpApp
+  (*app).name = name
+  (*app).started = 0
+  (*app).root = 0
+  ret app
+
+fn app_start(app:*OtpApp) -> int:
+  if app == 0 || (*app).system == 0:
+    ret 0 - 1
+  if (*app).started != 0:
+    ret ACTOR_OK
+  root:int = spawn((*app).system, (*app).name)
+  if root <= 0:
+    ret 0 - 1
+  (*app).root = root
+  (*app).started = 1
+  ret ACTOR_OK
+
+fn app_spawn_worker(app:*OtpApp, name:str, restart_policy:int, max_restarts:int) -> int:
+  if app == 0 || (*app).system == 0 || (*app).started == 0:
+    ret 0 - 1
+  worker:int = spawn((*app).system, name)
+  if worker <= 0:
+    ret 0 - 1
+  link_parent((*app).system, worker, (*app).root)
+  set_restart_policy((*app).system, worker, restart_policy, max_restarts)
+  ret worker
+
+fn app_stop_worker(app:*OtpApp, actor_id:int) -> int:
+  if app == 0 || (*app).system == 0 || (*app).started == 0:
+    ret 0 - 1
+  ret stop((*app).system, actor_id)
+
+fn app_supervise(app:*OtpApp) -> int:
+  if app == 0 || (*app).system == 0 || (*app).started == 0:
+    ret 0 - 1
+  ret supervise((*app).system, (*app).root)
+
+fn app_free(app:*OtpApp) -> int:
+  if app == 0:
+    ret 0 - 1
+  if (*app).system != 0:
+    system_free((*app).system)
+  free(app)
+  ret ACTOR_OK

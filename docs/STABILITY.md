@@ -74,6 +74,11 @@ These surfaces are useful today but need more conformance tests:
   VM/runtime gates also
   cover sorted recursive directory listing and raw glob filters.
 - `net`, `tls`, `tezzserve`, `tezzapi`
+- `actor`; local in-process spawn/send/receive, mailbox matching, restart
+  supervision, fail-closed remote node metadata, hot version tags, and
+  OTP-style app helpers are native-smoke gated. Real distributed actor
+  transport, preemptive scheduling, and hot module replacement remain beta
+  runtime gates.
 - `tezzdb` and `tezzdbql`
 - `llm_core`; f64 CPU transformer primitives for matmul, RMSNorm, softmax,
   RoPE, and signed int8-weight matmul with f64 accumulation are gated for

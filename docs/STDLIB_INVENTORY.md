@@ -35,6 +35,7 @@ trust in the stable core.
 | `tezzapi` | REST API framework | Add request/response validation examples. |
 | `tezzdb` | Embedded database | Add transaction, index, WAL, and recovery tests. |
 | `tezzdbql` | Query layer for TezzDB | Add parameterized query examples and tests. |
+| `actor` | Local actors, mailboxes, supervision, node metadata, and OTP-like app helpers | Local in-process spawn/send/receive, mailbox matching, restart supervision, hot version tags, and fail-closed remote node sends are native-smoke gated; add real scheduler, network distribution, and hot module replacement before promotion. |
 | `llm_core` | f64 CPU transformer primitives plus signed int8-weight matmul | Add f32/f16/bf16/uint8 and lower-bit lanes, tensor descriptors, model-load fixtures, GPU/NPU backend gates, and performance data before claiming production LLM support. |
 | `gui`, `gui_win` | Host GUI APIs | Add Windows-only examples and platform notes. |
 | `tzgui`, `tzui`, `tnui`, `tezzui`, `wm` | UI stacks | Clarify supported host path and maturity. |
@@ -84,3 +85,6 @@ A module can move toward Stable Candidate only when:
 5. Keep this inventory synchronized with `tezz.mod` and `lib/`.
 6. Grow `llm_core` from f64 correctness primitives into dtype, model IO, and
    backend-specific LLM gates before any production LLM claim.
+7. Grow `actor` from local deterministic actors into scheduler-backed actors,
+   remote distribution, and benchmarked service-runtime gates before any
+   Erlang/OTP-scale claim.

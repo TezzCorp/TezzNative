@@ -1,0 +1,29 @@
+import "tezzinstall"
+
+fn main() -> int:
+  cfg:TzInstall
+
+  tezzinstall.install_set_name(&cfg, "Demo")
+  tezzinstall.install_set_version(&cfg, "1.0.0")
+  tezzinstall.install_set_self_contained(&cfg, 1)
+  if tezzinstall.install_is_self_contained(&cfg) != 1:
+    ret 1
+
+  tezzinstall.install_set_download(&cfg, "https://tn.tezzcorp.com/download/sdk/tezznative-sdk.zip", "build/sdk.zip")
+  tezzinstall.install_set_download_max_bytes(&cfg, 1048576)
+  if tezzinstall.install_requires_download(&cfg) != 1:
+    ret 2
+  if tezzinstall.install_validate_download_config(&cfg) != 0:
+    ret 3
+
+  tezzinstall.install_set_download_sha256(&cfg, "abc")
+  if tezzinstall.install_validate_download_config(&cfg) == 0:
+    ret 4
+
+  tezzinstall.install_set_download_sha256(&cfg, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+  if tezzinstall.install_validate_download_config(&cfg) != 0:
+    ret 5
+  if tezzinstall.install_fetch_payload(&cfg) == 0:
+    ret 6
+
+  ret 0

@@ -5,6 +5,7 @@ import "math"
 import "time"
 import "vec"
 import "arena"
+import "actor"
 
 fn main() -> int:
   ret 0

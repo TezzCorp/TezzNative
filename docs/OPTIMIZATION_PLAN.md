@@ -849,6 +849,60 @@ Promotion rule:
 - Broad production LLM claims must remain blocked until the promotion rule is
   satisfied.
 
+## Milestone 11: Actor Runtime And OTP-Like Apps
+
+Status: started for the local deterministic actor foundation.
+
+Goal: give TezzNative a believable service-runtime path without claiming
+Erlang/OTP-scale behavior before the scheduler, distribution, and benchmark
+gates exist.
+
+Delivered:
+
+- Added `lib/actor.tn` with local actor systems, `spawn`, `send`,
+  `send_text`, FIFO `receive`, selective `receive_match`, mailbox capacity
+  and dropped-message accounting.
+- Added restart policies, parent links, `supervise`, `mark_failed`, restart
+  counters, and an `OtpApp` wrapper with app start, worker spawn, worker stop,
+  and app supervision helpers.
+- Added node metadata and `node_send`; local nodes route through the mailbox,
+  remote nodes fail closed with `actor.remote_unsupported()` until a real
+  authenticated transport exists.
+- Added version tags, `set_module`, and `hot_reload` as the first source-level
+  hot-version contract. This is version metadata, not live code replacement.
+- Added `tests/conformance/native/actor_runtime.tn` so the local actor
+  contract is built and executed in the native smoke lane.
+- Added installer download/self-contained metadata APIs and a compile-gated
+  installer contract. SHA-256 verification fails closed until runtime file
+  hashing is available.
+
+Production gates still required:
+
+1. Add a scheduler-backed actor runtime with per-actor stacks/state,
+   backpressure, bounded mailbox policies, and cooperative/preemptive yield
+   points.
+2. Add native message serialization with stable type tags, ownership rules, and
+   zero-copy paths for buffers.
+3. Add node-to-node messaging over authenticated TCP/TLS with reconnect,
+   heartbeats, delivery errors, and version negotiation.
+4. Add supervisor tree strategies: one-for-one, one-for-all, rest-for-one,
+   intensity windows, shutdown timeouts, and child specs.
+5. Add versioned module replacement with two-version compatibility, safe
+   quiescence points, rollback, and migration callbacks.
+6. Add an OTP-like standard app framework with app specs, env config, lifecycle
+   hooks, service registry, tracing, metrics, and crash reports.
+7. Add service-scale benchmarks for actors/sec, messages/sec, mailbox memory,
+   latency percentiles, TCP connection counts, restart storms, and hot upgrade
+   latency.
+
+Promotion rule:
+
+- TezzNative must not claim Erlang/OTP replacement, billion-connection
+  handling, or hot-code production support until the above gates are
+  source-visible, CI-backed, and benchmarked on named hardware.
+- The current claim is: local actor and OTP-like app foundation for native
+  service-runtime experiments.
+
 ## CI Matrix
 
 Minimum CI before claiming a stable release:

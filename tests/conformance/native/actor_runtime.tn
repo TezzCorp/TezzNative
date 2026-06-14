@@ -1,0 +1,120 @@
+import "actor"
+
+fn expect(cond:int, code:int) -> int:
+  if cond == 0:
+    ret code
+  ret 0
+
+fn main() -> int:
+  sys:*ActorSystem = actor.system_new(4, 2, 2)
+  if sys == 0:
+    ret 1
+
+  sup:int = actor.spawn(sys, "sup")
+  worker:int = actor.spawn(sys, "worker")
+  if sup <= 0 || worker <= 0:
+    actor.system_free(sys)
+    ret 2
+
+  if actor.link_parent(sys, worker, sup) != actor.ok():
+    actor.system_free(sys)
+    ret 3
+  if actor.set_restart_policy(sys, worker, actor.restart_permanent(), 2) != actor.ok():
+    actor.system_free(sys)
+    ret 4
+
+  if actor.send_from(sys, sup, worker, 10, 99, 1, 2, 3, "payload") != actor.ok():
+    actor.system_free(sys)
+    ret 5
+  if actor.mailbox_len(sys, worker) != 1:
+    actor.system_free(sys)
+    ret 6
+
+  msg:ActorMessage
+  unsafe:
+    if actor.receive_match(sys, worker, 10, 99, sup, &msg) != actor.ok():
+      actor.system_free(sys)
+      ret 7
+  if msg.kind != 10 || msg.tag != 99 || msg.from != sup || msg.a != 1 || msg.b != 2 || msg.c != 3:
+    actor.system_free(sys)
+    ret 8
+
+  if actor.send(sys, worker, 11, 1, 0, 0, 0) != actor.ok():
+    actor.system_free(sys)
+    ret 9
+  if actor.send(sys, worker, 12, 2, 0, 0, 0) != actor.ok():
+    actor.system_free(sys)
+    ret 10
+  overflow_rc:int = actor.send(sys, worker, 13, 3, 0, 0, 0)
+  if overflow_rc == actor.ok():
+    actor.system_free(sys)
+    ret 11
+  if actor.dropped_count(sys) != 1:
+    actor.system_free(sys)
+    ret 12
+  unsafe:
+    if actor.receive_match(sys, worker, 12, actor.any(), actor.any(), &msg) != actor.ok():
+      actor.system_free(sys)
+      ret 13
+  if msg.tag != 2:
+    actor.system_free(sys)
+    ret 14
+
+  if actor.stop(sys, worker) != actor.ok():
+    actor.system_free(sys)
+    ret 15
+  if actor.supervise(sys, sup) != 1:
+    actor.system_free(sys)
+    ret 16
+  if actor.is_alive(sys, worker) != actor.alive() || actor.restart_count(sys, worker) != 1:
+    actor.system_free(sys)
+    ret 17
+
+  local:int = actor.node_add(sys, "local", "127.0.0.1", 0, 1)
+  remote:int = actor.node_add(sys, "remote", "10.0.0.2", 4040, 0)
+  if actor.node_send(sys, local, sup, worker, 20, 1, 42) != actor.ok():
+    actor.system_free(sys)
+    ret 18
+  if actor.node_send(sys, remote, sup, worker, 20, 1, 42) != actor.remote_unsupported():
+    actor.system_free(sys)
+    ret 19
+  unsafe:
+    if actor.receive(sys, worker, &msg) != actor.ok():
+      actor.system_free(sys)
+      ret 20
+  if msg.kind != 20 || msg.a != 42:
+    actor.system_free(sys)
+    ret 21
+
+  if actor.set_module(sys, worker, "svc", 1) != actor.ok():
+    actor.system_free(sys)
+    ret 22
+  if actor.hot_reload(sys, "svc", 2) != 1:
+    actor.system_free(sys)
+    ret 23
+  if actor.version_of(sys, worker) != 2:
+    actor.system_free(sys)
+    ret 24
+
+  actor.system_free(sys)
+
+  app:*OtpApp = actor.app_new("app", 4, 2)
+  if app == 0:
+    ret 25
+  if actor.app_start(app) != actor.ok():
+    actor.app_free(app)
+    ret 26
+  w:int = actor.app_spawn_worker(app, "app-worker", actor.restart_permanent(), 1)
+  if w <= 0:
+    actor.app_free(app)
+    ret 27
+  if actor.app_stop_worker(app, w) != actor.ok():
+    actor.app_free(app)
+    ret 28
+  if actor.app_supervise(app) != 1:
+    actor.app_free(app)
+    ret 29
+  actor.app_free(app)
+
+  say "actor-runtime"
+  ret 0

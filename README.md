@@ -39,6 +39,7 @@ than the full repository surface.
 | Package trust | Stable/Beta (gated first-party set) | `tezz init/add/remove/update/lock/publish/test/build --release`, SemVer package pins, lock/registry parity, package checksums, generated package inventory docs, and first-party package promotion rules are gated |
 | Stable stdlib candidates | Stable/Beta (edge gated) | Core imports plus native math, string, raw/wrapped/line/stream file IO, directory lifecycle, direct `dir_list`, raw/public recursive listing and glob, portable path, vector, arena, process run/output capture, `time` clock/sleep/UTC/local-date smoke, and focused stdlib edge gates for math, strings, vectors, and arenas |
 | Networking/TLS/GUI/DB | Beta | `net` URL, DNS endpoint, HTTP parser, route, auth/cookie, chunked response helpers, keep-alive `Content-Length`/chunked response reads, Windows/Linux x64 TCP loopback send/recv, IPv4 literal bind hosts, localhost TCP/UDP connect wrappers, socket options, and local HTTP client/server route helpers are smoke gated; TLS, public-network HTTP, DNS-backed sockets, and wider backend matrix testing are still needed |
+| Actor runtime / OTP-like apps | Beta foundation | Local in-process `actor` module provides spawn/send/receive, mailbox matching, restart supervision, node metadata with fail-closed remote sends, hot version tags, and OTP-style app helpers; distributed scheduling and hot code replacement are planned gates, not production claims yet |
 | GPU/NPU/LLM/kernel modules | Experimental | `llm_core` now provides gated f64 CPU transformer primitives plus signed int8-weight matmul for tiny inference experiments; production LLM training/serving still needs dtype, tensor, model IO, GPU/NPU, and benchmark gates |
 
 See `docs/STABILITY.md` for the full stability map.
@@ -53,7 +54,8 @@ experience gates are documented in `docs/DEVELOPER_EXPERIENCE.md`. Release
 integrity and privacy policies are documented in `docs/RELEASE_ENGINEERING.md`,
 `docs/TELEMETRY_PRIVACY.md`, and `SECURITY.md`. Package trust rules are
 documented in `docs/PACKAGE_TRUST.md`. The LLM production-readiness boundary is
-documented in `docs/LLM_PRODUCTION_PATH.md`.
+documented in `docs/LLM_PRODUCTION_PATH.md`. Actor and OTP-like runtime
+boundaries are documented in `docs/ACTOR_RUNTIME.md`.
 
 ## Quick Example
 
@@ -99,6 +101,7 @@ The public `lib/` directory includes modules for:
 
 - Core utilities: `std`, `io`, `str`, `math`, `vec`, `arena`, `time`
 - Systems work: `sys`, `mmap`, `os`, `kernel`, `arduino`, `raspi`
+- Runtime concurrency: `task`, `event`, `actor`
 - Networking: `net`, `tls`, `tezzserve`, `tezzapi`
 - UI/application work: `gui`, `gui_win`, `tzgui`, `tzui`, `tnui`, `tezzui`
 - Data and AI experiments: `tezzdb`, `tensor`, `nn`, `llm`, `llm_core`, `tokenizer`, `tts`, `stt`
@@ -184,7 +187,7 @@ clock/sleep/UTC/local-date helpers, stdlib math/collections edge behavior,
 deterministic `net` URL/HTTP parsing,
 Windows/Linux x64 TCP loopback sockets, socket options, localhost socket
 wrappers, keep-alive HTTP response reads, and local HTTP client/server route
-helpers, plus IPv4 literal socket bind host handling:
+helpers, local actor/mailbox/supervision helpers, plus IPv4 literal socket bind host handling:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tests\conformance\run-native-smoke.ps1

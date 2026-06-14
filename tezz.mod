@@ -8,6 +8,7 @@ dep.net = 0.1.0
 dep.time = 0.1.0
 dep.event = 0.1.0
 dep.frame = 0.1.0
+dep.actor = 0.1.0
 dep.math = 0.1.0
 dep.tls = 0.1.0
 dep.simd = 0.1.0
