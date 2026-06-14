@@ -21,6 +21,15 @@ benchmarks/results/**
 !examples/
 !examples/dx/
 !examples/dx/**
+!projects/
+!projects/tezzmind/
+!projects/tezzmind/README.md
+!projects/tezzmind/*.tn
+!projects/tezzmind/*.mod
+!projects/tezzmind/lib/
+!projects/tezzmind/lib/*.tn
+!projects/tezzmind/train_data/
+!projects/tezzmind/train_data/*.txt
 !.github/
 !.github/workflows/
 !.github/workflows/conformance.yml

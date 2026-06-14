@@ -35,6 +35,20 @@ The current gate checks:
 - native executable build/run on the current Windows/Linux x64 path
 - runtime/VM memory tagging for f64 outputs written by builtin calls
 
+The TezzMind prototype now has a deterministic on-device AI verification path:
+
+- `lib/mind.tn` builds and runs a tiny GQA transformer with RMSNorm, RoPE,
+  SwiGLU, KV cache, save/load, deterministic generation, argmax, and checksum
+  helpers.
+- `lib/trainer.tn` provides AdamW training with gradient clipping, trainer
+  telemetry getters, deterministic loss evaluation, and clearer final-loss
+  behavior.
+- `tests/conformance/native/tezzmind_verify_output.tn` builds and runs a
+  source-visible native fixture for forward logits, generation, training loss
+  decrease, checkpoint save/load, and checksum preservation.
+- `projects/tezzmind/verify.tn` is the standalone project verifier for local
+  output inspection.
+
 ## How To Build A Tiny Transformer Experiment Today
 
 Use TezzNative for a small CPU-oriented inference prototype:
@@ -53,6 +67,10 @@ tezzc run tests/conformance/stdlib/llm_core_f64.tn --bc
 tezzc buildexe tests/conformance/stdlib/llm_core_f64.tn ./llm_core_f64 --verify
 tezzc run tests/conformance/stdlib/llm_core_quant_i8.tn --bc
 tezzc buildexe tests/conformance/stdlib/llm_core_quant_i8.tn ./llm_core_quant_i8 --verify
+tezzc buildexe tests/conformance/native/tezzmind_verify_output.tn ./tezzmind_verify --verify
+./tezzmind_verify
+tezzc buildexe projects/tezzmind/verify.tn ./tezzmind_project_verify --verify
+./tezzmind_project_verify
 ```
 
 This path is suitable for correctness experiments, education, and the first
@@ -74,6 +92,7 @@ is:
 - autodiff, optimizers, checkpointing, and mixed precision if training from
   scratch is a goal
 - benchmark gates for latency, throughput, memory, and numerical accuracy
+- trained checkpoint quality gates before calling TezzMind a reasoning model
 
 ## Promotion Plan
 
@@ -89,13 +108,17 @@ is:
 9. Add a tiny end-to-end decoder fixture before claiming LLM inference support.
 10. Add training primitives only after inference correctness and memory rules
     are stable.
+11. Expand TezzMind verification with trained checkpoint quality metrics,
+    tokenizer fixtures, and reproducible output benchmarks before any
+    reasoning-AI claim.
 
 ## Public Claim Boundary
 
 The safe claim is:
 
 > TezzNative has started a dtype-explicit LLM kernel foundation with f64 CPU
-> primitives, signed int8-weight matmul, and fallback validation.
+> primitives, signed int8-weight matmul, fallback validation, and a native
+> TezzMind tiny-transformer verification path.
 
 The unsafe claim is:
 

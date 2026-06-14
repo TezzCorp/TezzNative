@@ -1,0 +1,101 @@
+TezzNative is a fast, modern programming language for native development.
+It compiles directly to machine code and runs without a virtual machine.
+TezzNative includes a full on-device AI stack built into the language.
+
+The language is designed to be simple, powerful, and free for everyone.
+You can build applications, tools, and AI systems with TezzNative.
+
+Programming is the art of teaching computers to think.
+A program is a sequence of instructions that solves a problem.
+Functions break problems into smaller, manageable pieces.
+
+fn greet(name:str) -> int:
+  say "Hello, ", name, "!"
+  ret 0
+
+fn add(a:int, b:int) -> int:
+  ret a + b
+
+fn factorial(n:int) -> int:
+  if n <= 1:
+    ret 1
+  ret n * factorial(n - 1)
+
+fn main() -> int:
+  x:int = add(10, 20)
+  say "Sum:", x
+  say "Factorial of 5:", factorial(5)
+  greet("TezzNative")
+  ret 0
+
+Variables store values. Types keep them safe.
+x:int = 42
+y:float = 3.14
+name:str = "TezzNative"
+
+Control flow changes what happens next.
+if condition:
+  do_something()
+else:
+  do_other_thing()
+
+Loops repeat actions efficiently.
+i:int = 0
+while i < 10:
+  say i
+  i = i + 1
+
+Memory is managed with malloc and free.
+ptr:*char = malloc(100)
+free(ptr)
+
+Neural networks learn from data.
+A network has layers: input, hidden, output.
+Each layer transforms the data.
+Weights are learned through training.
+Training minimizes the loss function.
+The optimizer updates weights to reduce loss.
+Gradient descent finds the minimum.
+
+Words build sentences. Sentences express thoughts.
+Thoughts become programs. Programs create intelligence.
+
+One, two, three, four, five. Six, seven, eight, nine, ten.
+Alpha, beta, gamma, delta. Zero is nothing. One is something.
+True or false. Yes or no. On or off. Zero or one.
+
+The quick brown fox jumps over the lazy dog.
+To be or not to be, that is the question.
+All generalizations are false, including this one.
+The only way to learn is to do.
+
+import "math"
+import "nn"
+import "ai"
+
+let PI:float = 3.14159265
+let E:float  = 2.71828182
+
+x:float = math.sin(PI / 2.0)
+y:float = math.exp(1.0)
+z:float = math.sqrt(2.0)
+
+Reasoning: If all A are B, and C is an A, then C is a B.
+Logic: P and Q implies P. P implies P or Q.
+Math: 2 + 2 = 4. 3 * 4 = 12. 100 / 10 = 10.
+
+Intelligence is the ability to learn and adapt.
+Language is the primary medium of intelligence.
+Code is a formal language that machines can execute.
+AI learns language by predicting the next token.
+
+Step 1: Define the problem clearly.
+Step 2: Break it down into subproblems.
+Step 3: Solve each subproblem.
+Step 4: Combine the solutions.
+Step 5: Test and verify.
+
+TezzNative makes AI accessible to everyone.
+Run powerful models on your own device.
+No cloud. No subscription. No data sharing.
+Your AI. Your device. Your privacy.

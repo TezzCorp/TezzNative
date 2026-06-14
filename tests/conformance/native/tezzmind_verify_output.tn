@@ -1,0 +1,133 @@
+import "mind"
+import "trainer"
+import "io"
+
+fn finite(v:float) -> int:
+  if v != v:
+    ret 0
+  ret 1
+
+fn main() -> int:
+  text:str = "abababababababababababababababababababababababababababababababab"
+  path:str = "tezzmind_verify_tmp.tnw"
+
+  mind.mind_set_seed(123)
+  unsafe:
+    model:*float = mind.mind_new(128, 8, 2, 1, 1, 16, 16)
+    if model == 0 as *float:
+      ret 1
+    if mind.mind_is_valid(model) == 0:
+      mind.mind_free(model)
+      ret 2
+
+    before_sum:int = mind.mind_weight_checksum(model, 0)
+    if before_sum <= 0:
+      mind.mind_free(model)
+      ret 3
+
+    logits:[float;128]
+    if mind.mind_forward(model, 65, 0, &logits[0]) != 0:
+      mind.mind_free(model)
+      ret 4
+    logit_sum:int = mind.mind_logits_checksum(&logits[0], 128)
+    if logit_sum <= 0:
+      mind.mind_free(model)
+      ret 5
+    arg:int = mind.mind_argmax(&logits[0], 128)
+    if arg < 0 || arg >= 128:
+      mind.mind_free(model)
+      ret 6
+
+    empty:str = mind.mind_generate(model, 0 as str, 4, 0.0, 77)
+    if empty == 0:
+      mind.mind_free(model)
+      ret 7
+    free(empty)
+
+    gen:str = mind.mind_generate(model, "Hi", 8, 0.0, 77)
+    if gen == 0:
+      mind.mind_free(model)
+      ret 8
+    if len(gen) < 2:
+      free(gen)
+      mind.mind_free(model)
+      ret 9
+    free(gen)
+
+    acc:int = mind.mind_eval_next_token_accuracy(model, text, 8)
+    if acc < 0 || acc > 8:
+      mind.mind_free(model)
+      ret 10
+
+    nw:int = mind.mind_get_nw(model)
+    tr:*float = trainer.trainer_new(nw, 0.02)
+    if tr == 0 as *float:
+      mind.mind_free(model)
+      ret 11
+    if trainer.trainer_set_weight_decay(tr, 0.0) != 0:
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 12
+    if trainer.trainer_set_grad_clip(tr, 1.0) != 0:
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 13
+
+    before_loss:float = trainer.trainer_eval_loss(model, text, 2)
+    if finite(before_loss) == 0 || before_loss <= 0.0:
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 14
+
+    last_loss:float = trainer.trainer_train_text(model, tr, text, 16, 0, 0, 0 as str)
+    if finite(last_loss) == 0 || last_loss <= 0.0:
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 15
+    if trainer.trainer_step(tr) != 16:
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 16
+    if trainer.trainer_last_loss(tr) <= 0.0 || trainer.trainer_best_loss(tr) <= 0.0:
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 17
+
+    after_loss:float = trainer.trainer_eval_loss(model, text, 2)
+    if finite(after_loss) == 0 || after_loss <= 0.0 || after_loss > before_loss:
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 18
+
+    after_sum:int = mind.mind_weight_checksum(model, 0)
+    if after_sum <= 0 || after_sum == before_sum:
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 19
+
+    io.file_delete(path)
+    if mind.mind_save(model, path) != 0:
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 20
+    loaded:*float = mind.mind_load(path)
+    if loaded == 0 as *float:
+      io.file_delete(path)
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 21
+    loaded_sum:int = mind.mind_weight_checksum(loaded, 0)
+    if loaded_sum != after_sum:
+      mind.mind_free(loaded)
+      io.file_delete(path)
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 22
+    mind.mind_free(loaded)
+    io.file_delete(path)
+
+    trainer.trainer_free(tr)
+    mind.mind_free(model)
+
+  say "tezzmind-verify"
+  ret 0

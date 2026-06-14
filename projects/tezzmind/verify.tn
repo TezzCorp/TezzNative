@@ -1,0 +1,128 @@
+// TezzMind deterministic verification runner.
+//
+// This is a non-interactive project smoke test for local on-device AI work.
+// It checks model construction, forward logits, generation, training loss,
+// checkpoint save/load, and model checksum preservation.
+
+import "mind"
+import "trainer"
+import "io"
+
+fn finite(v:float) -> int:
+  if v != v:
+    ret 0
+  ret 1
+
+fn main() -> int:
+  text:str = "TezzNative builds local AI. TezzMind learns small patterns on device. abababababababababababababababababab"
+  path:str = "projects/tezzmind/tezzmind_verify_tmp.tnw"
+
+  say "TezzMind verify"
+  say "mode=deterministic-local"
+
+  mind.mind_set_seed(2026)
+  unsafe:
+    model:*float = mind.mind_new(128, 8, 2, 1, 1, 16, 16)
+    if model == 0 as *float:
+      say "status=fail stage=model_new"
+      ret 1
+    if mind.mind_is_valid(model) == 0:
+      say "status=fail stage=model_valid"
+      mind.mind_free(model)
+      ret 2
+
+    checksum_before:int = mind.mind_weight_checksum(model, 0)
+    logits:[float;128]
+    if mind.mind_forward(model, 84, 0, &logits[0]) != 0:
+      say "status=fail stage=forward"
+      mind.mind_free(model)
+      ret 3
+    logits_checksum:int = mind.mind_logits_checksum(&logits[0], 128)
+    top:int = mind.mind_argmax(&logits[0], 128)
+
+    gen:str = mind.mind_generate(model, "TN", 12, 0.0, 2026)
+    if gen == 0:
+      say "status=fail stage=generate"
+      mind.mind_free(model)
+      ret 4
+    gen_len:int = len(gen)
+    free(gen)
+
+    nw:int = mind.mind_get_nw(model)
+    tr:*float = trainer.trainer_new(nw, 0.02)
+    if tr == 0 as *float:
+      say "status=fail stage=trainer_new"
+      mind.mind_free(model)
+      ret 5
+    trainer.trainer_set_weight_decay(tr, 0.0)
+    trainer.trainer_set_grad_clip(tr, 1.0)
+
+    loss_before:float = trainer.trainer_eval_loss(model, text, 2)
+    if finite(loss_before) == 0 || loss_before <= 0.0:
+      say "status=fail stage=loss_before"
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 6
+
+    loss_train:float = trainer.trainer_train_text(model, tr, text, 16, 0, 0, 0 as str)
+    loss_after:float = trainer.trainer_eval_loss(model, text, 2)
+    if finite(loss_train) == 0 || finite(loss_after) == 0 || loss_train <= 0.0 || loss_after <= 0.0:
+      say "status=fail stage=train"
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 7
+    if loss_after > loss_before:
+      say "status=fail stage=loss_regression"
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 8
+
+    checksum_after:int = mind.mind_weight_checksum(model, 0)
+    if checksum_after <= 0 || checksum_after == checksum_before:
+      say "status=fail stage=checksum_after"
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 9
+
+    io.file_delete(path)
+    if mind.mind_save(model, path) != 0:
+      say "status=fail stage=save"
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 10
+
+    loaded:*float = mind.mind_load(path)
+    if loaded == 0 as *float:
+      say "status=fail stage=load"
+      io.file_delete(path)
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 11
+    checksum_loaded:int = mind.mind_weight_checksum(loaded, 0)
+    if checksum_loaded != checksum_after:
+      say "status=fail stage=load_checksum"
+      mind.mind_free(loaded)
+      io.file_delete(path)
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 12
+
+    say "weights=", nw
+    say "checksum_before=", checksum_before
+    say "logits_checksum=", logits_checksum
+    say "top_token=", top
+    say "generation_len=", gen_len
+    say "loss_before=", loss_before
+    say "loss_train=", loss_train
+    say "loss_after=", loss_after
+    say "trainer_step=", trainer.trainer_step(tr)
+    say "checksum_after=", checksum_after
+    say "checksum_loaded=", checksum_loaded
+    say "status=ok"
+
+    mind.mind_free(loaded)
+    io.file_delete(path)
+    trainer.trainer_free(tr)
+    mind.mind_free(model)
+
+  ret 0

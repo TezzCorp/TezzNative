@@ -827,6 +827,15 @@ Delivered:
 - Added `tests/conformance/stdlib/llm_core_quant_i8.tn` for scaled,
   unscaled, runtime, and scalar fallback int8 matmul correctness.
 - Added `docs/LLM_PRODUCTION_PATH.md` to keep the public claim boundary honest.
+- Hardened TezzMind core generation and verification with model validity
+  checks, deterministic weight/logit checksums, safe empty-prompt generation,
+  allocation guards, trainer telemetry getters, and clearer final-loss return
+  behavior.
+- Added `tests/conformance/native/tezzmind_verify_output.tn` for native
+  forward/generation/training/save-load output proof.
+- Added `projects/tezzmind/verify.tn` as the standalone on-device AI project
+  verifier with visible checksum, top-token, loss, trainer-step, and checkpoint
+  results.
 
 Next production gaps:
 
@@ -841,6 +850,8 @@ Next production gaps:
 8. Add GPU/NPU backend gates only where a real backend executes the kernels.
 9. Add latency, throughput, memory, and numerical accuracy benchmarks.
 10. Add a tiny end-to-end decoder fixture before claiming LLM inference support.
+11. Add trained checkpoint evaluation gates for TezzMind before claiming
+    reasoning AI behavior.
 
 Promotion rule:
 

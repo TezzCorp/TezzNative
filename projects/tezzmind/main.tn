@@ -1,0 +1,406 @@
+// ============================================================
+// TezzMind - On-Device AI Prototype
+// Main Entry Point  v1.0
+// ============================================================
+//
+// A compact GQA transformer prototype (Nano, byte-level tokens)
+// built entirely in TezzNative language.
+//
+// Change the `mode` variable in main() to switch modes:
+//   "--demo"   Run architecture demo (default)
+//   "--train"  Train on seed data file
+//   "--chat"   Interactive chat mode
+//   "--bench"  Benchmark forward pass speed
+// ============================================================
+
+import "mind"
+import "trainer"
+import "math"
+import "io"
+import "device"
+
+extern fn getchar() -> int
+
+// Local float-slot reader helper (for logits buffer)
+fn _logit_f(s:*float, i:int) -> float:
+  v:float = 0.0
+  unsafe:
+    sc:*char = s as *char
+    p:*float = (sc + i * 8) as *float
+    v = p[0]
+  ret v
+
+fn _ascii_preview(s:str) -> str:
+  if s == 0:
+    z:str
+    unsafe:
+      z = 0 as str
+    ret z
+  n:int = len(s)
+  raw:*char
+  unsafe:
+    raw = malloc(n + 1)
+  if raw == 0:
+    z2:str
+    unsafe:
+      z2 = 0 as str
+    ret z2
+  i:int = 0
+  while i < n:
+    c:int = 0
+    unsafe:
+      c = (s as *char)[i] as int & 255
+    if c < 32 || c > 126:
+      c = 46
+    unsafe:
+      raw[i] = c as char
+    i = i + 1
+  unsafe:
+    raw[n] = 0 as char
+  out:str
+  unsafe:
+    out = raw as str
+  ret out
+
+// ── Configuration ─────────────────────────────────────────────
+
+// Nano model used for local prototype validation
+let MIND_VOCAB:int   = 256    // byte-level (char 0..255)
+let MIND_DIM:int     = 128   // embedding dimension
+let MIND_QHEADS:int  = 4     // query attention heads
+let MIND_KVHEADS:int = 2      // key/value heads (GQA 4:1)
+let MIND_LAYERS:int  = 4     // transformer layers
+let MIND_FFN:int     = 384   // feed-forward hidden
+let MIND_SEQLEN:int  = 256    // maximum sequence length
+
+fn _mind_ckpt() -> str:
+  p0:str = "tezzmind_nano.tnw"
+  unsafe:
+    if io.file_exists(p0) != 0 && mind.mind_file_matches(p0, MIND_VOCAB, MIND_DIM, MIND_QHEADS, MIND_KVHEADS, MIND_LAYERS, MIND_FFN, MIND_SEQLEN) != 0:
+      ret p0
+  p1:str = "projects/tezzmind/tezzmind_nano.tnw"
+  unsafe:
+    if io.file_exists(p1) != 0 && mind.mind_file_matches(p1, MIND_VOCAB, MIND_DIM, MIND_QHEADS, MIND_KVHEADS, MIND_LAYERS, MIND_FFN, MIND_SEQLEN) != 0:
+      ret p1
+  p2:str = "tezzmind_large.tnw"
+  unsafe:
+    if io.file_exists(p2) != 0 && mind.mind_file_matches(p2, MIND_VOCAB, MIND_DIM, MIND_QHEADS, MIND_KVHEADS, MIND_LAYERS, MIND_FFN, MIND_SEQLEN) != 0:
+      ret p2
+  p3:str = "projects/tezzmind/tezzmind_large.tnw"
+  unsafe:
+    if io.file_exists(p3) != 0 && mind.mind_file_matches(p3, MIND_VOCAB, MIND_DIM, MIND_QHEADS, MIND_KVHEADS, MIND_LAYERS, MIND_FFN, MIND_SEQLEN) != 0:
+      ret p3
+  unsafe:
+    if io.file_exists("projects/tezzmind/train_data/seed.txt") != 0:
+      ret "projects/tezzmind/tezzmind_nano.tnw"
+  ret "tezzmind_nano.tnw"
+
+fn _mind_seed_file() -> str:
+  p1:str = "projects/tezzmind/train_data/seed.txt"
+  unsafe:
+    if io.file_exists(p1) != 0:
+      ret p1
+  p2:str = "train_data/seed.txt"
+  unsafe:
+    if io.file_exists(p2) != 0:
+      ret p2
+  ret "projects/tezzmind/train_data/seed.txt"
+
+// ── Load seed text ─────────────────────────────────────────────
+
+fn _get_seed_text() -> str:
+  loaded:str = io.read_all(_mind_seed_file())
+  unsafe:
+    if loaded != 0 as str:
+      ret loaded
+  ret "TezzNative language. Neural networks learn. Code is logic. Build and test. fn main()->int. AI on device."
+
+// ── Banner ────────────────────────────────────────────────────
+
+fn _print_banner() -> int:
+  say "======================================================"
+  say "TezzMind - On-Device AI Prototype"
+  say "Built in TezzNative Language v1.0"
+  say "======================================================"
+  say ""
+  ret 0
+
+// ── Mode: --demo ──────────────────────────────────────────────
+
+fn run_demo() -> int:
+  say "-- DEMO MODE --------------------------------------------"
+  say "Building TezzMind Nano model (random weights)..."
+  say ""
+
+  unsafe:
+    model:*float = mind.mind_new(MIND_VOCAB, MIND_DIM, MIND_QHEADS, MIND_KVHEADS, MIND_LAYERS, MIND_FFN, MIND_SEQLEN)
+    if model == 0 as *float:
+      say "ERROR: Failed to allocate model. Check available RAM."
+      ret 1
+
+    mind.mind_info(model)
+    say ""
+
+    say "-- Forward pass test ------------------------------------"
+    say "Running forward pass for token 'H' (ASCII 72)..."
+
+    vocab:int = MIND_VOCAB
+    logits_raw:*char = malloc(vocab * 8)
+    logits:*float = logits_raw as *float
+
+    rc:int = mind.mind_forward(model, 72, 0, logits)
+    if rc != 0:
+      say "ERROR: Forward pass failed (rc=", rc, ")"
+      mind.mind_free(model)
+      free(logits_raw)
+      ret 1
+
+    // Find top-3 predictions
+    say "OK! Top-3 next-token predictions:"
+    best1:int = 0; best2:int = 0; best3:int = 0
+    v1:float = 0.0 - 1.0e+30; v2:float = 0.0 - 1.0e+30; v3:float = 0.0 - 1.0e+30
+    i:int = 0
+    while i < vocab:
+      v:float = _logit_f(logits, i)
+      if v > v1:
+        v3 = v2; best3 = best2
+        v2 = v1; best2 = best1
+        v1 = v; best1 = i
+      else:
+        if v > v2:
+          v3 = v2; best3 = best2
+          v2 = v; best2 = i
+        else:
+          if v > v3:
+            v3 = v; best3 = i
+      i = i + 1
+
+    say "  1st: token=", best1, " score=", v1
+    say "  2nd: token=", best2, " score=", v2
+    say "  3rd: token=", best3, " score=", v3
+    say ""
+
+    say "-- Generation test --------------------------------------"
+    say "Generating 32 chars from prompt 'Hi' (random weights):"
+    gen:str = mind.mind_generate(model, "Hi", 32, 0.8, 12345)
+    if gen != 0:
+      preview:str = _ascii_preview(gen)
+      if preview != 0:
+        say "  Output: [", preview, "]"
+        free(preview)
+      else:
+        say "  Output: [preview unavailable]"
+      free(gen)
+    else:
+      say "  (generation returned null - normal with random weights)"
+    say ""
+    say "[DEMO] Architecture verified. All systems OK."
+    say "[DEMO] Change mode to '--train' to begin learning."
+    say ""
+
+    mind.mind_free(model)
+    free(logits_raw)
+  ret 0
+
+// ── Mode: --bench ─────────────────────────────────────────────
+
+fn run_bench() -> int:
+  say "-- BENCHMARK MODE ---------------------------------------"
+  say "Building TezzMind Nano..."
+  unsafe:
+    model:*float = mind.mind_new(MIND_VOCAB, MIND_DIM, MIND_QHEADS, MIND_KVHEADS, MIND_LAYERS, MIND_FFN, MIND_SEQLEN)
+    if model == 0 as *float:
+      say "ERROR: Allocation failed"
+      ret 1
+
+    vocab:int = MIND_VOCAB
+    logits_raw:*char = malloc(vocab * 8)
+    logits:*float = logits_raw as *float
+
+    say "Running 100 forward passes..."
+    n_passes:int = 100
+    i:int = 0
+    while i < n_passes:
+      tok:int = (i * 7 + 65) % 256
+      mind.mind_forward(model, tok, i % MIND_SEQLEN, logits)
+      i = i + 1
+
+    say "Completed ", n_passes, " forward passes."
+    say "Prototype path is ready for local evaluation."
+    say "[BENCH] Use system timing tools for precise ms/token measurements."
+    say ""
+
+    mind.mind_free(model)
+    free(logits_raw)
+  ret 0
+
+// ── Mode: --train ─────────────────────────────────────────────
+
+fn run_train() -> int:
+  say "-- TRAIN MODE -------------------------------------------"
+  say "Building TezzMind Nano..."
+  unsafe:
+    model:*float = mind.mind_new(MIND_VOCAB, MIND_DIM, MIND_QHEADS, MIND_KVHEADS, MIND_LAYERS, MIND_FFN, MIND_SEQLEN)
+    if model == 0 as *float:
+      say "ERROR: Failed to allocate model"
+      ret 1
+
+    mind.mind_info(model)
+    say ""
+
+    text:str = _get_seed_text()
+    text_len:int = len(text)
+    say "Training data: ", text_len, " bytes"
+    say ""
+
+    nw:int = mind.mind_get_nw(model)
+    tr:*float = trainer.trainer_new(nw, 0.001)
+    if tr == 0 as *float:
+      say "ERROR: Failed to allocate trainer"
+      mind.mind_free(model)
+      ret 1
+
+    trainer.trainer_info(tr)
+    say ""
+    say "Training: 3000 steps | log/10 | checkpoint/100"
+    say "----------------------------------------------------------"
+
+    trainer.trainer_train_text(model, tr, text, 3000, 10, 100, _mind_ckpt())
+
+    say ""
+    say "Training complete! Saving..."
+    mind.mind_save(model, _mind_ckpt())
+    say "Saved: ", _mind_ckpt()
+    say "[TRAIN] Change mode to '--chat' to interact with model."
+
+    trainer.trainer_free(tr)
+    mind.mind_free(model)
+  ret 0
+
+// ── Mode: --chat ──────────────────────────────────────────────
+
+fn run_chat() -> int:
+  say "-- CHAT MODE --------------------------------------------"
+
+  unsafe:
+    say "Loading model from: ", _mind_ckpt()
+    model:*float = mind.mind_load(_mind_ckpt())
+    if model == 0 as *float:
+      say "No checkpoint found. Using random weights."
+      say "(Run --train first for a real model)"
+      say ""
+      model = mind.mind_new(MIND_VOCAB, MIND_DIM, MIND_QHEADS, MIND_KVHEADS, MIND_LAYERS, MIND_FFN, MIND_SEQLEN)
+      if model == 0 as *float:
+        say "ERROR: Allocation failed"
+        ret 1
+
+    mind.mind_info(model)
+    say ""
+    say "Type a message and press Enter. Type 'quit' to exit."
+    say "----------------------------------------------------------"
+
+    rng:int = 54321
+
+    while 1:
+      say ""
+      say "You: "
+
+      line_buf:[char;512]
+      line_len:int = 0
+      c:int = 0
+      eof:int = 0
+      while line_len < 511:
+        c = getchar()
+        if c == 10:
+          break
+        if c <= 0 || c == 0 - 1 || c == 255:
+          eof = 1
+          break
+        if c == 13:
+          continue
+        line_buf[line_len] = c as char
+        line_len = line_len + 1
+      line_buf[line_len] = 0 as char
+
+      if eof != 0:
+        say "Goodbye!"
+        break
+
+      if line_len == 0:
+        continue
+
+      input:str = (&line_buf[0]) as str
+
+      if strcmp(input, "quit") == 0 || strcmp(input, "exit") == 0:
+        say "Goodbye!"
+        break
+
+      say ""
+      say "TezzMind: "
+
+      response:str = mind.mind_generate(model, input, 128, 0.7, rng)
+      rng = rng * 1664525 + 1013904223
+
+      if response != 0:
+        say response
+        free(response)
+      else:
+        say "[No response]"
+
+    mind.mind_free(model)
+  ret 0
+
+// ── Mode: --info ──────────────────────────────────────────────
+
+fn run_info() -> int:
+  say "-- MODEL INFO -------------------------------------------"
+  unsafe:
+    model:*float = mind.mind_load(_mind_ckpt())
+    if model == 0 as *float:
+      say "No checkpoint at: ", _mind_ckpt()
+      say "Run --train first."
+      ret 1
+    mind.mind_info(model)
+    mind.mind_free(model)
+  ret 0
+
+// ── main ──────────────────────────────────────────────────────
+
+fn main() -> int:
+  _print_banner()
+
+  device.ai_init()
+  say "Device: ", device.best_backend_name()
+  say ""
+
+  say "Select Mode:"
+  say "  1. Demo Mode (verify architecture)"
+  say "  2. Train Mode (learn from seed text)"
+  say "  3. Chat Mode (interactive conversation)"
+  say "  4. Benchmark Mode (measure speed)"
+  say "  5. Info Mode (saved checkpoint card)"
+  say ""
+  say "Choice (1-5, default 1): "
+
+  c:int = 0
+  unsafe:
+    c = getchar()
+
+  if c != 10:
+    unsafe:
+      dummy:int = 0
+      while dummy != 10 && dummy != 255 && dummy != 0 - 1:
+        dummy = getchar()
+
+  say ""
+
+  if c == 50: // '2'
+    ret run_train()
+  if c == 51: // '3'
+    ret run_chat()
+  if c == 52: // '4'
+    ret run_bench()
+  if c == 53: // '5'
+    ret run_info()
+
+  ret run_demo()

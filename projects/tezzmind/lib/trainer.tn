@@ -1,0 +1,545 @@
+// ============================================================
+// trainer.tn  â€”  TezzMind On-Device Training Engine  v4.0 (AVX2)
+// ============================================================
+
+import "math"
+import "io"
+import "str"
+import "nn"
+import "mind"
+
+extern fn nn_adam_step(w:*float, m:*float, v:*float, g:*float, n:int, lr:float, b1:float, b2:float, eps:float, wd:float, step:int) -> int
+extern fn nn_grad_clip(grads:*float, n:int, max_norm:float) -> int
+
+// Slab accessors (convenience)
+fn _tf(s:*float, i:int) -> float:
+  v:float = 0.0
+  unsafe:
+    v = s[i]
+  ret v
+
+fn _tw(s:*float, i:int, v:float) -> int:
+  unsafe:
+    s[i] = v
+  ret 0
+
+fn _ti(s:*float, i:int) -> int:
+  ret _tf(s, i) as int
+
+fn _twi(s:*float, i:int, v:int) -> int:
+  _tw(s, i, v as float)
+  ret 0
+
+fn _trainer_grad_clip(grads:*float, n:int, max_norm:float) -> int:
+  if grads == 0 as *float || n <= 0 || max_norm <= 0.0:
+    ret 0 - 1
+  rc:int = nn_grad_clip(grads, n, max_norm)
+  if rc == 0:
+    ret 0
+  sum_sq:float = 0.0
+  i:int = 0
+  while i < n:
+    g:float = _tf(grads, i)
+    sum_sq = sum_sq + g * g
+    i = i + 1
+  norm:float = math.sqrt(sum_sq)
+  if norm > max_norm:
+    scale:float = max_norm / norm
+    i = 0
+    while i < n:
+      _tw(grads, i, _tf(grads, i) * scale)
+      i = i + 1
+  ret 0
+
+fn _trainer_adam_step(w:*float, m:*float, v:*float, g:*float, n:int, lr:float, b1:float, b2:float, eps:float, wd:float, step:int) -> int:
+  if w == 0 as *float || m == 0 as *float || v == 0 as *float || g == 0 as *float || n <= 0:
+    ret 0 - 1
+  rc:int = nn_adam_step(w, m, v, g, n, lr, b1, b2, eps, wd, step)
+  if rc == 0:
+    ret 0
+  step_f:float = step as float
+  if step <= 0:
+    step_f = 1.0
+  correct1:float = 1.0 / (1.0 - math.pow(b1, step_f))
+  correct2:float = 1.0 / (1.0 - math.pow(b2, step_f))
+  i:int = 0
+  while i < n:
+    wi:float = _tf(w, i)
+    gi:float = _tf(g, i) + wd * wi
+    mi:float = b1 * _tf(m, i) + (1.0 - b1) * gi
+    vi:float = b2 * _tf(v, i) + (1.0 - b2) * gi * gi
+    _tw(m, i, mi)
+    _tw(v, i, vi)
+    m_hat:float = mi * correct1
+    v_hat:float = vi * correct2
+    _tw(w, i, wi - lr * m_hat / (math.sqrt(v_hat) + eps))
+    i = i + 1
+  ret 0
+
+fn _tfw_f(f:*char, v:float) -> int:
+  b:*char
+  unsafe:
+    b = malloc(8)
+    p:*float = b as *float
+    p[0] = v
+    fwrite(b, 8, 1, f)
+    free(b)
+  ret 0
+
+fn _tfr_f(f:*char) -> float:
+  v:float = 0.0
+  b:*char
+  unsafe:
+    b = malloc(8)
+    fread(b, 8, 1, f)
+    p:*float = b as *float
+    v = p[0]
+    free(b)
+  ret v
+
+// Allocate trainer slab (holds step, lr, loss, best loss, and AdamW moments)
+fn trainer_new(n_weights:int, lr:float) -> *float:
+  if n_weights <= 0:
+    ret 0 as *float
+  hdr_sz:int = 16
+  total:int = hdr_sz + n_weights * 2  // m1 + m2 moments
+
+  raw:*char
+  unsafe:
+    raw = malloc(total * 8)
+  if raw == 0:
+    ret 0 as *float
+  tr:*float
+  unsafe:
+    tr = raw as *float
+
+  // Zero out moments and metadata
+  i:int = 0
+  while i < total:
+    _tw(tr, i, 0.0)
+    i = i + 1
+
+  _twi(tr, 0,  1415072078)  // magic 'TRNR'
+  _twi(tr, 1,  0)           // step = 0
+  _tw(tr,  2,  lr)          // learning rate
+  _tw(tr,  3,  9999.0)      // best loss
+  _twi(tr, 4,  0)           // total tokens processed
+  _tw(tr,  5,  0.9)         // beta1
+  _tw(tr,  6,  0.999)       // beta2
+  _tw(tr,  7,  1.0e-08)     // eps
+  _tw(tr,  8,  0.01)        // weight decay
+  _tw(tr,  9,  1.0)         // grad clip
+  _twi(tr, 10, n_weights)
+  _tw(tr,  11, 0.0)         // last loss
+
+  ret tr
+
+fn trainer_free(tr:*float) -> int:
+  if tr == 0 as *float: ret 0
+  unsafe:
+    free(tr as *char)
+  ret 0
+
+fn trainer_set_lr(tr:*float, lr:float) -> int:
+  if tr == 0 as *float: ret 0 - 1
+  _tw(tr, 2, lr)
+  ret 0
+
+fn trainer_set_weight_decay(tr:*float, wd:float) -> int:
+  if tr == 0 as *float: ret 0 - 1
+  if wd < 0.0:
+    wd = 0.0
+  _tw(tr, 8, wd)
+  ret 0
+
+fn trainer_set_grad_clip(tr:*float, clip:float) -> int:
+  if tr == 0 as *float: ret 0 - 1
+  if clip < 0.0:
+    clip = 0.0
+  _tw(tr, 9, clip)
+  ret 0
+
+fn trainer_step(tr:*float) -> int:
+  if tr == 0 as *float: ret 0
+  ret _ti(tr, 1)
+
+fn trainer_lr(tr:*float) -> float:
+  if tr == 0 as *float: ret 0.0
+  ret _tf(tr, 2)
+
+fn trainer_best_loss(tr:*float) -> float:
+  if tr == 0 as *float: ret 0.0 - 1.0
+  ret _tf(tr, 3)
+
+fn trainer_last_loss(tr:*float) -> float:
+  if tr == 0 as *float: ret 0.0 - 1.0
+  ret _tf(tr, 11)
+
+fn trainer_save(tr:*float, path:str) -> int:
+  if tr == 0 as *float || path == 0: ret 0 - 1
+  f:*char = fopen(path, "wb")
+  unsafe:
+    if f == 0 as *char: ret 0 - 1
+  nw:int = _ti(tr, 10)
+  total:int = 16 + nw * 2
+  i:int = 0
+  while i < total:
+    _tfw_f(f, _tf(tr, i))
+    i = i + 1
+  unsafe:
+    fclose(f)
+  ret 0
+
+fn trainer_load(tr:*float, path:str) -> int:
+  if tr == 0 as *float || path == 0: ret 0 - 1
+  f:*char = fopen(path, "rb")
+  unsafe:
+    if f == 0 as *char: ret 0 - 1
+  nw:int = _ti(tr, 10)
+  total:int = 16 + nw * 2
+  i:int = 0
+  while i < total:
+    _tw(tr, i, _tfr_f(f))
+    i = i + 1
+  unsafe:
+    fclose(f)
+  ret 0
+
+fn get_opt_path(ckpt_path:str) -> str:
+  if ckpt_path == 0: ret 0 as str
+  stripped:str = io.path_strip_ext(ckpt_path)
+  opt_path:str = str.str_cat(stripped, ".tnt")
+  free(stripped)
+  ret opt_path
+
+// â”€â”€ trainer_train_text: train on raw text using analytical backpropagation â”€â”€
+fn trainer_train_text(model:*float, tr:*float, text:str, steps:int, log_every:int, save_every:int, ckpt_path:str) -> float:
+  if model == 0 as *float || tr == 0 as *float || steps <= 0:
+    ret 0.0 - 1.0
+
+  nw:int = _ti(tr, 10)
+  lr_max:float = _tf(tr, 2)
+  beta1:float = _tf(tr, 5)
+  beta2:float = _tf(tr, 6)
+  eps:float = _tf(tr, 7)
+  wd:float = _tf(tr, 8)
+  clip:float = _tf(tr, 9)
+
+  max_seq:int = _ti(model, 6)  // _MH_SEQLEN = 6
+  T:int = 512
+  if T > max_seq:
+    T = max_seq
+
+  // Detect existing checkpoints and resume
+  opt_path:str = get_opt_path(ckpt_path)
+  if ckpt_path != 0 && io.file_exists(ckpt_path) != 0:
+    loaded_model:*float = mind.mind_load(ckpt_path)
+    if loaded_model != 0 as *float:
+      w_off:int = _ti(model, 11)
+      i:int = 0
+      while i < nw:
+        _tw(model, w_off + i, _tf(loaded_model, w_off + i))
+        i = i + 1
+      mind.mind_free(loaded_model)
+
+      if opt_path != 0 && io.file_exists(opt_path) != 0:
+        trainer_load(tr, opt_path)
+        say "[Resumed from checkpoint. Step: ", _ti(tr, 1), "]"
+
+  // Allocate token/target buffers and grad slab
+  tok_raw:*char
+  tgt_raw:*char
+  grads_raw:*char
+  unsafe:
+    tok_raw = malloc(T * 8)
+    tgt_raw = malloc(T * 8)
+    grads_raw = malloc((_ti(model, 11) + nw) * 8) // _MH_WOFF = 11
+
+  if tok_raw == 0 || tgt_raw == 0 || grads_raw == 0:
+    unsafe:
+      if tok_raw != 0: free(tok_raw)
+      if tgt_raw != 0: free(tgt_raw)
+      if grads_raw != 0: free(grads_raw)
+    if opt_path != 0: free(opt_path)
+    ret 0.0 - 1.0
+
+  tokens:*int = tok_raw as *int
+  targets:*int = tgt_raw as *int
+  grads:*float = grads_raw as *float
+
+  input_text_len:int = 0
+  if text != 0:
+    input_text_len = len(text)
+
+  // Use explicit text when supplied. File discovery is only a fallback.
+  listing:str = 0 as str
+  if input_text_len <= 0:
+    listing = io.glob_list("projects/tezzmind/train_data/*.txt")
+    if listing == 0:
+      listing = io.glob_list("train_data/*.txt")
+    else:
+      if len(listing) == 0:
+        free(listing)
+        listing = io.glob_list("train_data/*.txt")
+
+  has_files:int = 0
+  if listing != 0:
+    if len(listing) > 0:
+      has_files = 1
+
+  loss_sum:float = 0.0
+  step_start:int = _ti(tr, 1)
+  step_limit:int = step_start + steps
+
+  // Cosine LR and warmup configurations
+  warmup_steps:int = step_limit / 10
+  if warmup_steps < 10: warmup_steps = 10
+
+  step_cnt:int = 0
+  trained_steps:int = 0
+  last_loss:float = 0.0
+
+  while _ti(tr, 1) < step_limit:
+    if has_files != 0:
+      start:int = 0
+      ln:int = len(listing)
+      idx:int = 0
+      while idx <= ln && _ti(tr, 1) < step_limit:
+        at_end:int = 0
+        ch:int = 0
+        if idx == ln:
+          at_end = 1
+        else:
+          unsafe:
+            ch = (listing as *char)[idx] as int
+        if at_end != 0 || ch == 10:
+          if idx > start:
+            filepath:str = str.str_slice(listing, start, idx)
+            if filepath != 0:
+              file_text:str = io.read_all(filepath)
+              if file_text != 0:
+                text_len:int = len(file_text)
+                pos_idx:int = 0
+                stride:int = T / 2
+                while pos_idx + T < text_len && _ti(tr, 1) < step_limit:
+                  step_num:int = _ti(tr, 1) + 1
+                  _twi(tr, 1, step_num)
+
+                  // Warmup & Cosine Decay
+                  lr:float = lr_max
+                  if step_num <= warmup_steps:
+                    lr = lr_max * (step_num as float) / (warmup_steps as float)
+                  else:
+                    progress:float = ((step_num - warmup_steps) as float) / ((step_limit - warmup_steps) as float)
+                    if progress > 1.0: progress = 1.0
+                    lr = lr_max * 0.5 * (1.0 + math.cos(3.141592653589793 * progress))
+                  _tw(tr, 2, lr)
+
+                  // Fill tokens and targets
+                  j:int = 0
+                  while j < T:
+                    unsafe:
+                      tokens[j] = (file_text as *char)[pos_idx + j] as int & 255
+                      targets[j] = (file_text as *char)[pos_idx + j + 1] as int & 255
+                    j = j + 1
+
+                  loss:float = mind.mind_backward(model, tokens, targets, T, grads)
+                  loss_sum = loss_sum + loss
+                  step_cnt = step_cnt + 1
+                  trained_steps = trained_steps + 1
+                  last_loss = loss
+                  _tw(tr, 11, loss)
+                  if loss > 0.0:
+                    if loss < _tf(tr, 3):
+                      _tw(tr, 3, loss)
+
+                  w_off:int = _ti(model, 11)
+                  params_p:*float; grads_p:*float; m1_p:*float; m2_p:*float
+                  unsafe:
+                    params_p = (model as *char + w_off * 8) as *float
+                    grads_p  = (grads as *char + w_off * 8) as *float
+                    m1_p     = (tr as *char + 16 * 8) as *float
+                    m2_p     = (tr as *char + (16 + nw) * 8) as *float
+
+                  if clip > 0.0:
+                    _trainer_grad_clip(grads_p, nw, clip)
+
+                  _trainer_adam_step(params_p, m1_p, m2_p, grads_p, nw, lr, beta1, beta2, eps, wd, step_num)
+
+                  // Logging
+                  if log_every > 0:
+                    if step_num % log_every == 0:
+                      avg_loss:float = loss_sum / (step_cnt as float)
+                      say "Step ", step_num, " | lr = ", lr, " | loss = ", avg_loss
+                      loss_sum = 0.0
+                      step_cnt = 0
+                      if avg_loss < _tf(tr, 3):
+                        _tw(tr, 3, avg_loss)
+
+                  // Saving checkpoint
+                  if save_every > 0:
+                    if ckpt_path != 0:
+                      if step_num % save_every == 0:
+                        mind.mind_save(model, ckpt_path)
+                        trainer_save(tr, opt_path)
+                        say "[Checkpoint saved: step ", step_num, "]"
+
+                  pos_idx = pos_idx + stride
+                free(file_text)
+              free(filepath)
+          start = idx + 1
+        idx = idx + 1
+    else:
+      // Fallback to text argument
+      text_len:int = input_text_len
+      if text_len <= T:
+        break
+      pos_idx:int = 0
+      stride:int = T / 2
+      while pos_idx + T < text_len && _ti(tr, 1) < step_limit:
+        step_num:int = _ti(tr, 1) + 1
+        _twi(tr, 1, step_num)
+
+        lr:float = lr_max
+        if step_num <= warmup_steps:
+          lr = lr_max * (step_num as float) / (warmup_steps as float)
+        else:
+          progress:float = ((step_num - warmup_steps) as float) / ((step_limit - warmup_steps) as float)
+          if progress > 1.0: progress = 1.0
+          lr = lr_max * 0.5 * (1.0 + math.cos(3.141592653589793 * progress))
+        _tw(tr, 2, lr)
+
+        j:int = 0
+        while j < T:
+          unsafe:
+            tokens[j] = (text as *char)[pos_idx + j] as int & 255
+            targets[j] = (text as *char)[pos_idx + j + 1] as int & 255
+          j = j + 1
+
+        loss:float = mind.mind_backward(model, tokens, targets, T, grads)
+        loss_sum = loss_sum + loss
+        step_cnt = step_cnt + 1
+        trained_steps = trained_steps + 1
+        last_loss = loss
+        _tw(tr, 11, loss)
+        if loss > 0.0:
+          if loss < _tf(tr, 3):
+            _tw(tr, 3, loss)
+
+        w_off:int = _ti(model, 11)
+        params_p:*float; grads_p:*float; m1_p:*float; m2_p:*float
+        unsafe:
+          params_p = (model as *char + w_off * 8) as *float
+          grads_p  = (grads as *char + w_off * 8) as *float
+          m1_p     = (tr as *char + 16 * 8) as *float
+          m2_p     = (tr as *char + (16 + nw) * 8) as *float
+
+        if clip > 0.0:
+          _trainer_grad_clip(grads_p, nw, clip)
+
+        _trainer_adam_step(params_p, m1_p, m2_p, grads_p, nw, lr, beta1, beta2, eps, wd, step_num)
+
+        if log_every > 0:
+          if step_num % log_every == 0:
+            avg_loss:float = loss_sum / (step_cnt as float)
+            say "Step ", step_num, " | lr = ", lr, " | loss = ", avg_loss
+            loss_sum = 0.0
+            step_cnt = 0
+            if avg_loss < _tf(tr, 3):
+              _tw(tr, 3, avg_loss)
+
+        if save_every > 0:
+          if ckpt_path != 0:
+            if step_num % save_every == 0:
+              mind.mind_save(model, ckpt_path)
+              trainer_save(tr, opt_path)
+              say "[Checkpoint saved: step ", step_num, "]"
+
+        pos_idx = pos_idx + stride
+
+  if has_files != 0 && listing != 0:
+    free(listing)
+
+  if opt_path != 0:
+    free(opt_path)
+
+  unsafe:
+    free(tok_raw)
+    free(tgt_raw)
+    free(grads_raw)
+
+  if step_cnt > 0:
+    final_loss:float = loss_sum / (step_cnt as float)
+    _tw(tr, 11, final_loss)
+    if final_loss > 0.0:
+      if final_loss < _tf(tr, 3):
+        _tw(tr, 3, final_loss)
+    ret final_loss
+  if trained_steps > 0:
+    ret last_loss
+  ret 0.0 - 1.0
+
+fn trainer_eval_loss(model:*float, text:str, n_samples:int) -> float:
+  if model == 0 as *float || text == 0 || n_samples <= 0: ret 0.0 - 1.0
+  text_len:int = len(text)
+  if text_len < 10: ret 0.0 - 1.0
+
+  max_seq:int = _ti(model, 6)
+  T:int = 64
+  if T > max_seq:
+    T = max_seq
+  if T > text_len - 2:
+    T = text_len - 2
+
+  tok_raw:*char
+  tgt_raw:*char
+  grads_raw:*char
+  unsafe:
+    tok_raw = malloc(T * 8)
+    tgt_raw = malloc(T * 8)
+    grads_raw = malloc((_ti(model, 11) + _ti(model, 9)) * 8)
+
+  if tok_raw == 0 || tgt_raw == 0 || grads_raw == 0:
+    unsafe:
+      if tok_raw != 0: free(tok_raw)
+      if tgt_raw != 0: free(tgt_raw)
+      if grads_raw != 0: free(grads_raw)
+    ret 0.0 - 1.0
+
+  tokens:*int = tok_raw as *int
+  targets:*int = tgt_raw as *int
+  grads:*float = grads_raw as *float
+
+  total_loss:float = 0.0
+  rng:int = 999
+  i:int = 0
+  while i < n_samples:
+    rng = rng * 1664525 + 1013904223
+    bits:int = (rng >> 1) & 2147483647
+    pos_idx:int = bits % (text_len - T - 1)
+    if pos_idx < 0:
+      pos_idx = 0
+
+    j:int = 0
+    while j < T:
+      unsafe:
+        tokens[j] = (text as *char)[pos_idx + j] as int & 255
+        targets[j] = (text as *char)[pos_idx + j + 1] as int & 255
+      j = j + 1
+
+    loss:float = mind.mind_backward(model, tokens, targets, T, grads)
+    total_loss = total_loss + loss
+    i = i + 1
+
+  unsafe:
+    free(tok_raw)
+    free(tgt_raw)
+    free(grads_raw)
+
+  ret total_loss / (n_samples as float)
+
+fn trainer_info(tr:*float) -> int:
+  if tr == 0 as *float: ret 0 - 1
+  say "[Trainer] step=", _ti(tr, 1), " lr=", _tf(tr, 2), " best_loss=", _tf(tr, 3)
+  say "  AdamW: beta1=", _tf(tr, 5), " beta2=", _tf(tr, 6), " wd=", _tf(tr, 8)
+  ret 0

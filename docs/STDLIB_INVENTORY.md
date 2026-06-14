@@ -37,6 +37,7 @@ trust in the stable core.
 | `tezzdbql` | Query layer for TezzDB | Add parameterized query examples and tests. |
 | `actor` | Local actors, mailboxes, supervision, node metadata, and OTP-like app helpers | Local in-process spawn/send/receive, mailbox matching, restart supervision, hot version tags, and fail-closed remote node sends are native-smoke gated; add real scheduler, network distribution, and hot module replacement before promotion. |
 | `llm_core` | f64 CPU transformer primitives plus signed int8-weight matmul | Add f32/f16/bf16/uint8 and lower-bit lanes, tensor descriptors, model-load fixtures, GPU/NPU backend gates, and performance data before claiming production LLM support. |
+| `mind`, `trainer` | TezzMind tiny on-device transformer and training prototype | Forward/generation/training/save-load verification is native-smoke gated; add trained checkpoint quality metrics, tokenizer fixtures, dtype lanes, and performance reports before promotion. |
 | `gui`, `gui_win` | Host GUI APIs | Add Windows-only examples and platform notes. |
 | `tzgui`, `tzui`, `tnui`, `tezzui`, `wm` | UI stacks | Clarify supported host path and maturity. |
 | `mmap`, `sys`, `task`, `event`, `frame` | Systems/runtime helpers | Add platform matrix and failure behavior. |
@@ -48,7 +49,7 @@ trust in the stable core.
 | `gpu` | GPU runtime hooks | Backend availability matrix and fallback tests. |
 | `npu` | NPU/model runtime hooks | Backend availability matrix and explicit unsupported behavior. |
 | `tensor` | Tensor math helpers | Numeric correctness tests and memory ownership docs. |
-| `nn`, `llm`, `tokenizer` | AI/LLM experiments | Stable model format, tests, and performance notes; build on the gated `llm_core` primitive lane instead of untested backend assumptions. |
+| `nn`, `llm`, `tokenizer` | AI/LLM experiments | Stable model format, tests, and performance notes; build on the gated `llm_core` and TezzMind verification lanes instead of untested backend assumptions. |
 | `tts`, `stt` | Speech experiments | Platform audio/runtime notes and examples. |
 | `kernel`, `os` | Freestanding/kernel work | Separate build docs and target matrix. |
 | `arduino`, `raspi` | Embedded board helpers | Board-specific build and flashing docs. |
