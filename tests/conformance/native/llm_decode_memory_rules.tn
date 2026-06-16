@@ -1,0 +1,55 @@
+import "llm_core"
+
+fn near(actual:float, expected:float, eps:float) -> int:
+  diff:float = actual - expected
+  if diff < 0.0:
+    diff = 0.0 - diff
+  if diff <= eps:
+    ret 1
+  ret 0
+
+fn main() -> int:
+  unsafe:
+    d:KvCacheDesc
+    if llm_core.kv_cache_desc_fill(&d, 2, 16, 2, 4, llm_core.dtype_f16()) != 0:
+      ret 1
+    if d.bytes != 1024:
+      ret 2
+  if llm_core.kv_cache_bytes(2, 16, 2, 4, llm_core.dtype_f16()) != 1024:
+    ret 3
+  if llm_core.streaming_decode_window(10, 12, 16) != 16:
+    ret 4
+  if llm_core.streaming_decode_can_fit(10, 5, 16) == 0:
+    ret 5
+  if llm_core.streaming_decode_can_fit(10, 7, 16) != 0:
+    ret 6
+  if llm_core.backend_require_real(llm_core.backend_cpu()) != 0:
+    ret 7
+  if llm_core.backend_require_real(llm_core.backend_gpu()) == 0:
+    ret 8
+  if llm_core.backend_can_run_kernel(llm_core.backend_npu(), "matmul_f32") != 0:
+    ret 9
+
+  unsafe:
+    logits:[float;4]
+    probs:[float;4]
+    ref:[float;4]
+    logits[0] = 0.1
+    logits[1] = 0.7
+    logits[2] = 0.2
+    logits[3] = 0.0
+    if llm_core.tiny_decoder_next_token(&logits[0], 4) != 1:
+      ret 10
+    if llm_core.softmax_rows_f32(&probs[0], &logits[0], 1, 4) != 0:
+      ret 11
+    ref[0] = probs[0]
+    ref[1] = probs[1]
+    ref[2] = probs[2]
+    ref[3] = probs[3]
+    if near(llm_core.mse_f64(&probs[0], &ref[0], 4), 0.0, 1.0e-12) == 0:
+      ret 12
+    if near(llm_core.max_abs_diff_f64(&probs[0], &ref[0], 4), 0.0, 1.0e-12) == 0:
+      ret 13
+
+  say "llm-decode-memory-rules"
+  ret 0

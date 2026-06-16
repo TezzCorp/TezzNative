@@ -796,7 +796,8 @@ Delivered:
 
 ## Milestone 10: LLM Production Path
 
-Status: started for the first dtype-explicit kernel foundation.
+Status: started for the dtype, tensor, checkpoint, decode, and benchmark
+foundation.
 
 Goal: make TezzNative capable of honest small-model inference experiments first,
 then grow toward production LLM workloads only through tested dtype, tensor,
@@ -806,9 +807,9 @@ Current answer:
 
 - TezzNative cannot yet build, train, and serve a production-scale LLM from
   scratch.
-- TezzNative can now host the first f64 CPU transformer primitive lane and a
-  signed int8-weight matmul lane for correctness experiments and backend
-  validation.
+- TezzNative can now host a dtype-explicit CPU LLM kernel foundation for
+  correctness experiments, tiny decoder fixtures, and backend validation, but
+  it still cannot claim production-scale LLM training/serving.
 
 Delivered:
 
@@ -836,22 +837,39 @@ Delivered:
 - Added `projects/tezzmind/verify.tn` as the standalone on-device AI project
   verifier with visible checksum, top-token, loss, trainer-step, and checkpoint
   results.
+- Added f32 API-shape transformer primitives and f16/bf16 storage-lane matmul
+  with f32-style accumulation into TezzNative float outputs.
+- Added uint8 and q4 quantized matmul fallback paths plus calibration metadata
+  helpers.
+- Added tensor descriptors for dtype, shape, stride, device, alignment,
+  element bytes, logical size, and byte size, with pointer-fill APIs for
+  native-safe descriptor use.
+- Added KV-cache descriptors, streaming decode fit/window helpers, tiny decoder
+  argmax, numerical accuracy helpers, and fail-closed CPU/GPU/NPU backend
+  gates.
+- Added tokenizer byte known-answer helpers and fixtures.
+- Added native smoke fixtures for dtype lanes, tensor descriptors, tokenizer
+  known answers, and decode/KV memory rules on Windows/Linux x64; tiny frozen
+  checkpoint and trained checkpoint evaluation are Windows-native gated while
+  Linux `mind` native lowering remains a backend blocker.
+- Added `benchmarks/tezz/llm_core_matmul.tn` so latency, throughput, memory,
+  binary-size, and output-hash measurement is source-visible through the public
+  benchmark harness.
 
 Next production gaps:
 
-1. Add f32 kernels with the same API shape.
-2. Add f16/bf16 storage lanes with f32 accumulation.
-3. Extend quantized matmul to uint8, lower-bit packing, and calibration
-   metadata.
-4. Add tensor descriptors for dtype, shape, stride, device, and alignment.
-5. Add mmap/model-load fixtures for a tiny frozen checkpoint.
-6. Add tokenizer known-answer fixtures.
-7. Add KV-cache and streaming decode memory rules.
-8. Add GPU/NPU backend gates only where a real backend executes the kernels.
-9. Add latency, throughput, memory, and numerical accuracy benchmarks.
-10. Add a tiny end-to-end decoder fixture before claiming LLM inference support.
-11. Add trained checkpoint evaluation gates for TezzMind before claiming
-    reasoning AI behavior.
+1. Add true packed f32 storage/backends and accelerated f16/bf16 kernels.
+2. Add a stable mmap-capable model container with descriptor-checked tensors.
+3. Add tokenizer compatibility fixtures for real vocab/merge files.
+4. Add an end-to-end decoder fixture that combines tokenizer, checkpoint,
+   KV-cache, logits, and decode output in one test.
+5. Publish benchmark result baselines for latency, throughput, memory, and
+   numerical accuracy on named hardware.
+6. Fix Linux native lowering for `mind` so TezzMind checkpoint gates can run on
+   both primary x64 targets.
+7. Add GPU/NPU backend gates only when a real backend executes the kernels.
+8. Add held-out trained checkpoint quality metrics before claiming reasoning AI
+   behavior.
 
 Promotion rule:
 

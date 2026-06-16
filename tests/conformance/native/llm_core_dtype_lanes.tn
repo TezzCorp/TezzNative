@@ -1,0 +1,90 @@
+import "llm_core"
+
+fn near(actual:float, expected:float, eps:float) -> int:
+  diff:float = actual - expected
+  if diff < 0.0:
+    diff = 0.0 - diff
+  if diff <= eps:
+    ret 1
+  ret 0
+
+fn main() -> int:
+  unsafe:
+    a:[float;2]
+    b:[float;4]
+    out:[float;2]
+
+    a[0] = 1.0
+    a[1] = 2.0
+    b[0] = 3.0
+    b[1] = 4.0
+    b[2] = 5.0
+    b[3] = 6.0
+
+    if llm_core.matmul_f32(&out[0], &a[0], &b[0], 1, 2, 2) != 0:
+      ret 1
+    if near(out[0], 13.0, 1.0e-06) == 0 || near(out[1], 16.0, 1.0e-06) == 0:
+      ret 2
+
+    a16:[u16;2]
+    b16:[u16;4]
+    a16[0] = 15360 as u16
+    a16[1] = 16384 as u16
+    b16[0] = 16896 as u16
+    b16[1] = 17408 as u16
+    b16[2] = 17664 as u16
+    b16[3] = 17920 as u16
+    if llm_core.matmul_f16_f32(&out[0], &a16[0], &b16[0], 1, 2, 2) != 0:
+      ret 3
+    if near(out[0], 13.0, 1.0e-06) == 0 || near(out[1], 16.0, 1.0e-06) == 0:
+      ret 4
+
+    abf:[u16;2]
+    bbf:[u16;4]
+    abf[0] = 16256 as u16
+    abf[1] = 16384 as u16
+    bbf[0] = 16448 as u16
+    bbf[1] = 16512 as u16
+    bbf[2] = 16544 as u16
+    bbf[3] = 16576 as u16
+    if llm_core.matmul_bf16_f32(&out[0], &abf[0], &bbf[0], 1, 2, 2) != 0:
+      ret 5
+    if near(out[0], 13.0, 1.0e-06) == 0 || near(out[1], 16.0, 1.0e-06) == 0:
+      ret 6
+
+    bu8:[u8;4]
+    scales:[float;2]
+    zps:[int;2]
+    bu8[0] = 2 as u8
+    bu8[1] = 3 as u8
+    bu8[2] = 4 as u8
+    bu8[3] = 5 as u8
+    scales[0] = 1.0
+    scales[1] = 1.0
+    zps[0] = 0
+    zps[1] = 0
+    if llm_core.matmul_u8_f64(&out[0], &a[0], &bu8[0], &scales[0], &zps[0], 1, 2, 2) != 0:
+      ret 7
+    if near(out[0], 10.0, 1.0e-06) == 0 || near(out[1], 13.0, 1.0e-06) == 0:
+      ret 8
+
+    q4:[u8;2]
+    q4[0] = 33 as u8
+    q4[1] = 67 as u8
+    if llm_core.q4_get(&q4[0], 0, 0, 0) != 1:
+      ret 9
+    if llm_core.q4_get(&q4[0], 1, 0, 0) != 2:
+      ret 10
+    if llm_core.matmul_q4_f64(&out[0], &a[0], &q4[0], &scales[0], 1, 2, 2, 0, 0) != 0:
+      ret 11
+    if near(out[0], 7.0, 1.0e-06) == 0 || near(out[1], 10.0, 1.0e-06) == 0:
+      ret 12
+
+    meta:QuantMeta = llm_core.quant_meta(llm_core.dtype_q4(), 32, 8, 0.125, 2, 2)
+    if meta.dtype != llm_core.dtype_q4() || meta.block != 32:
+      ret 13
+    if llm_core.dtype_slot_bytes(llm_core.dtype_f16()) != 2 || llm_core.q4_slot_bytes(5) != 3:
+      ret 14
+
+  say "llm-core-dtype-lanes"
+  ret 0

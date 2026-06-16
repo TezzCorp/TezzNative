@@ -1,0 +1,46 @@
+import "mind"
+import "io"
+
+fn main() -> int:
+  path:str = "tezzmind_frozen_fixture.tnw"
+  io.file_delete(path)
+
+  mind.mind_set_seed(2026)
+  unsafe:
+    model:*float = mind.mind_new(128, 8, 2, 1, 1, 16, 8)
+    if model == 0 as *float:
+      ret 1
+    sum0:int = mind.mind_weight_checksum(model, 0)
+    if sum0 <= 0:
+      mind.mind_free(model)
+      ret 2
+    if mind.mind_save(model, path) != 0:
+      mind.mind_free(model)
+      ret 3
+    if mind.mind_file_matches(path, 128, 8, 2, 1, 1, 16, 8) == 0:
+      io.file_delete(path)
+      mind.mind_free(model)
+      ret 4
+    loaded:*float = mind.mind_load(path)
+    if loaded == 0 as *float:
+      io.file_delete(path)
+      mind.mind_free(model)
+      ret 5
+    sum1:int = mind.mind_weight_checksum(loaded, 0)
+    if sum1 != sum0:
+      mind.mind_free(loaded)
+      io.file_delete(path)
+      mind.mind_free(model)
+      ret 6
+    if mind.mind_file_matches(path, 128, 8, 2, 1, 1, 32, 8) != 0:
+      mind.mind_free(loaded)
+      io.file_delete(path)
+      mind.mind_free(model)
+      ret 7
+
+    mind.mind_free(loaded)
+    io.file_delete(path)
+    mind.mind_free(model)
+
+  say "tezzmind-frozen-checkpoint"
+  ret 0

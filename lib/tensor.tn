@@ -8,6 +8,18 @@ import "simd"
 import "math"
 import "io"
 
+let TENSOR_DTYPE_F64:int = 1
+let TENSOR_DTYPE_F32:int = 2
+let TENSOR_DTYPE_F16:int = 3
+let TENSOR_DTYPE_BF16:int = 4
+let TENSOR_DTYPE_I8:int = 5
+let TENSOR_DTYPE_U8:int = 6
+let TENSOR_DTYPE_Q4:int = 7
+
+let TENSOR_DEVICE_CPU:int = 0
+let TENSOR_DEVICE_GPU:int = 1
+let TENSOR_DEVICE_NPU:int = 2
+
 // Core multidimensional tensor.
 // Supports fast parallel batching and SIMD dot products.
 struct Tensor:
@@ -15,6 +27,180 @@ struct Tensor:
   rows:int
   cols:int
   size:int
+
+struct TensorDesc:
+  dtype:int
+  rows:int
+  cols:int
+  stride0:int
+  stride1:int
+  device:int
+  alignment:int
+  elem_bytes:int
+  size:int
+  bytes:int
+
+fn tensor_dtype_f64() -> int:
+  ret TENSOR_DTYPE_F64
+
+fn tensor_dtype_f32() -> int:
+  ret TENSOR_DTYPE_F32
+
+fn tensor_dtype_f16() -> int:
+  ret TENSOR_DTYPE_F16
+
+fn tensor_dtype_bf16() -> int:
+  ret TENSOR_DTYPE_BF16
+
+fn tensor_dtype_i8() -> int:
+  ret TENSOR_DTYPE_I8
+
+fn tensor_dtype_u8() -> int:
+  ret TENSOR_DTYPE_U8
+
+fn tensor_dtype_q4() -> int:
+  ret TENSOR_DTYPE_Q4
+
+fn tensor_device_cpu() -> int:
+  ret TENSOR_DEVICE_CPU
+
+fn tensor_device_gpu() -> int:
+  ret TENSOR_DEVICE_GPU
+
+fn tensor_device_npu() -> int:
+  ret TENSOR_DEVICE_NPU
+
+fn tensor_dtype_bytes(dtype:int) -> int:
+  if dtype == TENSOR_DTYPE_F64:
+    ret 8
+  if dtype == TENSOR_DTYPE_F32:
+    ret 4
+  if dtype == TENSOR_DTYPE_F16 || dtype == TENSOR_DTYPE_BF16:
+    ret 2
+  if dtype == TENSOR_DTYPE_I8 || dtype == TENSOR_DTYPE_U8:
+    ret 1
+  if dtype == TENSOR_DTYPE_Q4:
+    ret 1
+  ret 0
+
+fn tensor_desc(rows:int, cols:int, dtype:int, device:int, alignment:int) -> TensorDesc:
+  d:TensorDesc
+  d.dtype = dtype
+  d.rows = rows
+  d.cols = cols
+  d.stride0 = cols
+  d.stride1 = 1
+  d.device = device
+  d.alignment = alignment
+  d.elem_bytes = tensor_dtype_bytes(dtype)
+  d.size = rows * cols
+  d.bytes = d.size * d.elem_bytes
+  if dtype == TENSOR_DTYPE_Q4:
+    d.bytes = (d.size + 1) / 2
+  ret d
+
+fn tensor_desc_fill(out:*TensorDesc, rows:int, cols:int, dtype:int, device:int, alignment:int) -> int:
+  if out == 0 as *TensorDesc:
+    ret 0 - 1
+  unsafe:
+    (*out).dtype = dtype
+    (*out).rows = rows
+    (*out).cols = cols
+    (*out).stride0 = cols
+    (*out).stride1 = 1
+    (*out).device = device
+    (*out).alignment = alignment
+    (*out).elem_bytes = tensor_dtype_bytes(dtype)
+    (*out).size = rows * cols
+    (*out).bytes = (*out).size * (*out).elem_bytes
+    if dtype == TENSOR_DTYPE_Q4:
+      (*out).bytes = ((*out).size + 1) / 2
+  ret 0
+
+fn tensor_desc_strided(rows:int, cols:int, stride0:int, stride1:int, dtype:int, device:int, alignment:int) -> TensorDesc:
+  d:TensorDesc = tensor_desc(rows, cols, dtype, device, alignment)
+  d.stride0 = stride0
+  d.stride1 = stride1
+  if rows > 0 && cols > 0 && stride0 > 0 && stride1 > 0:
+    last:int = (rows - 1) * stride0 + (cols - 1) * stride1 + 1
+    d.size = last
+    d.bytes = last * d.elem_bytes
+    if dtype == TENSOR_DTYPE_Q4:
+      d.bytes = (last + 1) / 2
+  ret d
+
+fn tensor_desc_strided_fill(out:*TensorDesc, rows:int, cols:int, stride0:int, stride1:int, dtype:int, device:int, alignment:int) -> int:
+  if out == 0 as *TensorDesc:
+    ret 0 - 1
+  if tensor_desc_fill(out, rows, cols, dtype, device, alignment) != 0:
+    ret 0 - 1
+  unsafe:
+    (*out).stride0 = stride0
+    (*out).stride1 = stride1
+    if rows > 0 && cols > 0 && stride0 > 0 && stride1 > 0:
+      last:int = (rows - 1) * stride0 + (cols - 1) * stride1 + 1
+      (*out).size = last
+      (*out).bytes = last * (*out).elem_bytes
+      if dtype == TENSOR_DTYPE_Q4:
+        (*out).bytes = (last + 1) / 2
+  ret 0
+
+fn tensor_desc_valid(d:TensorDesc) -> int:
+  if d.rows <= 0 || d.cols <= 0:
+    ret 0
+  if d.stride0 <= 0 || d.stride1 <= 0:
+    ret 0
+  if d.elem_bytes <= 0 || d.bytes <= 0:
+    ret 0
+  if d.device != TENSOR_DEVICE_CPU && d.device != TENSOR_DEVICE_GPU && d.device != TENSOR_DEVICE_NPU:
+    ret 0
+  if d.alignment < 0:
+    ret 0
+  ret 1
+
+fn tensor_desc_valid_p(d:*TensorDesc) -> int:
+  if d == 0 as *TensorDesc:
+    ret 0
+  unsafe:
+    if (*d).rows <= 0 || (*d).cols <= 0:
+      ret 0
+    if (*d).stride0 <= 0 || (*d).stride1 <= 0:
+      ret 0
+    if (*d).elem_bytes <= 0 || (*d).bytes <= 0:
+      ret 0
+    if (*d).device != TENSOR_DEVICE_CPU && (*d).device != TENSOR_DEVICE_GPU && (*d).device != TENSOR_DEVICE_NPU:
+      ret 0
+    if (*d).alignment < 0:
+      ret 0
+  ret 1
+
+fn tensor_desc_is_contiguous(d:TensorDesc) -> int:
+  if tensor_desc_valid(d) == 0:
+    ret 0
+  if d.stride1 == 1 && d.stride0 == d.cols:
+    ret 1
+  ret 0
+
+fn tensor_desc_is_contiguous_p(d:*TensorDesc) -> int:
+  if tensor_desc_valid_p(d) == 0:
+    ret 0
+  unsafe:
+    if (*d).stride1 == 1 && (*d).stride0 == (*d).cols:
+      ret 1
+  ret 0
+
+fn tensor_desc_matches_buffer(d:TensorDesc, byte_len:int) -> int:
+  if tensor_desc_valid(d) == 0 || byte_len < d.bytes:
+    ret 0
+  ret 1
+
+fn tensor_desc_matches_buffer_p(d:*TensorDesc, byte_len:int) -> int:
+  if tensor_desc_valid_p(d) == 0:
+    ret 0
+  unsafe:
+    if byte_len < (*d).bytes:
+      ret 0
+  ret 1
 
 // Allocate a new zero-initialized Tensor
 fn tensor_new(rows:int, cols:int) -> Tensor:

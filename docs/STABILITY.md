@@ -34,8 +34,8 @@ and type checking, `sizeof`/`alignof`, comments and literals, nested blocks,
 function calls/returns, pointer-array roundtrip, struct value flow, named
 unknown value/module/function diagnostics,
 struct-field diagnostics, function-arity diagnostics, parser rejection cases,
-unsafe pointer/address-of coverage, and the first dtype-explicit f64
-`llm_core` import/correctness fixtures, including signed int8 quantized
+unsafe pointer/address-of coverage, and the dtype-explicit `llm_core`
+import/correctness fixtures for f64 primitives plus signed int8 quantized
 matmul with per-output-column dequant scales.
 
 ## Beta Surfaces
@@ -80,11 +80,17 @@ These surfaces are useful today but need more conformance tests:
   transport, preemptive scheduling, and hot module replacement remain beta
   runtime gates.
 - `tezzdb` and `tezzdbql`
-- `llm_core`; f64 CPU transformer primitives for matmul, RMSNorm, softmax,
-  RoPE, and signed int8-weight matmul with f64 accumulation are gated for
-  import/type checking, bytecode execution, and current Windows/Linux x64
-  native fallback behavior. This is a kernel foundation, not a full production
+- `llm_core`; f64/f32 API-shape CPU transformer primitives, f16/bf16 storage
+  lane matmul with f32-style accumulation, signed int8/uint8/q4 quantized
+  matmul, calibration metadata, KV-cache/decode helpers, numerical accuracy
+  helpers, and fail-closed GPU/NPU backend gates are covered by source-visible
+  check, bytecode, benchmark, and native smoke fixtures on the current
+  Windows/Linux x64 path. This is a kernel foundation, not a full production
   LLM training or serving contract.
+- `mind` and `trainer`; TezzMind forward/training/checkpoint evaluation is
+  currently Windows-native gated. Linux native `mind` lowering is skipped by the
+  POSIX smoke runner until the backend issue is fixed, so TezzMind must not be
+  claimed as primary-target native complete.
 - GUI modules on supported host platforms
 
 ## Experimental Surfaces

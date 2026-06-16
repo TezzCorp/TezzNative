@@ -1,0 +1,23 @@
+import "tokenizer"
+
+fn main() -> int:
+  if tokenizer.tokenizer_byte_count("Hi") != 2:
+    ret 1
+
+  unsafe:
+    ids:[int;4]
+    out:[char;4]
+    n:int = tokenizer.tokenizer_byte_encode_to("Hi", &ids[0], 4)
+    if n != 2:
+      ret 2
+    if ids[0] != 72 || ids[1] != 105:
+      ret 3
+    if tokenizer.tokenizer_byte_decode_to(&ids[0], n, &out[0], 4) != 2:
+      ret 4
+    if out[0] as int != 72 || out[1] as int != 105 || out[2] != 0 as char:
+      ret 5
+    if tokenizer.tokenizer_byte_encode_to("toolong", &ids[0], 4) != 0 - 1:
+      ret 6
+
+  say "tokenizer-known-answers"
+  ret 0

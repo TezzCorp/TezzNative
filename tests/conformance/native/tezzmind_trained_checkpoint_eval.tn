@@ -1,0 +1,73 @@
+import "mind"
+import "trainer"
+import "io"
+
+fn finite(v:float) -> int:
+  if v != v:
+    ret 0
+  ret 1
+
+fn main() -> int:
+  text:str = "abababababababababababababababababababababababababababababababab"
+  path:str = "tezzmind_trained_eval.tnw"
+  io.file_delete(path)
+
+  mind.mind_set_seed(314)
+  unsafe:
+    model:*float = mind.mind_new(128, 8, 2, 1, 1, 16, 16)
+    if model == 0 as *float:
+      ret 1
+
+    nw:int = mind.mind_get_nw(model)
+    tr:*float = trainer.trainer_new(nw, 0.02)
+    if tr == 0 as *float:
+      mind.mind_free(model)
+      ret 2
+    trainer.trainer_set_weight_decay(tr, 0.0)
+    trainer.trainer_set_grad_clip(tr, 1.0)
+
+    before:float = trainer.trainer_eval_loss(model, text, 2)
+    if finite(before) == 0 || before <= 0.0:
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 3
+    last:float = trainer.trainer_train_text(model, tr, text, 16, 0, 0, 0 as str)
+    if finite(last) == 0 || last <= 0.0:
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 4
+    after:float = trainer.trainer_eval_loss(model, text, 2)
+    if finite(after) == 0 || after <= 0.0 || after > before:
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 5
+    acc:int = mind.mind_eval_next_token_accuracy(model, text, 8)
+    if acc < 0 || acc > 8:
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 6
+    if mind.mind_save(model, path) != 0:
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 7
+    loaded:*float = mind.mind_load(path)
+    if loaded == 0 as *float:
+      io.file_delete(path)
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 8
+    loaded_loss:float = trainer.trainer_eval_loss(loaded, text, 2)
+    if finite(loaded_loss) == 0 || loaded_loss <= 0.0 || loaded_loss > before:
+      mind.mind_free(loaded)
+      io.file_delete(path)
+      trainer.trainer_free(tr)
+      mind.mind_free(model)
+      ret 9
+
+    mind.mind_free(loaded)
+    io.file_delete(path)
+    trainer.trainer_free(tr)
+    mind.mind_free(model)
+
+  say "tezzmind-trained-checkpoint-eval"
+  ret 0

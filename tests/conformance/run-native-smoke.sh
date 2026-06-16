@@ -50,6 +50,13 @@ for file in "$SMOKE_DIR"/*.tn; do
       ;;
   esac
 
+  case "$(uname -s):$name" in
+    Linux*:tezzmind_*.tn)
+      echo "NATIVE_SKIP $name platform=windows-tezzmind-native"
+      continue
+      ;;
+  esac
+
   output="$("$TEZZC" check "$file" 2>&1)"
   rc=$?
   if [[ "$rc" -ne 0 ]]; then

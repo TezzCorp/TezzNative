@@ -46,7 +46,7 @@ struct Tokenizer:
   merges:*TokMerge
   n_merges:int
   // Byte tokens (256 raw bytes as token IDs)
-  byte_tokens:[int;256]
+  byte_tokens:*int
   // Special token IDs
   bos_id:int   // beginning of sequence
   eos_id:int   // end of sequence
@@ -291,10 +291,41 @@ fn _tok_parse_merges(tok:*Tokenizer, text:str) -> int:
 fn tokenizer_new() -> *Tokenizer:
   tok:*Tokenizer = (*Tokenizer)malloc(sizeof(Tokenizer))
   if tok == 0: ret 0 as *Tokenizer
+  (*tok).entries = 0 as *TokEntry
+  (*tok).merges = 0 as *TokMerge
+  (*tok).byte_tokens = 0 as *int
+  (*tok).out_buf = 0 as *int
+  (*tok).n_vocab = 0
+  (*tok).n_merges = 0
+  (*tok).out_cap = 0
+  (*tok).out_len = 0
+  (*tok).bos_id = 0
+  (*tok).eos_id = 50256  // GPT-2 default
+  (*tok).pad_id = 0 - 1
+  (*tok).unk_id = 0
+  (*tok).byte_tokens = (*int)malloc(sizeof(int) * 256)
   (*tok).entries = (*TokEntry)malloc(sizeof(TokEntry) * TOKENIZER_MAX_VOCAB)
   (*tok).merges  = (*TokMerge)malloc(sizeof(TokMerge) * TOKENIZER_MAX_MERGES)
   (*tok).out_buf = (*int)malloc(sizeof(int) * 8192)
-  if (*tok).entries == 0 || (*tok).merges == 0 || (*tok).out_buf == 0:
+  if (*tok).byte_tokens == 0 || (*tok).entries == 0 || (*tok).merges == 0 || (*tok).out_buf == 0:
+    tokenizer_free(tok)
+    ret 0 as *Tokenizer
+  i:int = 0
+  while i < 256:
+    (*tok).byte_tokens[i] = i
+    i = i + 1
+  (*tok).out_cap = 8192
+  ret tok
+
+fn tokenizer_byte_new() -> *Tokenizer:
+  tok:*Tokenizer = (*Tokenizer)malloc(sizeof(Tokenizer))
+  if tok == 0: ret 0 as *Tokenizer
+  (*tok).entries = 0 as *TokEntry
+  (*tok).merges = 0 as *TokMerge
+  (*tok).byte_tokens = 0 as *int
+  (*tok).out_buf = (*int)malloc(sizeof(int) * 8192)
+  (*tok).byte_tokens = (*int)malloc(sizeof(int) * 256)
+  if (*tok).out_buf == 0 || (*tok).byte_tokens == 0:
     tokenizer_free(tok)
     ret 0 as *Tokenizer
   (*tok).n_vocab = 0
@@ -302,10 +333,9 @@ fn tokenizer_new() -> *Tokenizer:
   (*tok).out_cap = 8192
   (*tok).out_len = 0
   (*tok).bos_id = 0
-  (*tok).eos_id = 50256  // GPT-2 default
+  (*tok).eos_id = 0
   (*tok).pad_id = 0 - 1
   (*tok).unk_id = 0
-  // Initialize byte tokens (IDs 0-255 map to themselves by default)
   i:int = 0
   while i < 256:
     (*tok).byte_tokens[i] = i
@@ -355,6 +385,7 @@ fn tokenizer_free(tok:*Tokenizer) -> int:
       i = i + 1
     free((*tok).entries as *char)
   if (*tok).merges != 0: free((*tok).merges as *char)
+  if (*tok).byte_tokens != 0: free((*tok).byte_tokens as *char)
   if (*tok).out_buf != 0: free((*tok).out_buf as *char)
   free(tok)
   ret 0
@@ -528,9 +559,12 @@ fn tokenizer_decode(tok:*Tokenizer, ids:*int, n:int) -> str:
         break
       j = j + 1
     if found == 0:
-      // Unknown: emit raw byte
+      // Byte fallback: raw byte tokens 0..255 round-trip without a vocab entry.
       if pos + 2 < out_cap:
-        out[pos] = 63 as char  // '?'
+        if tid >= 0 && tid < 256:
+          out[pos] = tid as char
+        else:
+          out[pos] = 63 as char  // '?'
         pos = pos + 1
     i = i + 1
   out[pos] = 0 as char
@@ -550,6 +584,41 @@ fn tokenizer_decode_token(tok:*Tokenizer, id:int) -> str:
       ret p as str
     i = i + 1
   ret 0 as str
+
+fn tokenizer_byte_count(text:str) -> int:
+  if text == 0:
+    ret 0
+  ret len(text)
+
+fn tokenizer_byte_encode_to(text:str, out:*int, max_tokens:int) -> int:
+  if text == 0 || out == 0 as *int || max_tokens < 0:
+    ret 0 - 1
+  n:int = len(text)
+  if n > max_tokens:
+    ret 0 - 1
+  i:int = 0
+  while i < n:
+    unsafe:
+      out[i] = (text as *char)[i] as int & 255
+    i = i + 1
+  ret n
+
+fn tokenizer_byte_decode_to(ids:*int, n:int, out:*char, out_cap:int) -> int:
+  if ids == 0 as *int || out == 0 as *char || n < 0 || out_cap <= n:
+    ret 0 - 1
+  i:int = 0
+  while i < n:
+    v:int = 0
+    unsafe:
+      v = ids[i]
+    if v < 0 || v > 255:
+      v = 63
+    unsafe:
+      out[i] = v as char
+    i = i + 1
+  unsafe:
+    out[n] = 0 as char
+  ret n
 
 // Count tokens without allocation
 fn tokenizer_count(tok:*Tokenizer, text:str) -> int:

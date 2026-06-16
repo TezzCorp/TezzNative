@@ -12,6 +12,7 @@ run metadata.
 | `sum_loop` | Numeric loop | Integer loop lowering and arithmetic throughput | check, bytecode, native |
 | `string_scan` | String processing | Byte scanning, nested loops, and integer accumulation | check, bytecode, native |
 | `file_io` | File read/write | Binary file write, size check, readback, byte accumulation, cleanup | check, bytecode, native |
+| `llm_core_matmul` | Matrix math / LLM core | CPU f32 API-shape matmul fixture plus tiny decoder sanity; records latency, memory, binary size, exit code, and output hash through the normal harness | check, bytecode, native |
 
 The same workload names are mirrored where practical under `benchmarks/python`,
 `benchmarks/c`, `benchmarks/node`, `benchmarks/go`, and `benchmarks/rust`.
@@ -27,7 +28,7 @@ and platform gates exist:
 | --- | --- |
 | JSON parsing | Waiting for a stable JSON module or first-party package fixture. |
 | HTTP server throughput | Waiting for a dedicated local load-driver and stable server fixture. |
-| Matrix math | Waiting for a real supported numeric backend target and correctness gate. |
+| Matrix math | CPU fallback fixture exists; no accelerated backend performance claim yet. |
 | GPU/NPU/LLM | Experimental only; fallback results must never be labeled as hardware acceleration. |
 
 ## Result Files

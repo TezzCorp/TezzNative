@@ -1,4 +1,5 @@
-# registry-meta v1 lines=46 payload=4557F7EF key=none sig=none
+# registry-meta v1 lines=49 payload=761508E6 key=none sig=none
+actor@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/actor.tn 38BA8BDB
 arena@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/arena.tn 7B42E28B
 color@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/color.tn 10472682
 cyber@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/cyber.tn 0E0374EE
@@ -11,10 +12,11 @@ gui_win@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/gui_win.tn 3FCB4390
 intrin@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/intrin.tn 4D2A6999
 io@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/io.tn 0669EF63
 llm@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/llm.tn 207FE104
-llm_core@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/llm_core.tn 6DE89F1C
+llm_core@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/llm_core.tn 58CA15B3
 math@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/math.tn 5C1ECAA3
+mind@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/mind.tn 358D2847
 net@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/net.tn 6F504BA1
-nn@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/nn.tn 5613EA7E
+nn@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/nn.tn 776C769A
 npu@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/npu.tn 39D27BD8
 os@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/os.tn 24B1A8F5
 simd@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/simd.tn 2382C055
@@ -23,11 +25,11 @@ str@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/str.tn 4DE809E3
 stt@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/stt.tn 787BE717
 sys@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/sys.tn 78E3A6B7
 task@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/task.tn 41478EC5
-tensor@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/tensor.tn 7169C46D
+tensor@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/tensor.tn 252E4E5D
 tezzapi@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/tezzapi.tn 197FB499
 tezzdb@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/tezzdb.tn 07A98226
 tezzdbql@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/tezzdbql.tn 6A7DAA10
-tezzinstall@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/tezzinstall.tn 16F741BD
+tezzinstall@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/tezzinstall.tn 7EF0717E
 tezzserve@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/tezzserve.tn 3F77DED4
 tezzsetup@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/tezzsetup.tn 35AB2C87
 tezzui@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/tezzui.tn 23AA9512
@@ -36,7 +38,8 @@ tls@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/tls.tn 4527F9AA
 tnauto@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/tnauto.tn 7459BF02
 tnui@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/tnui.tn 12D9128F
 tnx@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/tnx.tn 4F5F093F
-tokenizer@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/tokenizer.tn 6A1DF450
+tokenizer@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/tokenizer.tn 3AEF4023
+trainer@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/trainer.tn 15E73CDF
 tsm@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/tsm.tn 2A702A27
 tts@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/tts.tn 339718AE
 tzgui@0.1.0 https://tn.tezzcorp.com/download/sdk/lib/tzgui.tn 6B953795

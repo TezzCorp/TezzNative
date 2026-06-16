@@ -1,0 +1,36 @@
+import "tensor"
+
+fn main() -> int:
+  unsafe:
+    d:TensorDesc
+    if tensor.tensor_desc_fill(&d, 3, 4, tensor.tensor_dtype_f16(), tensor.tensor_device_cpu(), 32) != 0:
+      ret 1
+    if tensor.tensor_desc_valid_p(&d) == 0:
+      ret 2
+    if tensor.tensor_desc_is_contiguous_p(&d) == 0:
+      ret 3
+    if d.bytes != 24:
+      ret 4
+    if tensor.tensor_desc_matches_buffer_p(&d, 23) != 0:
+      ret 5
+    if tensor.tensor_desc_matches_buffer_p(&d, 24) == 0:
+      ret 6
+
+    q:TensorDesc
+    if tensor.tensor_desc_fill(&q, 3, 4, tensor.tensor_dtype_q4(), tensor.tensor_device_cpu(), 16) != 0:
+      ret 7
+    if q.bytes != 6:
+      ret 8
+
+    s:TensorDesc
+    if tensor.tensor_desc_strided_fill(&s, 2, 3, 5, 2, tensor.tensor_dtype_f32(), tensor.tensor_device_cpu(), 64) != 0:
+      ret 9
+    if tensor.tensor_desc_valid_p(&s) == 0:
+      ret 10
+    if tensor.tensor_desc_is_contiguous_p(&s) != 0:
+      ret 11
+    if s.bytes != 40:
+      ret 12
+
+  say "tensor-descriptor"
+  ret 0

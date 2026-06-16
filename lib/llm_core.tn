@@ -11,8 +11,122 @@ extern fn tezz_ai_rmsnorm_rows_f64(out:*float, x:*float, weight:*float, rows:int
 extern fn tezz_ai_softmax_rows_f64(out:*float, x:*float, rows:int, cols:int) -> int
 extern fn tezz_ai_rope_f64(q:*float, k:*float, pos:int, dim:int, base:float) -> int
 
+let LLM_DTYPE_F64:int = 1
+let LLM_DTYPE_F32:int = 2
+let LLM_DTYPE_F16:int = 3
+let LLM_DTYPE_BF16:int = 4
+let LLM_DTYPE_I8:int = 5
+let LLM_DTYPE_U8:int = 6
+let LLM_DTYPE_Q4:int = 7
+
+let LLM_DEVICE_CPU:int = 0
+let LLM_DEVICE_GPU:int = 1
+let LLM_DEVICE_NPU:int = 2
+
+struct QuantMeta:
+  dtype:int
+  block:int
+  zero_point:int
+  scale:float
+  rows:int
+  cols:int
+
+struct KvCacheDesc:
+  layers:int
+  max_seq:int
+  kv_heads:int
+  head_dim:int
+  dtype:int
+  bytes:int
+
+fn dtype_f64() -> int:
+  ret LLM_DTYPE_F64
+
+fn dtype_f32() -> int:
+  ret LLM_DTYPE_F32
+
+fn dtype_f16() -> int:
+  ret LLM_DTYPE_F16
+
+fn dtype_bf16() -> int:
+  ret LLM_DTYPE_BF16
+
+fn dtype_i8() -> int:
+  ret LLM_DTYPE_I8
+
+fn dtype_u8() -> int:
+  ret LLM_DTYPE_U8
+
+fn dtype_q4() -> int:
+  ret LLM_DTYPE_Q4
+
+fn backend_cpu() -> int:
+  ret LLM_DEVICE_CPU
+
+fn backend_gpu() -> int:
+  ret LLM_DEVICE_GPU
+
+fn backend_npu() -> int:
+  ret LLM_DEVICE_NPU
+
 fn f64_slot_bytes() -> int:
   ret 8
+
+fn f32_slot_bytes() -> int:
+  ret 4
+
+fn f16_slot_bytes() -> int:
+  ret 2
+
+fn bf16_slot_bytes() -> int:
+  ret 2
+
+fn q4_slot_bytes(n:int) -> int:
+  if n <= 0:
+    ret 0
+  ret (n + 1) / 2
+
+fn dtype_slot_bytes(dtype:int) -> int:
+  if dtype == LLM_DTYPE_F64:
+    ret 8
+  if dtype == LLM_DTYPE_F32:
+    ret 4
+  if dtype == LLM_DTYPE_F16 || dtype == LLM_DTYPE_BF16:
+    ret 2
+  if dtype == LLM_DTYPE_I8 || dtype == LLM_DTYPE_U8:
+    ret 1
+  if dtype == LLM_DTYPE_Q4:
+    ret 1
+  ret 0
+
+fn quant_meta(dtype:int, block:int, zero_point:int, scale:float, rows:int, cols:int) -> QuantMeta:
+  q:QuantMeta
+  q.dtype = dtype
+  q.block = block
+  q.zero_point = zero_point
+  q.scale = scale
+  q.rows = rows
+  q.cols = cols
+  if q.block <= 0:
+    q.block = cols
+  if q.scale == 0.0:
+    q.scale = 1.0
+  ret q
+
+fn backend_available(backend:int) -> int:
+  if backend == LLM_DEVICE_CPU:
+    ret 1
+  ret 0
+
+fn backend_require_real(backend:int) -> int:
+  if backend_available(backend) != 0:
+    ret 0
+  ret 0 - 1
+
+fn backend_can_run_kernel(backend:int, kernel_name:str) -> int:
+  if backend == LLM_DEVICE_CPU:
+    ret 1
+  ret 0
 
 fn _valid_matmul(m:int, n:int, k:int) -> int:
   if m <= 0 || n <= 0 || k <= 0:
@@ -23,6 +137,55 @@ fn _valid_rows_cols(rows:int, cols:int) -> int:
   if rows <= 0 || cols <= 0:
     ret 0
   ret 1
+
+fn _pow2(exp:int) -> float:
+  out:float = 1.0
+  if exp >= 0:
+    i:int = 0
+    while i < exp:
+      out = out * 2.0
+      i = i + 1
+    ret out
+  i:int = 0
+  limit:int = 0 - exp
+  while i < limit:
+    out = out * 0.5
+    i = i + 1
+  ret out
+
+fn f16_to_f32_bits(h:u16) -> float:
+  bits:int = h as int
+  sign:int = (bits >> 15) & 1
+  exp:int = (bits >> 10) & 31
+  mant:int = bits & 1023
+  out:float = 0.0
+  if exp == 0:
+    out = (mant as float) / 1024.0 * _pow2(0 - 14)
+  else:
+    if exp == 31:
+      out = 3.402823e38
+    else:
+      out = (1.0 + (mant as float) / 1024.0) * _pow2(exp - 15)
+  if sign != 0:
+    out = 0.0 - out
+  ret out
+
+fn bf16_to_f32_bits(h:u16) -> float:
+  bits:int = h as int
+  sign:int = (bits >> 15) & 1
+  exp:int = (bits >> 7) & 255
+  mant:int = bits & 127
+  out:float = 0.0
+  if exp == 0:
+    out = (mant as float) / 128.0 * _pow2(0 - 126)
+  else:
+    if exp == 255:
+      out = 3.402823e38
+    else:
+      out = (1.0 + (mant as float) / 128.0) * _pow2(exp - 127)
+  if sign != 0:
+    out = 0.0 - out
+  ret out
 
 fn matmul_f64_scalar(out:*float, a:*float, b:*float, m:int, n:int, k:int) -> int:
   if out == 0 as *float || a == 0 as *float || b == 0 as *float:
@@ -56,6 +219,70 @@ fn matmul_f64(out:*float, a:*float, b:*float, m:int, n:int, k:int) -> int:
   if rc == 0:
     ret 0
   ret matmul_f64_scalar(out, a, b, m, n, k)
+
+fn matmul_f32_scalar(out:*float, a:*float, b:*float, m:int, n:int, k:int) -> int:
+  ret matmul_f64_scalar(out, a, b, m, n, k)
+
+fn matmul_f32(out:*float, a:*float, b:*float, m:int, n:int, k:int) -> int:
+  ret matmul_f32_scalar(out, a, b, m, n, k)
+
+fn matmul_f16_f32_scalar(out:*float, a:*u16, b:*u16, m:int, n:int, k:int) -> int:
+  if out == 0 as *float || a == 0 as *u16 || b == 0 as *u16:
+    ret 0 - 1
+  if _valid_matmul(m, n, k) == 0:
+    ret 0 - 1
+
+  row:int = 0
+  while row < m:
+    col:int = 0
+    while col < n:
+      acc:float = 0.0
+      p:int = 0
+      while p < k:
+        av:float = 0.0
+        bv:float = 0.0
+        unsafe:
+          av = f16_to_f32_bits(a[row * k + p])
+          bv = f16_to_f32_bits(b[p * n + col])
+        acc = acc + av * bv
+        p = p + 1
+      unsafe:
+        out[row * n + col] = acc
+      col = col + 1
+    row = row + 1
+  ret 0
+
+fn matmul_f16_f32(out:*float, a:*u16, b:*u16, m:int, n:int, k:int) -> int:
+  ret matmul_f16_f32_scalar(out, a, b, m, n, k)
+
+fn matmul_bf16_f32_scalar(out:*float, a:*u16, b:*u16, m:int, n:int, k:int) -> int:
+  if out == 0 as *float || a == 0 as *u16 || b == 0 as *u16:
+    ret 0 - 1
+  if _valid_matmul(m, n, k) == 0:
+    ret 0 - 1
+
+  row:int = 0
+  while row < m:
+    col:int = 0
+    while col < n:
+      acc:float = 0.0
+      p:int = 0
+      while p < k:
+        av:float = 0.0
+        bv:float = 0.0
+        unsafe:
+          av = bf16_to_f32_bits(a[row * k + p])
+          bv = bf16_to_f32_bits(b[p * n + col])
+        acc = acc + av * bv
+        p = p + 1
+      unsafe:
+        out[row * n + col] = acc
+      col = col + 1
+    row = row + 1
+  ret 0
+
+fn matmul_bf16_f32(out:*float, a:*u16, b:*u16, m:int, n:int, k:int) -> int:
+  ret matmul_bf16_f32_scalar(out, a, b, m, n, k)
 
 fn matmul_i8_f64_scalar(out:*float, a:*float, b:*i8, scales:*float, m:int, n:int, k:int) -> int:
   if out == 0 as *float || a == 0 as *float || b == 0 as *i8:
@@ -97,6 +324,89 @@ fn matmul_i8_f64(out:*float, a:*float, b:*i8, scales:*float, m:int, n:int, k:int
   if rc == 0:
     ret 0
   ret matmul_i8_f64_scalar(out, a, b, scales, m, n, k)
+
+fn matmul_u8_f64_scalar(out:*float, a:*float, b:*u8, scales:*float, zero_points:*int, m:int, n:int, k:int) -> int:
+  if out == 0 as *float || a == 0 as *float || b == 0 as *u8:
+    ret 0 - 1
+  if _valid_matmul(m, n, k) == 0:
+    ret 0 - 1
+
+  row:int = 0
+  while row < m:
+    col:int = 0
+    while col < n:
+      scale:float = 1.0
+      zp:int = 0
+      if scales != 0 as *float:
+        unsafe:
+          scale = scales[col]
+      if zero_points != 0 as *int:
+        unsafe:
+          zp = zero_points[col]
+      acc:float = 0.0
+      p:int = 0
+      while p < k:
+        av:float = 0.0
+        q:int = 0
+        unsafe:
+          av = a[row * k + p]
+          q = b[p * n + col] as int
+        acc = acc + av * (((q - zp) as float) * scale)
+        p = p + 1
+      unsafe:
+        out[row * n + col] = acc
+      col = col + 1
+    row = row + 1
+  ret 0
+
+fn matmul_u8_f64(out:*float, a:*float, b:*u8, scales:*float, zero_points:*int, m:int, n:int, k:int) -> int:
+  ret matmul_u8_f64_scalar(out, a, b, scales, zero_points, m, n, k)
+
+fn q4_get(packed:*u8, idx:int, signed:int, zero_point:int) -> int:
+  if packed == 0 as *u8 || idx < 0:
+    ret 0
+  byte:int = 0
+  unsafe:
+    byte = packed[idx / 2] as int
+  nib:int = byte & 15
+  if (idx & 1) != 0:
+    nib = (byte >> 4) & 15
+  if signed != 0 && nib >= 8:
+    nib = nib - 16
+  ret nib - zero_point
+
+fn matmul_q4_f64_scalar(out:*float, a:*float, b:*u8, scales:*float, m:int, n:int, k:int, signed:int, zero_point:int) -> int:
+  if out == 0 as *float || a == 0 as *float || b == 0 as *u8:
+    ret 0 - 1
+  if _valid_matmul(m, n, k) == 0:
+    ret 0 - 1
+
+  row:int = 0
+  while row < m:
+    col:int = 0
+    while col < n:
+      scale:float = 1.0
+      if scales != 0 as *float:
+        unsafe:
+          scale = scales[col]
+      acc:float = 0.0
+      p:int = 0
+      while p < k:
+        av:float = 0.0
+        unsafe:
+          av = a[row * k + p]
+        packed_idx:int = p * n + col
+        q:int = q4_get(b, packed_idx, signed, zero_point)
+        acc = acc + av * ((q as float) * scale)
+        p = p + 1
+      unsafe:
+        out[row * n + col] = acc
+      col = col + 1
+    row = row + 1
+  ret 0
+
+fn matmul_q4_f64(out:*float, a:*float, b:*u8, scales:*float, m:int, n:int, k:int, signed:int, zero_point:int) -> int:
+  ret matmul_q4_f64_scalar(out, a, b, scales, m, n, k, signed, zero_point)
 
 fn rmsnorm_rows_f64_scalar(out:*float, x:*float, weight:*float, rows:int, cols:int, eps:float) -> int:
   if out == 0 as *float || x == 0 as *float:
@@ -141,6 +451,12 @@ fn rmsnorm_rows_f64(out:*float, x:*float, weight:*float, rows:int, cols:int, eps
   if rc == 0:
     ret 0
   ret rmsnorm_rows_f64_scalar(out, x, weight, rows, cols, eps)
+
+fn rmsnorm_rows_f32_scalar(out:*float, x:*float, weight:*float, rows:int, cols:int, eps:float) -> int:
+  ret rmsnorm_rows_f64_scalar(out, x, weight, rows, cols, eps)
+
+fn rmsnorm_rows_f32(out:*float, x:*float, weight:*float, rows:int, cols:int, eps:float) -> int:
+  ret rmsnorm_rows_f32_scalar(out, x, weight, rows, cols, eps)
 
 fn softmax_rows_f64_scalar(out:*float, x:*float, rows:int, cols:int) -> int:
   if out == 0 as *float || x == 0 as *float:
@@ -200,6 +516,12 @@ fn softmax_rows_f64(out:*float, x:*float, rows:int, cols:int) -> int:
     ret 0
   ret softmax_rows_f64_scalar(out, x, rows, cols)
 
+fn softmax_rows_f32_scalar(out:*float, x:*float, rows:int, cols:int) -> int:
+  ret softmax_rows_f64_scalar(out, x, rows, cols)
+
+fn softmax_rows_f32(out:*float, x:*float, rows:int, cols:int) -> int:
+  ret softmax_rows_f32_scalar(out, x, rows, cols)
+
 fn rope_f64_scalar(q:*float, k:*float, pos:int, dim:int, base:float) -> int:
   if q == 0 as *float || k == 0 as *float:
     ret 0 - 1
@@ -245,3 +567,112 @@ fn rope_f64(q:*float, k:*float, pos:int, dim:int, base:float) -> int:
   if rc == 0:
     ret 0
   ret rope_f64_scalar(q, k, pos, dim, base)
+
+fn rope_f32_scalar(q:*float, k:*float, pos:int, dim:int, base:float) -> int:
+  ret rope_f64_scalar(q, k, pos, dim, base)
+
+fn rope_f32(q:*float, k:*float, pos:int, dim:int, base:float) -> int:
+  ret rope_f32_scalar(q, k, pos, dim, base)
+
+fn mse_f64(a:*float, b:*float, n:int) -> float:
+  if a == 0 as *float || b == 0 as *float || n <= 0:
+    ret 0.0
+  sum:float = 0.0
+  i:int = 0
+  while i < n:
+    av:float = 0.0
+    bv:float = 0.0
+    unsafe:
+      av = a[i]
+      bv = b[i]
+    d:float = av - bv
+    sum = sum + d * d
+    i = i + 1
+  ret sum / (n as float)
+
+fn max_abs_diff_f64(a:*float, b:*float, n:int) -> float:
+  if a == 0 as *float || b == 0 as *float || n <= 0:
+    ret 0.0
+  best:float = 0.0
+  i:int = 0
+  while i < n:
+    av:float = 0.0
+    bv:float = 0.0
+    unsafe:
+      av = a[i]
+      bv = b[i]
+    d:float = av - bv
+    if d < 0.0:
+      d = 0.0 - d
+    if d > best:
+      best = d
+    i = i + 1
+  ret best
+
+fn kv_cache_bytes(layers:int, max_seq:int, kv_heads:int, head_dim:int, dtype:int) -> int:
+  if layers <= 0 || max_seq <= 0 || kv_heads <= 0 || head_dim <= 0:
+    ret 0
+  elem:int = dtype_slot_bytes(dtype)
+  if elem <= 0:
+    ret 0
+  ret layers * 2 * max_seq * kv_heads * head_dim * elem
+
+fn kv_cache_desc(layers:int, max_seq:int, kv_heads:int, head_dim:int, dtype:int) -> KvCacheDesc:
+  d:KvCacheDesc
+  d.layers = layers
+  d.max_seq = max_seq
+  d.kv_heads = kv_heads
+  d.head_dim = head_dim
+  d.dtype = dtype
+  d.bytes = kv_cache_bytes(layers, max_seq, kv_heads, head_dim, dtype)
+  ret d
+
+fn kv_cache_desc_fill(out:*KvCacheDesc, layers:int, max_seq:int, kv_heads:int, head_dim:int, dtype:int) -> int:
+  if out == 0 as *KvCacheDesc:
+    ret 0 - 1
+  unsafe:
+    (*out).layers = layers
+    (*out).max_seq = max_seq
+    (*out).kv_heads = kv_heads
+    (*out).head_dim = head_dim
+    (*out).dtype = dtype
+    (*out).bytes = kv_cache_bytes(layers, max_seq, kv_heads, head_dim, dtype)
+  ret 0
+
+fn streaming_decode_window(prompt_tokens:int, max_new_tokens:int, max_seq:int) -> int:
+  if prompt_tokens < 0 || max_new_tokens < 0 || max_seq <= 0:
+    ret 0
+  want:int = prompt_tokens + max_new_tokens
+  if want > max_seq:
+    ret max_seq
+  ret want
+
+fn streaming_decode_can_fit(prompt_tokens:int, max_new_tokens:int, max_seq:int) -> int:
+  if prompt_tokens < 0 || max_new_tokens < 0 || max_seq <= 0:
+    ret 0
+  if prompt_tokens + max_new_tokens <= max_seq:
+    ret 1
+  ret 0
+
+fn tiny_decoder_next_token(logits:*float, vocab:int) -> int:
+  if logits == 0 as *float || vocab <= 0:
+    ret 0 - 1
+  best:int = 0
+  best_v:float = 0.0
+  unsafe:
+    best_v = logits[0]
+  i:int = 1
+  while i < vocab:
+    v:float = 0.0
+    unsafe:
+      v = logits[i]
+    if v > best_v:
+      best_v = v
+      best = i
+    i = i + 1
+  ret best
+
+fn benchmark_matmul_work_items(m:int, n:int, k:int) -> int:
+  if _valid_matmul(m, n, k) == 0:
+    ret 0
+  ret m * n * k

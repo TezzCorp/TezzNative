@@ -36,8 +36,8 @@ trust in the stable core.
 | `tezzdb` | Embedded database | Add transaction, index, WAL, and recovery tests. |
 | `tezzdbql` | Query layer for TezzDB | Add parameterized query examples and tests. |
 | `actor` | Local actors, mailboxes, supervision, node metadata, and OTP-like app helpers | Local in-process spawn/send/receive, mailbox matching, restart supervision, hot version tags, and fail-closed remote node sends are native-smoke gated; add real scheduler, network distribution, and hot module replacement before promotion. |
-| `llm_core` | f64 CPU transformer primitives plus signed int8-weight matmul | Add f32/f16/bf16/uint8 and lower-bit lanes, tensor descriptors, model-load fixtures, GPU/NPU backend gates, and performance data before claiming production LLM support. |
-| `mind`, `trainer` | TezzMind tiny on-device transformer and training prototype | Forward/generation/training/save-load verification is native-smoke gated; add trained checkpoint quality metrics, tokenizer fixtures, dtype lanes, and performance reports before promotion. |
+| `llm_core` | Dtype-explicit CPU transformer primitives, quantized matmul, KV/decode helpers, and fail-closed backend gates | f32 API shape, f16/bf16 storage lanes, int8/uint8/q4 matmul, tensor/KV descriptors, tokenizer byte fixtures, tiny decoder rules, and benchmark source are gated; add true packed/accelerated backends, mmap model format, real tokenizer compatibility, and published performance data before claiming production LLM support. |
+| `mind`, `trainer` | TezzMind tiny on-device transformer and training prototype | Forward/generation/training/save-load, frozen checkpoint compatibility, and trained checkpoint evaluation are Windows-native gated; Linux native `mind` lowering remains a backend blocker. Add held-out quality metrics, tokenizer integration, Linux native parity, and performance reports before promotion. |
 | `gui`, `gui_win` | Host GUI APIs | Add Windows-only examples and platform notes. |
 | `tzgui`, `tzui`, `tnui`, `tezzui`, `wm` | UI stacks | Clarify supported host path and maturity. |
 | `mmap`, `sys`, `task`, `event`, `frame` | Systems/runtime helpers | Add platform matrix and failure behavior. |
@@ -48,8 +48,8 @@ trust in the stable core.
 | --- | --- | --- |
 | `gpu` | GPU runtime hooks | Backend availability matrix and fallback tests. |
 | `npu` | NPU/model runtime hooks | Backend availability matrix and explicit unsupported behavior. |
-| `tensor` | Tensor math helpers | Numeric correctness tests and memory ownership docs. |
-| `nn`, `llm`, `tokenizer` | AI/LLM experiments | Stable model format, tests, and performance notes; build on the gated `llm_core` and TezzMind verification lanes instead of untested backend assumptions. |
+| `tensor` | Tensor math helpers and descriptor metadata | Descriptor fill/validation is native-smoke gated; add ownership, view, allocator, and numeric kernel docs before promotion. |
+| `nn`, `llm`, `tokenizer` | AI/LLM experiments | Byte-token known answers are gated; stable model/tokenizer formats, compatibility tests, and performance notes must build on the gated `llm_core` and TezzMind verification lanes instead of untested backend assumptions. |
 | `tts`, `stt` | Speech experiments | Platform audio/runtime notes and examples. |
 | `kernel`, `os` | Freestanding/kernel work | Separate build docs and target matrix. |
 | `arduino`, `raspi` | Embedded board helpers | Board-specific build and flashing docs. |
@@ -84,8 +84,9 @@ A module can move toward Stable Candidate only when:
 4. Keep the curated `examples/dx` programs aligned with stable-candidate module
    behavior and the developer-experience gate.
 5. Keep this inventory synchronized with `tezz.mod` and `lib/`.
-6. Grow `llm_core` from f64 correctness primitives into dtype, model IO, and
-   backend-specific LLM gates before any production LLM claim.
+6. Grow `llm_core` from CPU correctness primitives into real model IO,
+   tokenizer compatibility, packed/accelerated dtype backends, and published
+   performance gates before any production LLM claim.
 7. Grow `actor` from local deterministic actors into scheduler-backed actors,
    remote distribution, and benchmarked service-runtime gates before any
    Erlang/OTP-scale claim.

@@ -1,0 +1,27 @@
+import "llm_core"
+
+fn main() -> int:
+  unsafe:
+    a:[float;64]
+    b:[float;64]
+    out:[float;64]
+
+    i:int = 0
+    while i < 64:
+      a[i] = ((i & 7) as float) * 0.25 + 1.0
+      b[i] = (((i * 3) & 7) as float) * 0.125 + 0.5
+      out[i] = 0.0
+      i = i + 1
+
+    rounds:int = 256
+    r:int = 0
+    while r < rounds:
+      if llm_core.matmul_f32(&out[0], &a[0], &b[0], 8, 8, 8) != 0:
+        ret 1
+      r = r + 1
+
+    if llm_core.tiny_decoder_next_token(&out[0], 64) < 0:
+      ret 2
+  if llm_core.benchmark_matmul_work_items(8, 8, 8) != 512:
+    ret 3
+  ret 0
